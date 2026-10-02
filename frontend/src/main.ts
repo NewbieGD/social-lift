@@ -6,6 +6,7 @@ import type { SimEvent } from './core/types';
 import { ru } from './i18n/ru';
 import { InputController } from './input/input';
 import { scenes } from './render/palette';
+import { applyControls, loadControls, mountPickers } from './ui/controlsLayout';
 import { Renderer } from './render/renderer';
 
 const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
@@ -21,10 +22,9 @@ const toastEl = $('toast');
 const walletEl = scoreEl.parentElement as HTMLElement;
 const buttonsEl = $('buttons');
 const controlsEl = $('controls');
-const padEl = $('pad');
 
 const renderer = new Renderer(canvas);
-const input = new InputController([field, padEl]);
+const input = new InputController([field]);
 const isTouch = window.matchMedia('(pointer: coarse)').matches;
 
 let sim = new Sim(randomSeed(), 700);
@@ -78,6 +78,8 @@ for (const light of LIGHTS) {
   buttons.set(light, b);
   b.addEventListener('pointerdown', (e) => {
     e.preventDefault();
+    // The floating shield sits on the play field: don't let the press start a steering drag.
+    e.stopPropagation();
     if (b.classList.contains('locked')) return;
     b.classList.add('pressed');
     input.press(light);
@@ -244,26 +246,12 @@ $('startBtn').textContent = ru.start.play;
 $('protoNote').textContent = ru.proto;
 $('startBtn').addEventListener('click', startRun);
 
-// Which side the color buttons sit on. Default: left thumb on colors, right thumb steers.
-type Side = 'left' | 'right';
-function readSide(): Side {
-  try {
-    return localStorage.getItem('sl_side') === 'right' ? 'right' : 'left';
-  } catch {
-    return 'left';
-  }
-}
-function applySide(side: Side): void {
-  controlsEl.classList.toggle('mirror', side === 'right');
-  $('sideBtn').textContent = side === 'left' ? ru.start.sideLeft : ru.start.sideRight;
-  try {
-    localStorage.setItem('sl_side', side);
-  } catch {
-    /* storage unavailable: ignore */
-  }
-}
-applySide(readSide());
-$('sideBtn').addEventListener('click', () => applySide(readSide() === 'left' ? 'right' : 'left'));
+const applyPrefs = (p = loadControls()): void => {
+  applyControls(p, { controls: controlsEl, buttons: buttonsEl, board, shield: buttons.get('red')! });
+  layout();
+};
+mountPickers(applyPrefs);
+applyPrefs();
 $('againBtn').addEventListener('click', startRun);
 $('pauseBtn').addEventListener('click', pause);
 $('resumeBtn').addEventListener('click', resume);

@@ -37,12 +37,6 @@
         </div>
         <div id="controls">
           <div id="buttons"></div>
-          <div id="pad" aria-hidden="true">
-            <svg viewBox="0 0 64 24" width="64" height="24">
-              <path d="M10 12l8-7v14zM54 12l-8-7v14z" fill="currentColor" />
-              <rect x="22" y="10.5" width="20" height="3" rx="1.5" fill="currentColor" />
-            </svg>
-          </div>
         </div>
       </div>
 
@@ -52,8 +46,8 @@
           <p id="startLead"></p>
           <p id="startControls" class="muted"></p>
           <p id="startRed" class="muted"></p>
+          <div class="controls-picker"></div>
           <button id="startBtn" class="primary"></button>
-          <button id="sideBtn" class="secondary"></button>
           <p id="protoNote" class="note"></p>
         </div>
       </div>
@@ -61,6 +55,7 @@
       <div id="pauseScreen" class="overlay hidden">
         <div class="panel">
           <h2>Пауза</h2>
+          <div class="controls-picker"></div>
           <button id="resumeBtn" class="primary">Продолжить</button>
           <button id="restartBtn" class="secondary">Начать заново</button>
         </div>
