@@ -2,7 +2,7 @@ import { gameConfig, type ColorId, type LightId } from '../core/gameConfig';
 import type { Sim } from '../core/sim';
 import type { Platform, SimEvent } from '../core/types';
 import { ru } from '../i18n/ru';
-import { drawHeroBody, drawItem, outfitChanges, PICKABLE, TORCH_TIP, type Face, type Gesture, type Item, type Outfit } from './hero';
+import { drawHeroBody, drawItem, heroAttachment, outfitChanges, PICKABLE, TORCH_TIP, type Face, type Gesture, type Item, type Outfit } from './hero';
 import { palette } from './palette';
 import { paintScene, paintSky } from './scenes';
 
@@ -396,7 +396,7 @@ export class Renderer {
     }
   }
 
-  private drawItems(sim: Sim, heroX: number, heroY: number, toY: (y: number) => number, dt: number): void {
+  private drawItems(sim: Sim, heroX: number, heroY: number, toY: (y: number) => number, dt: number, tier: number): void {
     if (!this.items.length) return;
     const ctx = this.ctx;
     const facing = sim.hero.facing;
@@ -406,8 +406,15 @@ export class Renderer {
       const k = Math.min(1, it.t / it.dur);
       ctx.save();
       if (it.dir === 'in') {
-        const tx = heroX + it.vx * facing;
-        const ty = heroY - it.vy;
+        const attachment = heroAttachment(it.item, {
+          tier,
+          vx: sim.hero.vx,
+          vy: sim.hero.vy,
+          time: sim.time + this.clock * (this.cine ? 1 : 0),
+          gesture: this.menuGesture ?? undefined,
+        });
+        const tx = heroX + attachment[0] * facing;
+        const ty = heroY - attachment[1];
         const e = 1 - Math.pow(1 - k, 3);
         const cx = (it.x0 + tx) / 2;
         const cy = Math.max(it.y0, ty) + 90;
@@ -443,7 +450,7 @@ export class Renderer {
           this.onItemSnap(it.item);
           const o = PICKABLE[it.item];
           if (it.pickup && o) Object.assign(this.extra, o);
-          this.highlights.push({ anchor: [it.vx, it.vy], t: 0 });
+          this.highlights.push({ anchor: [attachment[0], attachment[1]], t: 0 });
           for (let i = 0; i < 14; i++) {
             const a = Math.random() * Math.PI * 2;
             this.particles.spawn(2, tx, ty, Math.cos(a) * 140, Math.sin(a) * 140, 0.5);
@@ -581,7 +588,7 @@ export class Renderer {
     }
 
     this.drawHero(sim, hx, toY(hy), frameDt, tier);
-    this.drawItems(sim, hx, hy, toY, frameDt);
+    this.drawItems(sim, hx, hy, toY, frameDt, tier);
     this.drawHighlights(hx, toY(hy), hero.facing, frameDt);
     this.drawSparkles(frameDt);
     if (!this.cine) this.drawDanger(sim, W, H);

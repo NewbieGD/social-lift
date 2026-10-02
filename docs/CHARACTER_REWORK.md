@@ -19,3 +19,12 @@ The player character renderer was refined without replacing the existing Canvas 
 ## Validation
 
 `hero.ts` passes a standalone TypeScript type check with the DOM library. The full frontend build could not be run in this environment because the repository dependencies were not installed and package installation timed out.
+
+## Attachment pass
+
+- Added live hero attachment points for wearable and held items.
+- Pickup/suit-up destinations now follow the animated hand/head/feet instead of relying only on fixed world offsets.
+- Watch is attached to the animated wrist rather than the flashlight.
+- Glasses are rendered on the face/head layer and the suit helmet uses a proper helmet silhouette.
+- Held phone/torch destinations share the same animated hand attachment logic.
+- Shoe pickup targets follow the current animated feet.

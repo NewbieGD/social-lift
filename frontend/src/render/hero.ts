@@ -566,20 +566,58 @@ export function drawHeroBody(ctx: CanvasRenderingContext2D, pose: HeroPose): voi
   }
   ctx.stroke();
 
+  // Wearable face/head equipment follows the animated head rather than floating at a fixed world point.
+  if (o.luxury && !o.suit) {
+    ctx.strokeStyle = '#17181D';
+    ctx.lineWidth = 1.05;
+    ctx.fillStyle = 'rgba(170,215,255,0.16)';
+    for (const ex of [1.9, 6.9]) {
+      ctx.beginPath();
+      rr(ctx, ex - 2.55, eyeY - 1.75, 5.1, 3.5, 1.15);
+      ctx.fill();
+      ctx.stroke();
+    }
+    ctx.beginPath();
+    ctx.moveTo(4.45, eyeY);
+    ctx.lineTo(4.55, eyeY);
+    ctx.stroke();
+  }
+  if (o.suit) {
+    // A real helmet silhouette, with a clear visor and a small rear rim.
+    ctx.save();
+    ctx.fillStyle = 'rgba(215,231,245,0.92)';
+    ctx.strokeStyle = '#8D9AA8';
+    ctx.lineWidth = 1.1;
+    ctx.beginPath();
+    ctx.moveTo(-9.5, hy + 0.5);
+    ctx.quadraticCurveTo(-8.8, hy - 12.8, 1, hy - 15.1);
+    ctx.quadraticCurveTo(9.2, hy - 12.5, 10.2, hy - 1.5);
+    ctx.lineTo(7.7, hy + 0.3);
+    ctx.quadraticCurveTo(0, hy - 3.2, -7.8, hy + 0.3);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = 'rgba(95,132,168,0.28)';
+    ctx.beginPath();
+    ctx.moveTo(-6.8, hy - 2.1);
+    ctx.quadraticCurveTo(0, hy - 7.1, 7.1, hy - 2.1);
+    ctx.lineTo(6.2, hy + 0.1);
+    ctx.quadraticCurveTo(0, hy - 3.3, -6.2, hy + 0.1);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  }
+
   ctx.restore();
 
   if (o.suit) {
-    ctx.strokeStyle = 'rgba(220,235,255,0.95)';
-    ctx.lineWidth = 2;
-    ctx.fillStyle = 'rgba(160,210,255,0.16)';
+    ctx.strokeStyle = 'rgba(220,235,255,0.55)';
+    ctx.lineWidth = 1.1;
     ctx.beginPath();
-    ctx.arc(1, hy, 13.5, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.stroke();
-    ctx.strokeStyle = 'rgba(255,255,255,0.75)';
-    ctx.lineWidth = 1.6;
-    ctx.beginPath();
-    ctx.arc(-2, hy - 3, 8.6, Math.PI * 1.1, Math.PI * 1.45);
+    ctx.moveTo(-7, -40);
+    ctx.lineTo(-9, -35);
+    ctx.moveTo(7, -40);
+    ctx.lineTo(9, -35);
     ctx.stroke();
   }
 
@@ -592,6 +630,23 @@ export function drawHeroBody(ctx: CanvasRenderingContext2D, pose: HeroPose): voi
     : [19, -29 + rising * 2.5 + breathe];
   const front = reach(frontShoulder[0], frontShoulder[1], handTarget[0], handTarget[1], 8.5, 8.2, 1);
   limb(ctx, front, [6, 5, 4.4], sleeve, o.top === 'tank' && !o.suit ? SKIN : sleeve);
+  if (o.watch) {
+    const wa = Math.atan2(front[5] - front[3], front[4] - front[2]);
+    ctx.save();
+    ctx.translate(front[4], front[5]);
+    ctx.rotate(wa);
+    ctx.fillStyle = '#C59A3A';
+    rr(ctx, -2.9, -2.2, 5.8, 2.1, 0.9);
+    ctx.fill();
+    ctx.fillStyle = '#E8C060';
+    rr(ctx, -2.1, -1.35, 4.2, 3.1, 0.9);
+    ctx.fill();
+    ctx.fillStyle = '#FFF5C7';
+    ctx.beginPath();
+    ctx.arc(0, 0.2, 1.05, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
   if (jacket && !o.suit) {
     // White shirt cuff.
     const a = Math.atan2(front[5] - front[3], front[4] - front[2]);
@@ -601,11 +656,6 @@ export function drawHeroBody(ctx: CanvasRenderingContext2D, pose: HeroPose): voi
   ctx.translate(front[4], front[5]);
   // The torch points down-forward, or up while waving.
   ctx.rotate(waving ? Math.PI * 1.1 + Math.sin(t * 7) * 0.2 : -Math.atan2(0.78, 0.62));
-  if (o.watch) {
-    ctx.fillStyle = '#E8C060';
-    rr(ctx, -3.2, -5, 6.4, 2.6, 1);
-    ctx.fill();
-  }
   ctx.fillStyle = o.newTorch ? '#D3D8E2' : '#3B3F4A';
   rr(ctx, -3, -1.5, 6, o.newTorch ? 12 : 10, 2);
   ctx.fill();
@@ -628,6 +678,90 @@ export function drawHeroBody(ctx: CanvasRenderingContext2D, pose: HeroPose): voi
   ctx.lineWidth = 1.1;
   ctx.stroke();
   ctx.restore();
+}
+
+export interface HeroAttachmentPose {
+  tier: number;
+  vx?: number;
+  vy: number;
+  time: number;
+  gesture?: Gesture;
+}
+
+/**
+ * Returns a live local-space attachment point for wearable/held objects.
+ * The renderer uses these points while an item is flying onto the hero, so the
+ * destination follows the animated body instead of being a fixed world offset.
+ */
+export function heroAttachment(item: Item, pose: HeroAttachmentPose): [number, number] {
+  const o = outfitFor(pose.tier);
+  const t = pose.time;
+  const breathe = Math.sin(t * 3.2) * 0.5;
+  const speed = Math.min(1, Math.abs(pose.vx ?? 0) / 220);
+  const walking = speed > 0.08 && Math.abs(pose.vy) < 90;
+  const walk = walking ? Math.sin(t * (8 + speed * 4)) * speed : 0;
+  const rising = Math.max(-1, Math.min(1, pose.vy / 700));
+  const poise = Math.min(1, pose.tier / 8);
+  const flail = (1 - poise) * Math.sin(t * 11) * 0.18;
+  const tuck = Math.max(0, rising) * 0.65;
+  const shoulderY = -38 + breathe;
+  const backShoulder: [number, number] = [-4.5, shoulderY + 1.5];
+  const frontShoulder: [number, number] = [5, shoulderY + 1.5];
+  const gesture = pose.gesture ?? (o.phone ? 'none' : poise >= 1 ? 'pocket' : 'none');
+
+  let otherTarget: [number, number];
+  let otherBend = -1;
+  if (gesture === 'pocket') {
+    otherTarget = [-3, -25]; otherBend = 1;
+  } else if (gesture === 'scratch') {
+    otherTarget = [-5 + Math.sin(t * 10) * 0.8, -58 + breathe]; otherBend = 1;
+  } else if (gesture === 'tie') {
+    otherTarget = [1.5, -37 + Math.sin(t * 4) * 0.6 + breathe]; otherBend = 1;
+  } else {
+    const swing = -0.2 - rising * 0.9 * (1 - poise * 0.6) + flail + walk * 0.55;
+    otherTarget = [backShoulder[0] + Math.sin(swing) * 15, backShoulder[1] + Math.cos(swing) * 15];
+  }
+  const other = reach(backShoulder[0], backShoulder[1], otherTarget[0], otherTarget[1], 8.5, 7.8, otherBend);
+  const waving = gesture === 'wave';
+  const handTarget: [number, number] = waving
+    ? [15 + Math.sin(t * 7) * 2.5, -49 + Math.abs(Math.cos(t * 7)) * 0.8 + breathe]
+    : [19, -29 + rising * 2.5 + breathe];
+  const front = reach(frontShoulder[0], frontShoulder[1], handTarget[0], handTarget[1], 8.5, 8.2, 1);
+
+  switch (item) {
+    case 'watch':
+    case 'newTorch':
+    case 'torch':
+      return [front[4], front[5]];
+    case 'phone':
+      return [other[4], other[5]];
+    case 'glasses':
+      return [4.5, -53 + breathe * 1.15];
+    case 'helmet':
+      return [1, -67 + breathe * 1.15];
+    case 'tie':
+      return [0, -36 + breathe];
+    case 'shirt':
+    case 'tank':
+    case 'jacket':
+      return [0, -33 + breathe];
+    case 'shorts':
+    case 'sweats':
+    case 'trousers':
+      return [0, -15];
+    case 'slippers':
+    case 'shoes': {
+      const legs: [number, number, number, number, number, number][] = [];
+      for (const side of [-1, 1]) {
+        const phase = side === 1 ? walk : -walk;
+        const k = side === 1 ? 0.08 + tuck * 0.85 + phase * 0.42 : -0.06 + tuck * 0.6 + phase * 0.42;
+        legs.push(chain(side * 3.6, -21, k, 10, -k * 1.5 + phase * 0.12, 9.5));
+      }
+      return [(legs[0][4] + legs[1][4]) / 2, (legs[0][5] + legs[1][5]) / 2 + 0.8];
+    }
+    default:
+      return [0, -30];
+  }
 }
 
 /** Torch lens position in hero coordinates (used for light effects). */
