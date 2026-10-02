@@ -178,6 +178,8 @@ export class Renderer {
   }));
   /** Platform id -> clothing item lying on it (cosmetic early pickup). */
   pickups = new Map<number, Item>();
+  /** Freeze-frame suit-up movie; when off, clothes change instantly with a glow. */
+  cinematic = true;
   /** Menu background: draw the scene only, no platforms or hero. */
   sceneOnly = false;
   /** Called at the start of a suit-up with the new pieces (for the caption). */
@@ -209,6 +211,7 @@ export class Renderer {
   setScene(tier: number): void {
     this.sceneTier = tier;
     this.cine = null;
+    this.danger = 0;
     this.highlights.length = 0;
     this.sparkles.length = 0;
     this.prewornItems.clear();
@@ -300,14 +303,18 @@ export class Renderer {
     const from = this.pendingOutfit >= 0 ? this.pendingOutfit : this.outfitTier;
     const changes = outfitChanges(from, tier).filter((c) => !this.prewornItems.has(c.item));
     this.pendingOutfit = tier;
-    if (this.reducedEffects || !changes.length) {
+    if (this.reducedEffects || !this.cinematic || !changes.length) {
       this.sceneTier = tier;
       this.finishOutfit();
+      if (!this.reducedEffects) {
+        for (const c of changes) this.highlights.push({ anchor: [c.anchor[0], c.anchor[1]], t: 0 });
+        this.impulse = 1;
+      }
       return;
     }
     const W = gameConfig.world.width;
-    const lead = 0.6;
-    const step = 0.5;
+    const lead = 0.9;
+    const step = 0.85;
     changes.forEach((c, i) => {
       const left = i % 2 === 0;
       this.items.push({
@@ -320,7 +327,7 @@ export class Renderer {
         ax: 0,
         ay: 0,
         t: -(lead + i * step),
-        dur: 0.65,
+        dur: 0.9,
         rot: (left ? -1 : 1) * (4 + Math.random() * 2),
         done: false,
       });
@@ -334,14 +341,15 @@ export class Renderer {
           vy: 280,
           ax: c.anchor[0],
           ay: c.anchor[1],
-          t: -(lead + i * step + 0.65),
+          t: -(lead + i * step + 0.9),
           dur: 1.4,
           rot: 0,
           done: false,
         });
       }
     });
-    const dur = lead + (changes.length - 1) * step + 0.65 + 1.1;
+    // Hold on the finished look before the camera returns.
+    const dur = lead + (changes.length - 1) * step + 0.9 + 1.8;
     this.cine = { t: 0, dur, fromScene: this.sceneTier, toScene: tier, anchors: changes.map((c) => c.anchor) };
     this.onCaption(changes.map((c) => c.item));
   }
@@ -351,6 +359,12 @@ export class Renderer {
     this.pendingOutfit = -1;
     this.prewornItems.clear();
     this.extra = {};
+  }
+
+  /** True if this piece is already on the hero (worn or picked up early). */
+  isWorn(item: Item): boolean {
+    if (this.prewornItems.has(item)) return true;
+    return !outfitChanges(this.outfitTier, this.outfitTier + 1).some((c) => c.item === item);
   }
 
   /** Main calls this when the hero lands on a platform carrying a pickup. */
@@ -463,9 +477,9 @@ export class Renderer {
     if (!this.highlights.length) return;
     const ctx = this.ctx;
     ctx.globalCompositeOperation = 'lighter';
-    this.highlights = this.highlights.filter((h) => (h.t += dt) < 5);
+    this.highlights = this.highlights.filter((h) => (h.t += dt) < 6);
     for (const h of this.highlights) {
-      const fade = h.t < 4 ? 1 : 5 - h.t;
+      const fade = h.t < 5 ? 1 : 6 - h.t;
       const pulse = 0.55 + 0.45 * Math.sin(h.t * 4);
       const hx = x + h.anchor[0] * facing;
       const hy = footY + h.anchor[1];
@@ -504,8 +518,8 @@ export class Renderer {
     if (this.cine) {
       const c = this.cine;
       c.t += frameDt;
-      const kin = Math.min(1, c.t / 0.5);
-      const kout = Math.min(1, Math.max(0, (c.dur - c.t) / 0.5));
+      const kin = Math.min(1, c.t / 0.7);
+      const kout = Math.min(1, Math.max(0, (c.dur - c.t) / 0.7));
       zoom = 1 + 0.9 * easeInOut(Math.min(kin, kout));
       if (c.t >= 0.35 && this.sceneTier !== c.toScene) this.sceneTier = c.toScene;
       if (c.t >= c.dur) {
@@ -842,7 +856,10 @@ export class Renderer {
 
   /** Red vignette at the edges when the debt wave is close (smooth, never flashing). */
   private drawDanger(sim: Sim, W: number, H: number): void {
-    if (!sim.waveActive || sim.dead) return;
+    if (!sim.waveActive || sim.dead) {
+      this.danger = 0;
+      return;
+    }
     const gap = sim.hero.y - sim.waveY;
     const k = Math.max(0, Math.min(1, 1 - (gap - 60) / 220));
     this.danger = k;

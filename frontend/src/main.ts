@@ -76,6 +76,8 @@ function layout(): void {
   const cssW = Math.floor(W * scale);
   const cssH = Math.floor(viewH * scale);
   board.style.width = `${cssW}px`;
+  // Screens keep their content inside the play column (desktop shows side margins).
+  document.documentElement.style.setProperty('--board-w', `${cssW}px`);
   board.style.height = `${cssH}px`;
   renderer.resize(cssW, cssH, scale);
   input.scale = scale;
@@ -143,6 +145,7 @@ function applySettings(s: Settings, changed?: (keyof Settings)[]): void {
   board.classList.toggle('zones', s.steer === 'zones');
   renderer.reducedEffects = s.reducedFx;
   renderer.colorblind = s.colorblind;
+  renderer.cinematic = s.cinematic;
   document.body.classList.toggle('reduced', s.reducedFx);
   audio.musicOn = s.music;
   audio.musicVol = s.musicVol;
@@ -180,7 +183,7 @@ function schedulePickup(): void {
   nextPickupAt = sim.runTime + 15 + Math.random() * 15;
   const options = outfitChanges(sim.tier, sim.tier + 1)
     .map((c) => c.item)
-    .filter((it) => PICKABLE[it]);
+    .filter((it) => PICKABLE[it] && !renderer.isWorn(it));
   if (!options.length) return;
   const top = sim.camY + sim.viewH;
   const candidates = sim.platforms.filter(
@@ -200,7 +203,7 @@ renderer.onCaption = (items) => {
   void el.offsetWidth;
   el.classList.add('on');
   clearTimeout(captionTimer);
-  captionTimer = window.setTimeout(() => el.classList.remove('on'), 2600);
+  captionTimer = window.setTimeout(() => el.classList.remove('on'), 3800);
 };
 
 renderer.onItemSnap = (item) => {
@@ -335,6 +338,7 @@ function handleUiEvents(events: SimEvent[]): void {
     } else if (e.type === 'close') {
       audio.play('close');
     } else if (e.type === 'death') {
+      audio.stopTension();
       audio.play('death');
       if (settingsStore.get().vibration) haptic('heavy');
       if (mode === 'tutorial') tutorialDeath();
@@ -462,6 +466,7 @@ function newSim(seed: number, tutorial = false): void {
   nextPickupAt = 12;
   lastMult = 1;
   audio.setIntense(false);
+  audio.stopTension();
   setWallet(0);
   renderer.camShift = 0;
   renderer.prewarm(1, sim.viewH);

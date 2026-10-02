@@ -136,6 +136,16 @@ export class AudioEngine {
     this.drone.gain.gain.setTargetAtTime(Math.max(0, Math.min(1, k)) * 0.22, ctx.currentTime, 0.3);
   }
 
+  /** Cuts the danger drone and the combo lead at once (death, new run, menu). */
+  stopTension(): void {
+    this.intense = false;
+    if (this.ctx && this.drone) {
+      const g = this.drone.gain.gain;
+      g.cancelScheduledValues(this.ctx.currentTime);
+      g.setValueAtTime(0, this.ctx.currentTime);
+    }
+  }
+
   play(name: Sfx, opts: { tier?: number; color?: ColorId; streak?: number; item?: string } = {}): void {
     const ctx = this.ctx;
     if (!ctx || ctx.state !== 'running') return;

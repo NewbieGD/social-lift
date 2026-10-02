@@ -219,6 +219,7 @@ export const ru = {
     colorblind: 'Режим для дальтоников',
     reducedFx: 'Меньше эффектов',
     rulesCard: 'Показывать правила перед игрой',
+    cinematic: 'Пауза при смене образа',
     docs: 'Документы',
     data: 'Данные',
     playerId: (id: number) => `Ваш номер игрока: ${id}`,

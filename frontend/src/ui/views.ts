@@ -253,6 +253,7 @@ export function settingsView(s: Settings, opts: { vibration: boolean; playerId: 
     ${toggle('colorblind', ru.settings.colorblind, s.colorblind)}
     ${toggle('reducedFx', ru.settings.reducedFx, s.reducedFx)}
     ${toggle('rulesCard', ru.settings.rulesCard, s.rulesCard)}
+    ${toggle('cinematic', ru.settings.cinematic, s.cinematic)}
 
     <h3>${ru.settings.docs}</h3>
     <div class="doc-links left">

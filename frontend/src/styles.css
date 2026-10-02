@@ -2302,3 +2302,25 @@ body.in-menu #controls {
     font-size: 14px;
   }
 }
+
+/* Keep every screen's content inside the play column. */
+:root {
+  --board-w: 480px;
+}
+.menu2 {
+  width: min(var(--board-w), 100%);
+}
+.screen > .panel,
+.screen .panel.wide {
+  width: min(360px, var(--board-w), 100%);
+}
+.screen-head,
+.scroll,
+.tabs,
+.reset-line,
+.me-card {
+  max-width: min(480px, var(--board-w));
+}
+button.primary.play::after {
+  background: linear-gradient(100deg, rgba(255, 255, 255, 0), rgba(255, 255, 255, 0.3), rgba(255, 255, 255, 0));
+}

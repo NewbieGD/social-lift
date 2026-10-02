@@ -18,6 +18,8 @@ export interface Settings {
   colorblind: boolean;
   reducedFx: boolean;
   rulesCard: boolean;
+  /** Freeze-frame movie when the outfit changes. */
+  cinematic: boolean;
 }
 
 export const DEFAULTS: Settings = {
@@ -32,6 +34,7 @@ export const DEFAULTS: Settings = {
   colorblind: false,
   reducedFx: false,
   rulesCard: true,
+  cinematic: true,
 };
 
 const KEY = 'sl_settings';
