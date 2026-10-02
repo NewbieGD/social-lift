@@ -25,6 +25,8 @@ export interface HeroPose {
   /** Seconds since landing (squash) and vertical speed (tuck, arm swing). */
   sinceLand: number;
   vy: number;
+  /** Horizontal velocity, used for the walk cycle. */
+  vx?: number;
   time: number;
   face?: Face;
   gesture?: Gesture;
@@ -64,25 +66,39 @@ function rr(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: n
   ctx.closePath();
 }
 
-/** One tapered segment from (ax,ay) width wa to (bx,by) width wb, with round ends. */
+/** One smooth tapered segment with rounded ends. */
 function seg(ctx: CanvasRenderingContext2D, ax: number, ay: number, bx: number, by: number, wa: number, wb: number, color: string): void {
   const dx = bx - ax;
   const dy = by - ay;
   const len = Math.hypot(dx, dy) || 1;
   const nx = -dy / len;
   const ny = dx / len;
+  const ra = wa / 2;
+  const rb = wb / 2;
+  const a0 = Math.atan2(ny, nx);
+  const a1 = a0 + Math.PI;
+
   ctx.fillStyle = color;
   ctx.beginPath();
-  ctx.moveTo(ax + (nx * wa) / 2, ay + (ny * wa) / 2);
-  ctx.lineTo(bx + (nx * wb) / 2, by + (ny * wb) / 2);
-  ctx.lineTo(bx - (nx * wb) / 2, by - (ny * wb) / 2);
-  ctx.lineTo(ax - (nx * wa) / 2, ay - (ny * wa) / 2);
+  ctx.moveTo(ax + nx * ra, ay + ny * ra);
+  ctx.lineTo(bx + nx * rb, by + ny * rb);
+  ctx.arc(bx, by, rb, a0, a1);
+  ctx.lineTo(ax - nx * ra, ay - ny * ra);
+  ctx.arc(ax, ay, ra, a1, a0);
   ctx.closePath();
   ctx.fill();
-  ctx.beginPath();
-  ctx.arc(ax, ay, wa / 2, 0, Math.PI * 2);
-  ctx.arc(bx, by, wb / 2, 0, Math.PI * 2);
-  ctx.fill();
+
+  // Very restrained highlight keeps the forms readable without making them glossy.
+  if (len > 3) {
+    ctx.globalAlpha = 0.12;
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = Math.max(0.6, Math.min(1.1, wa * 0.12));
+    ctx.beginPath();
+    ctx.moveTo(ax + nx * ra * 0.55, ay + ny * ra * 0.55);
+    ctx.lineTo(bx + nx * rb * 0.55, by + ny * rb * 0.55);
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
 }
 
 /** A tapered two-segment limb with a clean outline: shoulder/hip -> elbow/knee -> wrist/ankle. */
@@ -127,26 +143,39 @@ function chain(x: number, y: number, a1: number, l1: number, a2: number, l2: num
 
 function hand(ctx: CanvasRenderingContext2D, p: [number, number, number, number, number, number], skin: string): void {
   const a = Math.atan2(p[5] - p[3], p[4] - p[2]);
-  const hx = p[4] + Math.cos(a) * 1.6;
-  const hy = p[5] + Math.sin(a) * 1.6;
+  const hx = p[4] + Math.cos(a) * 1.8;
+  const hy = p[5] + Math.sin(a) * 1.8;
+  ctx.save();
+  ctx.translate(hx, hy);
+  ctx.rotate(a);
   ctx.fillStyle = skin;
   ctx.strokeStyle = LINE;
-  ctx.lineWidth = 1.2;
+  ctx.lineWidth = 1.05;
   ctx.beginPath();
-  ctx.ellipse(hx, hy, 3.3, 2.8, a, 0, Math.PI * 2);
+  ctx.ellipse(0, 0, 3.45, 2.75, 0, 0, Math.PI * 2);
   ctx.fill();
   ctx.stroke();
+  ctx.strokeStyle = 'rgba(120,75,55,0.42)';
+  ctx.lineWidth = 0.65;
+  ctx.beginPath();
+  ctx.moveTo(0.2, -1.5);
+  ctx.lineTo(2.1, -0.9);
+  ctx.moveTo(0.6, 1.1);
+  ctx.lineTo(2.2, 0.7);
+  ctx.stroke();
+  ctx.restore();
 }
 
 function torsoPath(ctx: CanvasRenderingContext2D, ty: number): void {
   ctx.beginPath();
-  ctx.moveTo(-8.5, ty + 2.5);
-  ctx.quadraticCurveTo(-8.5, ty, -5.5, ty);
-  ctx.lineTo(5.5, ty);
-  ctx.quadraticCurveTo(9, ty, 9, ty + 3);
-  ctx.quadraticCurveTo(9.5, ty + 12, 7.5, ty + 21);
-  ctx.quadraticCurveTo(0, ty + 22.5, -7.5, ty + 21);
-  ctx.quadraticCurveTo(-9.5, ty + 12, -8.5, ty + 2.5);
+  ctx.moveTo(-8.8, ty + 3);
+  ctx.quadraticCurveTo(-9.2, ty, -6, ty - 0.8);
+  ctx.quadraticCurveTo(-3.2, ty - 2.4, 0, ty - 1.8);
+  ctx.quadraticCurveTo(3.2, ty - 2.4, 6, ty - 0.8);
+  ctx.quadraticCurveTo(9.2, ty, 8.8, ty + 3);
+  ctx.quadraticCurveTo(9.4, ty + 12, 7.2, ty + 21);
+  ctx.quadraticCurveTo(0, ty + 23.2, -7.2, ty + 21);
+  ctx.quadraticCurveTo(-9.4, ty + 12, -8.8, ty + 3);
   ctx.closePath();
 }
 
@@ -168,11 +197,14 @@ export function drawHeroBody(ctx: CanvasRenderingContext2D, pose: HeroPose): voi
   const o: Outfit = { ...outfitFor(pose.tier), ...(pose.extra ?? {}) };
   const t = pose.time;
   const breathe = Math.sin(t * 3.2) * 0.5;
+  const speed = Math.min(1, Math.abs(pose.vx ?? 0) / 220);
+  const walking = speed > 0.08 && Math.abs(pose.vy) < 90;
+  const walk = walking ? Math.sin(t * (8 + speed * 4)) * speed : 0;
   const rising = Math.max(-1, Math.min(1, pose.vy / 700));
   const land = Math.exp(-pose.sinceLand * 14);
   // Wealth makes the gait composed: flailing in the yard, poised in the palace.
   const poise = Math.min(1, pose.tier / 8);
-  const flail = (1 - poise) * Math.sin(t * 11) * 0.25;
+  const flail = (1 - poise) * Math.sin(t * 11) * 0.18;
   const tuck = Math.max(0, rising) * 0.65 + land * 0.4;
 
   const jacket = o.top === 'jacket';
@@ -219,7 +251,7 @@ export function drawHeroBody(ctx: CanvasRenderingContext2D, pose: HeroPose): voi
     otherLayer = 'chest';
   } else {
     // Natural swing: forward-up on the jump, loose and flailing in poor tiers.
-    const swing = -0.2 - rising * 0.9 * (1 - poise * 0.6) + flail;
+    const swing = -0.2 - rising * 0.9 * (1 - poise * 0.6) + flail + walk * 0.55;
     otherTarget = [backShoulder[0] + Math.sin(swing) * 15, backShoulder[1] + Math.cos(swing) * 15];
   }
   const other = reach(backShoulder[0], backShoulder[1], otherTarget[0], otherTarget[1], 8.5, 7.8, otherBend);
@@ -243,8 +275,11 @@ export function drawHeroBody(ctx: CanvasRenderingContext2D, pose: HeroPose): voi
 
   // ---- Legs: almost straight when standing, knees tuck up on the jump ----
   for (const side of [-1, 1]) {
-    const k = side === 1 ? 0.08 + tuck * 0.85 : -0.06 + tuck * 0.6;
-    const leg = chain(side * 3.6, -21, k, 10, -k * 1.5, 9.5);
+    const phase = side === 1 ? walk : -walk;
+    const k = side === 1
+      ? 0.08 + tuck * 0.85 + phase * 0.42
+      : -0.06 + tuck * 0.6 + phase * 0.42;
+    const leg = chain(side * 3.6, -21, k, 10, -k * 1.5 + phase * 0.12, 9.5);
     leg[5] = Math.min(leg[5], -2.2);
     limb(ctx, leg, [8, 6.6, 5.6], pants, shin);
     ctx.save();
@@ -256,13 +291,30 @@ export function drawHeroBody(ctx: CanvasRenderingContext2D, pose: HeroPose): voi
       ctx.fillStyle = '#3B82F6';
       rr(ctx, -3.5, -1.2, 11, 3.4, 1.6);
     } else {
-      ctx.fillStyle = o.suit ? '#C9D2DD' : '#141414';
-      rr(ctx, -3.5, -3, 11.5, 5, 2.5);
+      ctx.fillStyle = o.suit ? '#C9D2DD' : '#17181D';
+      rr(ctx, -3.5, -3.2, 11.5, 5.4, 2.4);
+      ctx.fill();
+      ctx.strokeStyle = LINE;
+      ctx.lineWidth = 1.1;
+      ctx.stroke();
+      ctx.fillStyle = o.suit ? '#AEB9C8' : '#F1F2F4';
+      rr(ctx, -2.8, -0.8, 9.2, 1.3, 0.55);
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+      ctx.lineWidth = 0.65;
+      ctx.beginPath();
+      ctx.moveTo(0, -2.1);
+      ctx.lineTo(2.8, -2.1);
+      ctx.moveTo(0.8, -1.1);
+      ctx.lineTo(3.2, -1.1);
+      ctx.stroke();
     }
-    ctx.fill();
-    ctx.strokeStyle = LINE;
-    ctx.lineWidth = 1.1;
-    ctx.stroke();
+    if (o.feet !== 'shoes') {
+      ctx.fill();
+      ctx.strokeStyle = LINE;
+      ctx.lineWidth = 1.1;
+      ctx.stroke();
+    }
     if (o.feet === 'shoes' && !o.suit) {
       ctx.fillStyle = 'rgba(255,255,255,0.55)';
       ctx.fillRect(2, -2.4, 4, 1);
@@ -371,115 +423,150 @@ export function drawHeroBody(ctx: CanvasRenderingContext2D, pose: HeroPose): voi
   if (otherLayer === 'chest') drawOtherArm();
 
   // ---- Head ----
-  const hy = -53 + breathe * 1.2;
+  const hy = -54 + breathe * 1.15;
+  const headTilt = Math.max(-0.035, Math.min(0.035, -rising * 0.02));
+  ctx.save();
+  ctx.rotate(headTilt);
+
+  // Neck first, so the head grows naturally out of the torso.
   ctx.fillStyle = SKIN;
   ctx.strokeStyle = LINE;
-  ctx.lineWidth = 1.2;
-  rr(ctx, -2.2, hy + 7, 4.8, 5, 1.5); // neck
+  ctx.lineWidth = 1.15;
+  rr(ctx, -3.1, hy + 7.5, 6.2, 6.2, 1.9);
   ctx.fill();
   ctx.stroke();
+
+  // Main head shape: slightly wider and less perfectly oval than the old version.
   ctx.beginPath();
-  ctx.ellipse(1, hy, 9.6, 10, 0, 0, Math.PI * 2);
+  ctx.moveTo(-8.7, hy + 2.8);
+  ctx.quadraticCurveTo(-9.3, hy - 5.5, -3.8, hy - 9.4);
+  ctx.quadraticCurveTo(1.8, hy - 13.2, 7.2, hy - 8.8);
+  ctx.quadraticCurveTo(11, hy - 5.2, 10.2, hy + 2.5);
+  ctx.quadraticCurveTo(9.5, hy + 8.8, 3.6, hy + 10.1);
+  ctx.quadraticCurveTo(-3.4, hy + 10.7, -7.3, hy + 6.5);
+  ctx.quadraticCurveTo(-9, hy + 4.8, -8.7, hy + 2.8);
+  ctx.closePath();
   ctx.fillStyle = SKIN;
   ctx.fill();
-  const hs = ctx.createLinearGradient(-9, 0, 11, 0);
+  const hs = ctx.createLinearGradient(-9, hy, 11, hy);
   hs.addColorStop(0, 'rgba(160,90,60,0.22)');
-  hs.addColorStop(0.5, 'rgba(255,255,255,0)');
+  hs.addColorStop(0.48, 'rgba(255,255,255,0)');
+  hs.addColorStop(1, 'rgba(255,255,255,0.08)');
   ctx.fillStyle = hs;
   ctx.fill();
-  ctx.lineWidth = 1.3;
+  ctx.strokeStyle = LINE;
+  ctx.lineWidth = 1.25;
   ctx.stroke();
-  // Ear
+
+  // Ear.
   ctx.beginPath();
-  ctx.ellipse(-3.6, hy + 1.6, 1.7, 2.3, 0, 0, Math.PI * 2);
+  ctx.ellipse(-7.9, hy + 2.2, 1.8, 2.7, -0.12, 0, Math.PI * 2);
   ctx.fillStyle = SKIN;
   ctx.fill();
-  ctx.lineWidth = 0.9;
+  ctx.strokeStyle = LINE;
+  ctx.lineWidth = 0.85;
   ctx.stroke();
   ctx.strokeStyle = SKIN_SHADE;
   ctx.beginPath();
-  ctx.arc(-3.4, hy + 1.6, 0.9, -1.2, 1.2);
+  ctx.arc(-7.8, hy + 2.1, 0.95, -1.25, 1.15);
   ctx.stroke();
-  // Hair with a tuft that lags behind the motion
-  const tuft = -rising * 2 + Math.sin(t * 5) * 0.5;
+
+  // Hair mass with a deliberately simple silhouette.
+  const tuft = -rising * 2 + Math.sin(t * 4.5) * 0.35;
   ctx.fillStyle = HAIR;
   ctx.beginPath();
-  ctx.moveTo(-8.6, hy + 2);
-  ctx.quadraticCurveTo(-10, hy - 10.5, 1.5, hy - 10.6);
-  ctx.quadraticCurveTo(10, hy - 10.5, 10.4, hy - 3.5);
-  ctx.quadraticCurveTo(5.5, hy - 6.5, 0, hy - 5);
-  ctx.quadraticCurveTo(-3.5, hy - 3.5, -4.6, hy + 1.5);
+  ctx.moveTo(-8.9, hy + 2.4);
+  ctx.quadraticCurveTo(-10.2, hy - 7.8, -3.8, hy - 11.1);
+  ctx.quadraticCurveTo(1.4, hy - 14.3, 6.5, hy - 10.3);
+  ctx.quadraticCurveTo(10.1, hy - 7.4, 10.1, hy - 2.2);
+  ctx.quadraticCurveTo(7.2, hy - 5.2, 3.8, hy - 4.4);
+  ctx.quadraticCurveTo(-1.1, hy - 5.8, -4.8, hy + 0.9);
+  ctx.quadraticCurveTo(-6.7, hy + 3.8, -8.9, hy + 2.4);
   ctx.closePath();
   ctx.fill();
   ctx.beginPath();
-  ctx.moveTo(-1, hy - 10);
-  ctx.quadraticCurveTo(-2.5, hy - 14.5 + tuft, 3 + tuft, hy - 14.5 + tuft);
-  ctx.quadraticCurveTo(1, hy - 11.5, 2.2, hy - 10.2);
+  ctx.moveTo(-0.8, hy - 10.5);
+  ctx.quadraticCurveTo(-2.1, hy - 14.4 + tuft, 2.8 + tuft, hy - 14.7 + tuft);
+  ctx.quadraticCurveTo(2.2, hy - 11.3, 3.8, hy - 10.2);
   ctx.fill();
 
-  // Face
+  // Face: readable three-quarter view instead of a single-eye profile.
   const face = pose.face ?? 'normal';
   const blink = face === 'normal' && t % 3.7 < 0.12;
-  const ex = 5;
-  const ey = hy - 0.5;
+  const eyeY = hy - 0.8;
+  const eyeXs = [1.9, 6.9];
+  const eyeScale = face === 'scared' ? 1.18 : 1;
   if (o.luxury && !o.suit && face !== 'scared') {
     ctx.fillStyle = '#111';
-    rr(ctx, 1.4, ey - 2, 8.6, 3.6, 1.6);
+    rr(ctx, 0.2, eyeY - 2.7, 9.1, 4.3, 1.7);
     ctx.fill();
-    ctx.fillStyle = 'rgba(255,255,255,0.45)';
-    ctx.fillRect(2.8, ey - 1.4, 2.4, 0.9);
+    ctx.fillStyle = 'rgba(255,255,255,0.4)';
+    ctx.fillRect(1.5, eyeY - 1.9, 2.4, 0.8);
   } else if (face === 'squint' || blink) {
     ctx.strokeStyle = '#1D1A24';
-    ctx.lineWidth = 1.3;
-    ctx.beginPath();
-    ctx.moveTo(ex - 2, ey + 0.3);
-    ctx.quadraticCurveTo(ex, ey + 1.3, ex + 2, ey + 0.3);
-    ctx.stroke();
+    ctx.lineWidth = 1.25;
+    for (const ex of eyeXs) {
+      ctx.beginPath();
+      ctx.moveTo(ex - 1.5, eyeY + 0.3);
+      ctx.quadraticCurveTo(ex, eyeY + 1.1, ex + 1.5, eyeY + 0.3);
+      ctx.stroke();
+    }
   } else {
-    const r = face === 'scared' ? 2.8 : 2.2;
-    ctx.fillStyle = '#ffffff';
-    ctx.beginPath();
-    ctx.ellipse(ex, ey, r, r * 1.15, 0, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.strokeStyle = 'rgba(28,20,24,0.55)';
-    ctx.lineWidth = 0.8;
-    ctx.stroke();
-    ctx.fillStyle = '#1D1A24';
-    ctx.beginPath();
-    ctx.arc(ex + 0.7, ey - rising * 0.5, face === 'scared' ? 1.05 : 1.3, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(ex + 1, ey - 1.1 - rising * 0.5, 0.8, 0.8);
+    for (const ex of eyeXs) {
+      const r = (face === 'scared' ? 2.55 : 2.05) * eyeScale;
+      ctx.fillStyle = '#fff';
+      ctx.beginPath();
+      ctx.ellipse(ex, eyeY, r, r * 1.12, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(28,20,24,0.5)';
+      ctx.lineWidth = 0.75;
+      ctx.stroke();
+      ctx.fillStyle = '#1D1A24';
+      ctx.beginPath();
+      ctx.arc(ex + 0.45, eyeY - rising * 0.35, face === 'scared' ? 1.05 : 1.05, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(ex + 0.75, eyeY - 1.05 - rising * 0.35, 0.65, 0.65);
+    }
   }
+
+  // Brows make the face readable even when scaled down.
   ctx.strokeStyle = HAIR;
-  ctx.lineWidth = 1.3;
-  ctx.beginPath();
-  if (face === 'grin') {
-    ctx.moveTo(2.6, ey - 3.4);
-    ctx.lineTo(7.4, ey - 4.8);
-  } else if (face === 'scared') {
-    ctx.moveTo(2.6, ey - 4.8);
-    ctx.lineTo(7.4, ey - 4);
-  } else {
-    ctx.moveTo(2.8, ey - 3.6);
-    ctx.lineTo(7.2, ey - 3.6);
-  }
-  ctx.stroke();
-  ctx.strokeStyle = SKIN_SHADE;
-  ctx.lineWidth = 1.2;
-  ctx.beginPath();
-  ctx.arc(9.2, hy + 2.5, 1.5, -1.2, 1.4);
-  ctx.stroke();
-  ctx.strokeStyle = '#6E2E24';
-  ctx.lineWidth = 1.1;
+  ctx.lineWidth = 1.25;
+  ctx.lineCap = 'round';
   ctx.beginPath();
   if (face === 'scared') {
-    ctx.ellipse(5.8, hy + 6, 1.3, 1.7, 0, 0, Math.PI * 2);
+    ctx.moveTo(0.5, eyeY - 3.7); ctx.lineTo(3.1, eyeY - 4.5);
+    ctx.moveTo(5.8, eyeY - 4.4); ctx.lineTo(8.3, eyeY - 3.7);
+  } else if (face === 'grin') {
+    ctx.moveTo(0.6, eyeY - 3.5); ctx.lineTo(3.1, eyeY - 3.1);
+    ctx.moveTo(5.8, eyeY - 3.1); ctx.lineTo(8.4, eyeY - 3.5);
   } else {
-    const r = face === 'grin' ? 2.6 : 1.5 + Math.min(1, pose.tier / 8);
-    ctx.arc(7.2, hy + 5, r, 0.25, Math.PI * (face === 'grin' ? 0.85 : 0.7));
+    ctx.moveTo(0.7, eyeY - 3.8); ctx.lineTo(3.1, eyeY - 3.8);
+    ctx.moveTo(5.8, eyeY - 3.8); ctx.lineTo(8.2, eyeY - 3.8);
   }
   ctx.stroke();
+
+  // Tiny nose and mouth.
+  ctx.strokeStyle = SKIN_SHADE;
+  ctx.lineWidth = 0.9;
+  ctx.beginPath();
+  ctx.moveTo(4.5, hy + 1.2);
+  ctx.quadraticCurveTo(5.1, hy + 2.5, 4.3, hy + 3);
+  ctx.stroke();
+  ctx.strokeStyle = '#6E2E24';
+  ctx.lineWidth = 1.05;
+  ctx.beginPath();
+  if (face === 'scared') {
+    ctx.ellipse(4.6, hy + 6.1, 1.25, 1.65, 0, 0, Math.PI * 2);
+  } else if (face === 'grin') {
+    ctx.arc(4.9, hy + 5.2, 2.5, 0.15, Math.PI * 0.9);
+  } else {
+    ctx.arc(4.8, hy + 5.3, 1.45, 0.15, Math.PI * 0.78);
+  }
+  ctx.stroke();
+
+  ctx.restore();
 
   if (o.suit) {
     ctx.strokeStyle = 'rgba(220,235,255,0.95)';
@@ -572,8 +659,8 @@ export function outfitChanges(from: number, to: number): ItemChange[] {
   if (!a.newTorch && b.newTorch) out.push({ item: 'newTorch', replaces: 'torch', anchor: [16, -22] });
   if (!a.tie && b.tie) out.push({ item: 'tie', replaces: null, anchor: [0, -36] });
   if (!a.phone && b.phone) out.push({ item: 'phone', replaces: null, anchor: [-14, -26] });
-  if (!a.luxury && b.luxury) out.push({ item: 'glasses', replaces: null, anchor: [5, -52] });
-  if (!a.suit && b.suit) out.push({ item: 'helmet', replaces: null, anchor: [0, -51] });
+  if (!a.luxury && b.luxury) out.push({ item: 'glasses', replaces: null, anchor: [4.5, -53] });
+  if (!a.suit && b.suit) out.push({ item: 'helmet', replaces: null, anchor: [1, -64] });
   return out;
 }
 
@@ -655,9 +742,19 @@ export function drawItem(ctx: CanvasRenderingContext2D, item: Item): void {
       ctx.fillRect(-2.3, -4, 4.6, 7);
       break;
     case 'glasses':
-      ctx.fillStyle = '#111';
-      rr(ctx, -4, -1.6, 8, 3.2, 1.4);
-      ctx.fill();
+      ctx.strokeStyle = '#17181D';
+      ctx.lineWidth = 1.1;
+      ctx.fillStyle = 'rgba(170,215,255,0.16)';
+      for (const x of [-3, 3]) {
+        ctx.beginPath();
+        rr(ctx, x - 2.6, -1.8, 5.2, 3.6, 1.2);
+        ctx.fill();
+        ctx.stroke();
+      }
+      ctx.beginPath();
+      ctx.moveTo(-0.4, 0);
+      ctx.lineTo(0.4, 0);
+      ctx.stroke();
       break;
     case 'helmet':
       ctx.strokeStyle = 'rgba(220,235,255,0.95)';

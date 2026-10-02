@@ -1119,6 +1119,7 @@ export class Renderer {
       neutral: sim.light === null,
       sinceLand: hero.sinceLand,
       vy: hero.vy,
+      vx: hero.vx,
       time: sim.time + this.clock * (this.cine ? 1 : 0),
       face: this.faceFor(sim),
       gesture: this.menuGesture ?? undefined,
