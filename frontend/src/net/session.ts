@@ -12,6 +12,9 @@ export interface Stats {
   total_runs: number;
   rank_all: number | null;
   rank_week: number | null;
+  last_tier?: number;
+  best_combo?: number;
+  total_captures?: number;
 }
 
 export interface Bootstrap {
@@ -153,7 +156,10 @@ export class Session {
     }
   }
 
+  private lastReport: RunReport | null = null;
+
   async finish(report: RunReport): Promise<FinishResult | null> {
+    this.lastReport = report;
     try {
       const res = await api<FinishResult>('POST', '/runs/finish', report);
       this.applyResult(res);
@@ -225,6 +231,9 @@ export class Session {
     s.rank_all = r.rank_all;
     s.rank_week = r.rank_week;
     s.total_runs += 1;
+    s.last_tier = this.lastReport?.tier ?? s.last_tier;
+    s.best_combo = Math.max(s.best_combo ?? 0, Math.min(this.lastReport?.max_combo ?? 0, this.lastReport?.captures ?? 0));
+    s.total_captures = (s.total_captures ?? 0) + (this.lastReport?.captures ?? 0);
   }
 
   private enqueue(report: RunReport): void {
@@ -251,6 +260,7 @@ export class Session {
     for (const report of q) {
       try {
         const res = await api<FinishResult>('POST', '/runs/finish', report);
+        this.lastReport = report;
         this.applyResult(res);
       } catch (e) {
         if (e instanceof ApiError && (e.offline || e.status >= 500 || e.status === 429)) left.push(report);

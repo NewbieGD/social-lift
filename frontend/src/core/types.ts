@@ -46,7 +46,7 @@ export interface SimInput {
 export type DeathReason = 'wave' | 'red' | 'fall';
 
 export type SimEvent =
-  | { type: 'land'; x: number; y: number }
+  | { type: 'land'; x: number; y: number; id: number }
   | { type: 'capture'; x: number; y: number; points: number; mult: number; color: ColorId }
   | { type: 'aura'; x: number; y: number }
   | { type: 'death'; reason: DeathReason }

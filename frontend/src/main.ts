@@ -14,7 +14,7 @@ import { haptic, hapticsSupported, initHaptics } from './platform/haptics';
 import { ads, DEFAULT_ADS, type AdsConfig } from './platform/ads';
 import { initVk } from './platform/vk';
 import { scenes } from './render/palette';
-import { drawHeroBody } from './render/hero';
+import { drawHeroBody, outfitChanges, PICKABLE } from './render/hero';
 import { Renderer } from './render/renderer';
 import { applyControls } from './ui/controlsLayout';
 import { $ } from './ui/dom';
@@ -164,7 +164,44 @@ applySettings(settingsStore.get());
 let prevLight: LightId | null = null;
 
 let lastMult = 1;
-let slowTimer = 0;
+let nextPickupAt = 12;
+
+/**
+ * Now and then a piece of the next tier's outfit lies on a platform ahead. Touching that
+ * platform puts it on early. Purely cosmetic: it never changes the score.
+ */
+function schedulePickup(): void {
+  if (renderer.pickups.size) {
+    // Drop a pickup that fell below the screen.
+    for (const id of renderer.pickups.keys()) if (!sim.platforms.some((p) => p.id === id)) renderer.pickups.delete(id);
+    return;
+  }
+  if (sim.runTime < nextPickupAt || sim.tier >= 12) return;
+  nextPickupAt = sim.runTime + 15 + Math.random() * 15;
+  const options = outfitChanges(sim.tier, sim.tier + 1)
+    .map((c) => c.item)
+    .filter((it) => PICKABLE[it]);
+  if (!options.length) return;
+  const top = sim.camY + sim.viewH;
+  const candidates = sim.platforms.filter(
+    (p) => (p.kind === 'color' || p.kind === 'white') && !p.phases && p.y > top - sim.viewH * 0.35 && p.y < top + 40,
+  );
+  if (!candidates.length) return;
+  const p = candidates[Math.floor(Math.random() * candidates.length)];
+  renderer.pickups.set(p.id, options[Math.floor(Math.random() * options.length)]);
+}
+
+let captionTimer = 0;
+renderer.onCaption = (items) => {
+  const el = document.getElementById('caption');
+  if (!el) return;
+  el.innerHTML = `<span class="cap-label">${ru.look.caption}</span><span class="cap-items">${items.map((i) => ru.items[i]).join(', ')}</span>`;
+  el.classList.remove('on');
+  void el.offsetWidth;
+  el.classList.add('on');
+  clearTimeout(captionTimer);
+  captionTimer = window.setTimeout(() => el.classList.remove('on'), 2600);
+};
 
 renderer.onItemSnap = (item) => {
   audio.play('snap', { item });
@@ -261,7 +298,14 @@ function handleUiEvents(events: SimEvent[]): void {
       if (m > lastMult && m >= 2) comboStep(m);
       lastMult = m;
       if (settingsStore.get().vibration) haptic('light');
-    } else if (e.type === 'land') {
+    } else if (e.type === 'land' && mode === 'run') {
+      const item = renderer.pickups.get(e.id);
+      if (item) {
+        renderer.pickups.delete(e.id);
+        renderer.collectPickup(item, sim);
+        toast(`${ru.look.early}: ${ru.items[item]}`);
+      }
+      schedulePickup();
       audio.play('jump', { tier: sim.tier });
     } else if (e.type === 'warn') {
       audio.play('tick');
@@ -278,7 +322,6 @@ function handleUiEvents(events: SimEvent[]): void {
     } else if (e.type === 'tier') {
       showFloor(e.tier);
       setWallet(e.tier);
-      if (mode === 'run' && !settingsStore.get().reducedFx) slowTimer = 0.2; // a beat for the suit-up
       document.body.style.backgroundColor = scenes[e.tier].page;
       audio.setTier(e.tier);
       audio.play('bell');
@@ -415,8 +458,9 @@ function newSim(seed: number, tutorial = false): void {
   renderer.setScene(0);
   renderer.heroTierOverride = null;
   renderer.menuGesture = null;
+  renderer.sceneOnly = false;
+  nextPickupAt = 12;
   lastMult = 1;
-  slowTimer = 0;
   audio.setIntense(false);
   setWallet(0);
   renderer.camShift = 0;
@@ -522,6 +566,7 @@ function finishRun(): void {
   adState.runsSince++;
   saveAdState();
   session.event('run_end', sim.score);
+  rememberLocalRun(sim.score, sim.tier);
   const runTicket = ticket;
   ticket = null;
   const best = session.data?.stats.best_all ?? readLocalBest();
@@ -599,12 +644,16 @@ function celebrate(): void {
   if (settingsStore.get().reducedFx) return;
   const host = document.getElementById('confetti') ?? document.body.appendChild(Object.assign(document.createElement('div'), { id: 'confetti' }));
   host.className = 'confetti';
+  const flashes = Array.from({ length: 6 }, (_, i) => {
+    const left = i % 2 === 0;
+    return `<b class="flash" style="${left ? 'left' : 'right'}:${4 + Math.random() * 12}%;top:${12 + Math.random() * 60}%;--d:${(0.3 + i * 0.4).toFixed(2)}s"></b>`;
+  }).join('');
   host.innerHTML = Array.from({ length: 26 }, (_, i) => {
     const x = Math.round(Math.random() * 100);
     const d = (Math.random() * 0.6).toFixed(2);
     const r = Math.round(Math.random() * 720 - 360);
     return `<i style="left:${x}%;--d:${d}s;--r:${r}deg;--s:${(0.8 + Math.random() * 0.6).toFixed(2)}" class="${i % 3 === 0 ? 'gold' : ''}"></i>`;
-  }).join('');
+  }).join('') + flashes;
   clearTimeout(confettiTimer);
   confettiTimer = window.setTimeout(() => (host.innerHTML = ''), 2600);
 }
@@ -622,22 +671,109 @@ function countUp(el: HTMLElement): void {
   requestAnimationFrame(step);
 }
 
-function bestTier(): number {
-  return session.data?.stats.best_tier ?? 0;
+function lastTier(): number {
+  return session.data?.stats.last_tier ?? localStats()?.last_tier ?? 0;
 }
 
 function goMenu(): void {
   mode = 'menu';
   ticket = null;
   newSim(randomSeed());
-  const best = bestTier();
-  renderer.heroTierOverride = best;
-  renderer.menuGesture = best >= 12 ? 'wave' : best >= 8 ? 'tie' : best >= 3 ? 'pocket' : 'scratch';
-  renderer.camShift = -sim.viewH * 0.45;
-  audio.setTier(best);
-  setSkin(best);
-  document.body.style.backgroundColor = scenes[best].page;
+  // The menu is a calm scene of the last reached place: no gameplay behind it.
+  const tier = lastTier();
+  renderer.heroTierOverride = tier;
+  renderer.sceneOnly = true;
+  renderer.setScene(tier);
+  audio.setTier(tier);
+  setSkin(tier);
+  setWallet(tier);
+  document.body.style.backgroundColor = scenes[tier].page;
   router.reset('menu');
+}
+
+// ---------- Menu showcase: the hero on a stage ----------
+
+function sizeCanvas(c: HTMLCanvasElement): CanvasRenderingContext2D | null {
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  const w = c.clientWidth;
+  const h = c.clientHeight;
+  if (!w || !h) return null;
+  if (c.width !== Math.round(w * dpr) || c.height !== Math.round(h * dpr)) {
+    c.width = Math.round(w * dpr);
+    c.height = Math.round(h * dpr);
+  }
+  const g = c.getContext('2d');
+  g?.setTransform(dpr, 0, 0, dpr, 0, 0);
+  return g;
+}
+
+/** Draws the hero standing on a small podium, alive: breathing, blinking, waving, hopping. */
+function drawStageHero(c: HTMLCanvasElement, tier: number, t: number, silhouette = false, still = false): void {
+  const g = sizeCanvas(c);
+  if (!g) return;
+  const w = c.clientWidth;
+  const h = c.clientHeight;
+  g.clearRect(0, 0, w, h);
+  const scale = Math.min(w / 66, h / 76);
+  const cx = w / 2 - 9 * scale;
+  const base = h - 10 * scale * 0.35 - 8;
+  // Podium
+  g.fillStyle = 'rgba(0,0,0,0.25)';
+  g.beginPath();
+  g.ellipse(w / 2, base + 4, 18 * scale, 3.2 * scale, 0, 0, Math.PI * 2);
+  g.fill();
+  if (!silhouette) {
+    g.fillStyle = '#565C6B';
+    g.beginPath();
+    g.roundRect(w / 2 - 17 * scale, base - 1, 34 * scale, 5 * scale, 2.5 * scale);
+    g.fill();
+    g.fillStyle = '#8C93A3';
+    g.beginPath();
+    g.roundRect(w / 2 - 17 * scale, base - 1, 34 * scale, 3.4 * scale, 2.5 * scale);
+    g.fill();
+  }
+  // A little hop every few seconds, with squash on landing.
+  const cycle = still ? 3 : t % 6;
+  const hop = cycle > 5.3 ? Math.sin(((cycle - 5.3) / 0.7) * Math.PI) * 9 * scale : 0;
+  const sinceLand = cycle > 5.3 ? 1 : cycle;
+  const gesture = still ? undefined : cycle < 2.2 ? 'wave' : tier >= 8 && cycle < 4 ? 'tie' : undefined;
+  g.save();
+  g.translate(cx, base - hop);
+  g.scale(scale, scale);
+  drawHeroBody(g, {
+    tier,
+    light: '255,214,64',
+    neutral: true,
+    sinceLand,
+    vy: hop > 0 ? 300 : 0,
+    time: t,
+    face: still ? 'normal' : cycle < 2.2 ? 'grin' : 'normal',
+    gesture,
+    noBeam: true,
+  });
+  g.restore();
+  if (silhouette) {
+    g.globalCompositeOperation = 'source-atop';
+    g.fillStyle = 'rgba(20,24,34,0.92)';
+    g.fillRect(0, 0, w, h);
+    g.globalCompositeOperation = 'source-over';
+  }
+}
+
+function drawShowcase(t: number): void {
+  const tier = lastTier();
+  const menuHero = document.getElementById('menuHero') as HTMLCanvasElement | null;
+  if (menuHero) drawStageHero(menuHero, tier, t);
+  const ward = document.getElementById('wardHero') as HTMLCanvasElement | null;
+  if (ward) drawStageHero(ward, tier, t);
+}
+
+function drawCollection(root: HTMLElement): void {
+  const best = session.data?.stats.best_tier ?? localStats()?.best_tier ?? 0;
+  root.querySelectorAll<HTMLCanvasElement>('canvas[data-look]').forEach((c) => {
+    const tier = Number(c.dataset.look);
+    drawStageHero(c, tier, 3, tier > best, true);
+  });
 }
 
 // ---------- Pause ----------
@@ -697,6 +833,11 @@ router.register('consent', {
 router.register('declined', { html: () => V.declinedView(), cls: 'solid' });
 router.register('doc', { html: () => V.docView(docKind), cls: 'solid' });
 router.register('rules', { html: () => V.docView('rules'), cls: 'solid' });
+router.register('wardrobe', {
+  html: () => V.wardrobeView(session.data?.stats ?? localStats()),
+  cls: 'solid',
+  mount: (root) => requestAnimationFrame(() => drawCollection(root)),
+});
 router.register('menu', {
   html: () => V.menuView({ stats: session.data?.stats ?? localStats(), mode: session.mode }),
   cls: 'menu-screen',
@@ -744,9 +885,37 @@ router.onChange = (top) => {
 
 function localStats(): Stats | null {
   const best = readLocalBest();
-  return best > 0
-    ? { best_all: best, best_tier: 0, best_week: 0, last_score: null, total_runs: 1, rank_all: null, rank_week: null }
+  let local: { last?: number; lastTier?: number; bestTier?: number; runs?: number } = {};
+  try {
+    local = JSON.parse(localStorage.getItem('sl_local') || '{}');
+  } catch {
+    /* ignore */
+  }
+  return best > 0 || local.runs
+    ? {
+        best_all: best,
+        best_tier: local.bestTier ?? 0,
+        best_week: 0,
+        last_score: local.last ?? null,
+        total_runs: local.runs ?? 1,
+        rank_all: null,
+        rank_week: null,
+        last_tier: local.lastTier ?? 0,
+      }
     : null;
+}
+
+/** Without a server (outside VK) the last run is remembered locally for the menu. */
+function rememberLocalRun(score: number, tier: number): void {
+  try {
+    const prev = JSON.parse(localStorage.getItem('sl_local') || '{}');
+    localStorage.setItem(
+      'sl_local',
+      JSON.stringify({ last: score, lastTier: tier, bestTier: Math.max(prev.bestTier ?? 0, tier), runs: (prev.runs ?? 0) + 1 }),
+    );
+  } catch {
+    /* ignore */
+  }
 }
 
 async function loadLeaders(force: boolean): Promise<void> {
@@ -988,28 +1157,24 @@ function frame(now: number): void {
       if (deathTimer > stop + slowMoSec) finishRun();
     } else if (mode === 'tutorial') {
       scale = 0.8; // the tutorial runs a little slower
-    } else if (slowTimer > 0) {
-      slowTimer -= realDt;
-      scale = 0.4;
     }
-    acc += realDt * scale;
-    while (acc >= DT && (mode === 'run' || mode === 'tutorial')) {
+    if (renderer.cineActive) {
+      // The suit-up is a short movie: the game is frozen, input is ignored.
+      acc = 0;
+      input.takePress();
+    } else acc += realDt * scale;
+    while (acc >= DT && (mode === 'run' || mode === 'tutorial') && !renderer.cineActive) {
       sim.step({ axis: input.axis(sim.hero.x), press: input.takePress() });
       renderer.handleEvents(sim.events, sim);
       handleUiEvents(sim.events);
       if (mode === 'tutorial') tutorialTick();
       acc -= DT;
     }
-  } else if (mode === 'menu') {
-    // Menu background: the hero idles on the start platform.
-    acc += realDt;
-    while (acc >= DT) {
-      sim.step({ axis: 0, press: null });
-      acc -= DT;
-    }
   }
 
-  renderer.draw(sim, active || mode === 'menu' ? acc / DT : 1, paused ? 0 : realDt * scale);
+  const renderDt = paused ? 0 : renderer.cineActive || mode === 'menu' ? realDt : realDt * scale;
+  renderer.draw(sim, active && !renderer.cineActive ? acc / DT : 1, renderDt);
+  if (router.top === 'menu' || router.top === 'wardrobe') drawShowcase(now / 1000);
   updateHud(realDt);
   requestAnimationFrame(frame);
 }

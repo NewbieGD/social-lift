@@ -63,6 +63,9 @@ async def test_finish_valid_and_idempotent(client):
     async with SessionLocal() as s:
         user = await s.get(User, 11)
         assert user.total_runs == 1
+        assert user.best_combo == 3 and user.total_captures == 6 and user.last_tier == 0
+    boot = (await client.post("/api/session/bootstrap", headers=headers(11))).json()
+    assert boot["stats"]["best_combo"] == 3 and boot["stats"]["total_captures"] == 6
 
 
 async def test_finish_rejections(client):

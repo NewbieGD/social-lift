@@ -2,7 +2,7 @@ import { gameConfig, type ColorId, type LightId } from '../core/gameConfig';
 import type { Sim } from '../core/sim';
 import type { Platform, SimEvent } from '../core/types';
 import { ru } from '../i18n/ru';
-import { drawHeroBody, drawItem, outfitChanges, type Face, type Gesture, type Item } from './hero';
+import { drawHeroBody, drawItem, outfitChanges, PICKABLE, TORCH_TIP, type Face, type Gesture, type Item, type Outfit } from './hero';
 import { palette } from './palette';
 import { paintScene, paintSky } from './scenes';
 
@@ -90,6 +90,28 @@ interface FlyItem {
   dur: number;
   rot: number;
   done: boolean;
+  pickup?: boolean;
+}
+
+interface Cine {
+  t: number;
+  dur: number;
+  fromScene: number;
+  toScene: number;
+  anchors: [number, number][];
+}
+
+/** Light motes floating over the scene, in screen space. */
+interface Mote {
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  life: number;
+  max: number;
+  size: number;
+  kind: number;
+  seed: number;
 }
 
 interface Spot {
@@ -120,8 +142,6 @@ export class Renderer {
   private ambient: Ambient[] = [];
   private ambientTimer = 0;
   private sceneTier = 0;
-  private doorT = -1;
-  private pendingTier = 0;
   private flashlightColor: [number, number, number] = [235, 235, 225];
   private auraPulse = 0;
   private frameTimes: number[] = [];
@@ -143,6 +163,25 @@ export class Renderer {
   menuGesture: Gesture | null = null;
 
   private items: FlyItem[] = [];
+  private cine: Cine | null = null;
+  private highlights: { anchor: [number, number]; t: number }[] = [];
+  private sparkles: { x: number; y: number; t: number }[] = [];
+  private prewornItems = new Set<Item>();
+  private extra: Partial<Outfit> = {};
+  private rings: { t: number; color: string }[] = [];
+  private trail: { x: number; y: number }[] = [];
+  private motes: Mote[] = [];
+  private beamMotes: { u: number; v: number; s: number }[] = Array.from({ length: 12 }, () => ({
+    u: Math.random(),
+    v: Math.random() * 2 - 1,
+    s: 0.3 + Math.random() * 0.7,
+  }));
+  /** Platform id -> clothing item lying on it (cosmetic early pickup). */
+  pickups = new Map<number, Item>();
+  /** Menu background: draw the scene only, no platforms or hero. */
+  sceneOnly = false;
+  /** Called at the start of a suit-up with the new pieces (for the caption). */
+  onCaption: (items: Item[]) => void = () => undefined;
   private outfitTier = 0;
   private pendingOutfit = -1;
   private impulse = 0;
@@ -169,8 +208,14 @@ export class Renderer {
   /** Instantly shows a scene (new run, menu) and clears effects. */
   setScene(tier: number): void {
     this.sceneTier = tier;
-    this.pendingTier = tier;
-    this.doorT = -1;
+    this.cine = null;
+    this.highlights.length = 0;
+    this.sparkles.length = 0;
+    this.prewornItems.clear();
+    this.extra = {};
+    this.pickups.clear();
+    this.trail.length = 0;
+    this.rings.length = 0;
     this.bills.length = 0;
     this.floaters.length = 0;
     this.ambient.length = 0;
@@ -224,20 +269,12 @@ export class Renderer {
         this.auraPulse = 1;
       } else if (e.type === 'close') {
         this.floaters.push({ x: e.x, y: e.y + 46, life: 0.9, max: 0.9, text: ru.hud.close, color: '#FFE58A', big: true });
+      } else if (e.type === 'light') {
+        if (!this.reducedEffects) this.rings.push({ t: 0, color: palette.light[e.light] });
       } else if (e.type === 'tier') {
-        this.pendingTier = e.tier;
         this.moneyTier = e.tier;
-        this.startSuitUp(e.tier, sim);
         this.prewarm(Math.min(e.tier + 1, 12), H);
-        if (this.reducedEffects) {
-          this.sceneTier = e.tier;
-        } else {
-          this.doorT = 0;
-          for (let i = 0; i < 18; i++) {
-            const a = Math.random() * Math.PI * 2;
-            this.particles.spawn(2, sim.hero.x, sim.hero.y + 26, Math.cos(a) * 140, Math.sin(a) * 140 + 40, 0.7);
-          }
-        }
+        this.startSuitUp(e.tier, sim);
       } else if (e.type === 'death' && !this.reducedEffects) {
         for (let i = 0; i < 16; i++) {
           const a = Math.random() * Math.PI * 2;
@@ -247,31 +284,44 @@ export class Renderer {
     }
   }
 
-  /** Iron-Man style: new pieces fly in from the screen edges and snap on; old ones get knocked off. */
+  // ---------- Suit-up cinematic ----------
+
+  /** True while the tier-change cinematic plays: the game is frozen meanwhile. */
+  get cineActive(): boolean {
+    return this.cine !== null;
+  }
+
+  /**
+   * Iron-Man style: the camera moves in on the hero, the scene dims under a spotlight,
+   * new pieces fly in one by one and snap on, old ones get knocked off. Then every new
+   * piece keeps a soft glow for a few seconds so the player sees what changed.
+   */
   private startSuitUp(tier: number, sim: Sim): void {
     const from = this.pendingOutfit >= 0 ? this.pendingOutfit : this.outfitTier;
-    const changes = outfitChanges(from, tier);
+    const changes = outfitChanges(from, tier).filter((c) => !this.prewornItems.has(c.item));
     this.pendingOutfit = tier;
     if (this.reducedEffects || !changes.length) {
-      this.outfitTier = tier;
-      this.pendingOutfit = -1;
+      this.sceneTier = tier;
+      this.finishOutfit();
       return;
     }
     const W = gameConfig.world.width;
+    const lead = 0.6;
+    const step = 0.5;
     changes.forEach((c, i) => {
-      const left = (i + Math.floor(sim.hero.x)) % 2 === 0;
+      const left = i % 2 === 0;
       this.items.push({
         item: c.item,
         dir: 'in',
-        x0: left ? -30 : W + 30,
-        y0: sim.hero.y + 140 + i * 30,
+        x0: left ? -40 : W + 40,
+        y0: sim.hero.y + 120 + (i % 3) * 40,
         vx: c.anchor[0],
         vy: c.anchor[1],
         ax: 0,
         ay: 0,
-        t: -i * 0.12,
-        dur: 0.5,
-        rot: (left ? -1 : 1) * (3 + Math.random() * 2),
+        t: -(lead + i * step),
+        dur: 0.65,
+        rot: (left ? -1 : 1) * (4 + Math.random() * 2),
         done: false,
       });
       if (c.replaces) {
@@ -280,17 +330,56 @@ export class Renderer {
           dir: 'out',
           x0: 0,
           y0: 0,
-          vx: (Math.random() < 0.5 ? -1 : 1) * (60 + Math.random() * 60),
-          vy: 260,
+          vx: (left ? 1 : -1) * (70 + Math.random() * 50),
+          vy: 280,
           ax: c.anchor[0],
           ay: c.anchor[1],
-          t: -(i * 0.12 + 0.5),
-          dur: 1.3,
+          t: -(lead + i * step + 0.65),
+          dur: 1.4,
           rot: 0,
           done: false,
         });
       }
     });
+    const dur = lead + (changes.length - 1) * step + 0.65 + 1.1;
+    this.cine = { t: 0, dur, fromScene: this.sceneTier, toScene: tier, anchors: changes.map((c) => c.anchor) };
+    this.onCaption(changes.map((c) => c.item));
+  }
+
+  private finishOutfit(): void {
+    if (this.pendingOutfit >= 0) this.outfitTier = this.pendingOutfit;
+    this.pendingOutfit = -1;
+    this.prewornItems.clear();
+    this.extra = {};
+  }
+
+  /** Main calls this when the hero lands on a platform carrying a pickup. */
+  collectPickup(item: Item, sim: Sim): void {
+    const change = outfitChanges(this.outfitTier, this.outfitTier + 1).find((c) => c.item === item);
+    if (!change) return;
+    this.prewornItems.add(item);
+    const W = gameConfig.world.width;
+    this.items.push({
+      item,
+      dir: 'in',
+      x0: sim.hero.x + (sim.hero.x < W / 2 ? 40 : -40),
+      y0: sim.hero.y + 60,
+      vx: change.anchor[0],
+      vy: change.anchor[1],
+      ax: 0,
+      ay: 0,
+      t: 0,
+      dur: 0.45,
+      rot: 3,
+      done: false,
+      pickup: true,
+    });
+    if (change.replaces) {
+      this.items.push({
+        item: change.replaces, dir: 'out', x0: 0, y0: 0, vx: 90, vy: 260,
+        ax: change.anchor[0], ay: change.anchor[1], t: -0.45, dur: 1.3, rot: 0, done: false,
+      });
+    }
   }
 
   private drawItems(sim: Sim, heroX: number, heroY: number, toY: (y: number) => number, dt: number): void {
@@ -303,7 +392,6 @@ export class Renderer {
       const k = Math.min(1, it.t / it.dur);
       ctx.save();
       if (it.dir === 'in') {
-        // Arc from the screen edge to the attach point on the moving hero.
         const tx = heroX + it.vx * facing;
         const ty = heroY - it.vy;
         const e = 1 - Math.pow(1 - k, 3);
@@ -312,22 +400,42 @@ export class Renderer {
         const u = 1 - e;
         const x = u * u * it.x0 + 2 * u * e * cx + e * e * tx;
         const y = u * u * it.y0 + 2 * u * e * cy + e * e * ty;
-        ctx.translate(x, toY(y));
-        ctx.rotate(it.rot * (1 - e));
-        const sc = 1.7 - 0.7 * e;
-        ctx.scale(sc * facing, sc);
-        drawItem(ctx, it.item);
+        const attached = it.done && !it.pickup && this.pendingOutfit >= 0;
+        if (attached) {
+          // Snapped on: stays in place until the whole new outfit is complete.
+          ctx.translate(tx, toY(ty));
+          ctx.scale(facing, 1);
+          drawItem(ctx, it.item);
+        } else if (k < 1) {
+          // A bright streak behind the flying piece.
+          ctx.globalCompositeOperation = 'lighter';
+          ctx.globalAlpha = 0.5 * (1 - k);
+          const g = ctx.createRadialGradient(x, toY(y), 0, x, toY(y), 22);
+          g.addColorStop(0, 'rgba(255,230,150,0.9)');
+          g.addColorStop(1, 'rgba(255,230,150,0)');
+          ctx.fillStyle = g;
+          ctx.fillRect(x - 22, toY(y) - 22, 44, 44);
+          ctx.globalCompositeOperation = 'source-over';
+          ctx.globalAlpha = 1;
+          ctx.translate(x, toY(y));
+          ctx.rotate(it.rot * (1 - e));
+          const sc = 2.2 - 1.2 * e;
+          ctx.scale(sc * facing, sc);
+          drawItem(ctx, it.item);
+        }
         if (k >= 1 && !it.done) {
           it.done = true;
           this.impulse = 1;
           this.onItemSnap(it.item);
-          for (let i = 0; i < 10; i++) {
+          const o = PICKABLE[it.item];
+          if (it.pickup && o) Object.assign(this.extra, o);
+          this.highlights.push({ anchor: [it.vx, it.vy], t: 0 });
+          for (let i = 0; i < 14; i++) {
             const a = Math.random() * Math.PI * 2;
-            this.particles.spawn(2, tx, ty, Math.cos(a) * 120, Math.sin(a) * 120, 0.45);
+            this.particles.spawn(2, tx, ty, Math.cos(a) * 140, Math.sin(a) * 140, 0.5);
           }
         }
       } else {
-        // Knocked-off piece tumbles down toward the debt wave.
         if (!it.done) {
           it.done = true;
           it.x0 = heroX + it.ax * facing;
@@ -339,19 +447,36 @@ export class Renderer {
         ctx.globalAlpha = 1 - k;
         ctx.translate(x, toY(y));
         ctx.rotate(tt * 8 * Math.sign(it.vx));
-        ctx.scale(facing, 1);
+        ctx.scale(1.3 * facing, 1.3);
         drawItem(ctx, it.item);
       }
       ctx.restore();
     }
     ctx.globalAlpha = 1;
-    // Pieces that already snapped on stay attached until the whole outfit is complete,
-    // then the hero switches to the new outfit in one go.
-    if (this.pendingOutfit >= 0 && this.items.every((it) => it.dir !== 'in' || it.done)) {
-      this.outfitTier = this.pendingOutfit;
-      this.pendingOutfit = -1;
+    this.items = this.items.filter((it) =>
+      it.dir === 'in' ? !it.done || (!it.pickup && this.pendingOutfit >= 0) : it.t < it.dur,
+    );
+  }
+
+  /** Soft pulsing glow on freshly worn pieces for a few seconds. */
+  private drawHighlights(x: number, footY: number, facing: number, dt: number): void {
+    if (!this.highlights.length) return;
+    const ctx = this.ctx;
+    ctx.globalCompositeOperation = 'lighter';
+    this.highlights = this.highlights.filter((h) => (h.t += dt) < 5);
+    for (const h of this.highlights) {
+      const fade = h.t < 4 ? 1 : 5 - h.t;
+      const pulse = 0.55 + 0.45 * Math.sin(h.t * 4);
+      const hx = x + h.anchor[0] * facing;
+      const hy = footY + h.anchor[1];
+      const g = ctx.createRadialGradient(hx, hy, 0, hx, hy, 16);
+      g.addColorStop(0, `rgba(255,236,160,${0.55 * pulse * fade})`);
+      g.addColorStop(1, 'rgba(255,236,160,0)');
+      ctx.fillStyle = g;
+      ctx.fillRect(hx - 16, hy - 16, 32, 32);
+      if (Math.random() < dt * 6) this.sparkles.push({ x: hx + (Math.random() - 0.5) * 18, y: hy + (Math.random() - 0.5) * 18, t: 0 });
     }
-    this.items = this.items.filter((it) => (it.dir === 'in' ? this.pendingOutfit >= 0 : it.t < it.dur));
+    ctx.globalCompositeOperation = 'source-over';
   }
 
   draw(sim: Sim, alpha: number, frameDt: number): void {
@@ -370,23 +495,85 @@ export class Renderer {
     const tier = this.heroTierOverride ?? this.outfitTier;
     this.impulse = Math.max(0, this.impulse - frameDt * 5);
 
+    const hero = sim.hero;
+    const hx = hero.prevX + (hero.x - hero.prevX) * alpha;
+    const hy = hero.prevY + (hero.y - hero.prevY) * alpha;
+
+    // Cinematic camera: zoom towards the hero during the suit-up.
+    let zoom = 1;
+    if (this.cine) {
+      const c = this.cine;
+      c.t += frameDt;
+      const kin = Math.min(1, c.t / 0.5);
+      const kout = Math.min(1, Math.max(0, (c.dur - c.t) / 0.5));
+      zoom = 1 + 0.9 * easeInOut(Math.min(kin, kout));
+      if (c.t >= 0.35 && this.sceneTier !== c.toScene) this.sceneTier = c.toScene;
+      if (c.t >= c.dur) {
+        this.cine = null;
+        this.finishOutfit();
+      }
+    }
+    if (zoom !== 1) {
+      const fx = hx;
+      const fy = toY(hy) - 26;
+      ctx.translate(fx, fy);
+      ctx.scale(zoom, zoom);
+      ctx.translate(-fx, -fy + (zoom - 1) * 30);
+    }
+
     this.drawBackground(W, H, cam, frameDt);
+    this.drawMotes(tier, W, H, frameDt);
+    if (this.sceneOnly) {
+      this.drawSparkles(frameDt);
+      return;
+    }
     this.drawAmbient(tier, W, H, frameDt);
 
-    for (const p of sim.platforms) this.drawPlatform(p, toY(p.y), sim.time);
+    for (const p of sim.platforms) {
+      this.drawPlatform(p, toY(p.y), sim.time);
+      const pick = this.pickups.get(p.id);
+      if (pick) this.drawPickup(pick, p.x, toY(p.y), sim.time);
+    }
     this.drawSpots(toY, frameDt);
 
     this.drawWave(sim, toY, W, H);
     this.drawParticles(toY);
+    this.drawTrail(sim, hx, hy, toY);
 
-    const hero = sim.hero;
-    const hx = hero.prevX + (hero.x - hero.prevX) * alpha;
-    const hy = hero.prevY + (hero.y - hero.prevY) * alpha;
+    if (this.cine) {
+      // Dim the scene and light the hero with a spotlight.
+      const c = this.cine;
+      const k = Math.min(1, c.t / 0.4, Math.max(0, (c.dur - c.t) / 0.4));
+      const sx = hx;
+      const sy = toY(hy) - 28;
+      const g = ctx.createRadialGradient(sx, sy, 30, sx, sy, 170);
+      g.addColorStop(0, 'rgba(5,6,12,0)');
+      g.addColorStop(1, `rgba(5,6,12,${0.7 * k})`);
+      ctx.fillStyle = g;
+      ctx.fillRect(sx - W * 2, sy - H * 2, W * 4, H * 4);
+      ctx.globalCompositeOperation = 'lighter';
+      const beam = ctx.createLinearGradient(sx, sy - 220, sx, sy + 40);
+      beam.addColorStop(0, `rgba(255,240,200,0)`);
+      beam.addColorStop(1, `rgba(255,240,200,${0.16 * k})`);
+      ctx.fillStyle = beam;
+      ctx.beginPath();
+      ctx.moveTo(sx - 18, sy - 260);
+      ctx.lineTo(sx + 18, sy - 260);
+      ctx.lineTo(sx + 50, sy + 40);
+      ctx.lineTo(sx - 50, sy + 40);
+      ctx.closePath();
+      ctx.fill();
+      ctx.globalCompositeOperation = 'source-over';
+    }
+
     this.drawHero(sim, hx, toY(hy), frameDt, tier);
     this.drawItems(sim, hx, hy, toY, frameDt);
-    this.drawDanger(sim, W, H);
+    this.drawHighlights(hx, toY(hy), hero.facing, frameDt);
+    this.drawSparkles(frameDt);
+    if (!this.cine) this.drawDanger(sim, W, H);
 
     this.drawFloaters(toY, frameDt);
+    ctx.setTransform(s, 0, 0, s, 0, 0);
     this.drawBills(frameDt);
 
     if (this.deathK > 0) {
@@ -443,20 +630,15 @@ export class Renderer {
     this.clock += dt;
     if (!this.reducedEffects) this.drawDecor(shown, W, H, off);
 
-    // Elevator doors on the background layer when the tier changes; gameplay continues.
-    if (this.doorT >= 0) {
-      this.doorT += dt;
-      const k = this.doorT / 0.9;
-      if (k >= 0.5 && this.sceneTier !== this.pendingTier) this.sceneTier = this.pendingTier;
-      const close = k < 0.5 ? easeInOut(k * 2) : 1 - easeInOut((k - 0.5) * 2);
-      const half = (W / 2) * close;
-      ctx.fillStyle = '#9AA3B2';
-      ctx.fillRect(0, 0, half, H);
-      ctx.fillRect(W - half, 0, half, H);
-      ctx.fillStyle = 'rgba(255,255,255,0.25)';
-      ctx.fillRect(half - 3, 0, 2, H);
-      ctx.fillRect(W - half + 1, 0, 2, H);
-      if (k >= 1) this.doorT = -1;
+    // During the suit-up the new scene fades in over the old one.
+    if (this.cine && this.cine.t < 0.9 && this.cine.fromScene !== shown) {
+      const k = Math.min(1, this.cine.t / 0.9);
+      ctx.globalAlpha = 1 - k;
+      ctx.drawImage(this.sky(this.cine.fromScene, W, H), 0, 0, W, H);
+      const old = this.tile(this.cine.fromScene, W, H);
+      ctx.drawImage(old, 0, off - H, W, H);
+      ctx.drawImage(old, 0, off, W, H);
+      ctx.globalAlpha = 1;
     }
   }
 
@@ -897,8 +1079,8 @@ export class Renderer {
     const k = Math.min(1, dt / 0.12); // flashlight color changes in about 0.12 s
     for (let i = 0; i < 3; i++) this.flashlightColor[i] += (target[i] - this.flashlightColor[i]) * k;
     const [r, g, b] = this.flashlightColor.map(Math.round);
+    const rgb = `${r},${g},${b}`;
 
-    // Squash on landing, stretch while rising fast, a small overshoot after landing.
     const land = Math.exp(-hero.sinceLand * 18);
     const overshoot = Math.sin(Math.min(1, hero.sinceLand * 6) * Math.PI) * 0.04 * Math.exp(-hero.sinceLand * 4);
     const stretch = Math.min(0.12, Math.max(0, hero.vy) / 6000);
@@ -906,34 +1088,310 @@ export class Renderer {
     const sy = 1 - land * 0.2 + stretch + overshoot - this.impulse * 0.12;
     const sx = 1 + land * 0.16 - stretch * 0.6 + this.impulse * 0.1;
 
+    const tipX = x + TORCH_TIP[0] * sx * hero.facing;
+    const tipY = footY + TORCH_TIP[1] * sy;
+    if (!sim.dead) this.drawBeam(sim, tipX, tipY, hero.facing, rgb, tier, dt);
+
     ctx.save();
     ctx.translate(x, footY);
     if (sim.dead) ctx.rotate(hero.spin);
     ctx.scale(sx * hero.facing, sy);
     drawHeroBody(ctx, {
       tier,
-      light: `${r},${g},${b}`,
+      light: rgb,
       neutral: sim.light === null,
       sinceLand: hero.sinceLand,
       vy: hero.vy,
-      time: sim.time,
+      time: sim.time + this.clock * (this.cine ? 1 : 0),
       face: this.faceFor(sim),
       gesture: this.menuGesture ?? undefined,
-      beam: 1 + (sim.multiplier - 1) * 0.25,
+      extra: this.extra,
+      noBeam: true,
     });
     ctx.restore();
 
-    if (sim.light === 'red' && !sim.dead) {
-      const pulse = this.auraPulse;
-      const breathe = this.reducedEffects ? 0 : Math.sin(sim.time * 5) * 1.5;
-      ctx.strokeStyle = `rgba(255,70,80,${0.55 + 0.45 * pulse})`;
-      ctx.lineWidth = 2.5 + pulse * 3;
-      ctx.fillStyle = 'rgba(255,60,70,0.12)';
+    // Lens flare and a color-change ring at the flashlight.
+    if (!sim.dead) {
+      ctx.globalCompositeOperation = 'lighter';
+      const glow = ctx.createRadialGradient(tipX, tipY, 0, tipX, tipY, 12);
+      glow.addColorStop(0, `rgba(${rgb},${sim.light ? 0.9 : 0.35})`);
+      glow.addColorStop(1, `rgba(${rgb},0)`);
+      ctx.fillStyle = glow;
+      ctx.fillRect(tipX - 12, tipY - 12, 24, 24);
+      if (sim.light && !this.reducedEffects) {
+        const rot = this.clock * 0.8;
+        ctx.strokeStyle = `rgba(${rgb},0.6)`;
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        for (let i = 0; i < 2; i++) {
+          const a = rot + (i * Math.PI) / 2;
+          ctx.moveTo(tipX - Math.cos(a) * 11, tipY - Math.sin(a) * 11);
+          ctx.lineTo(tipX + Math.cos(a) * 11, tipY + Math.sin(a) * 11);
+        }
+        ctx.stroke();
+      }
+      this.rings = this.rings.filter((ring) => (ring.t += dt) < 0.4);
+      for (const ring of this.rings) {
+        const rk = ring.t / 0.4;
+        ctx.strokeStyle = ring.color;
+        ctx.globalAlpha = 1 - rk;
+        ctx.lineWidth = 3 * (1 - rk) + 0.5;
+        ctx.beginPath();
+        ctx.arc(tipX, tipY, 4 + 26 * rk, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+      ctx.globalAlpha = 1;
+      ctx.globalCompositeOperation = 'source-over';
+    }
+
+    if (sim.light === 'red' && !sim.dead) this.drawAura(x, footY - 28, sim.time, dt);
+  }
+
+  /** Volumetric flashlight beam: a soft wide cone, a bright core and dust glittering in it. */
+  private drawBeam(sim: Sim, x: number, y: number, facing: number, rgb: string, tier: number, dt: number): void {
+    const ctx = this.ctx;
+    const on = sim.light !== null;
+    const len = (tier >= 7 ? 125 : 100) * (1 + (sim.multiplier - 1) * 0.15);
+    const dir = Math.atan2(0.62, 0.78 * facing);
+    const intensity = on ? 1 : 0.35;
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(dir);
+    ctx.globalCompositeOperation = 'lighter';
+    const cone = (spread: number, alpha: number): void => {
+      const g = ctx.createRadialGradient(0, 0, 2, 0, 0, len);
+      g.addColorStop(0, `rgba(${rgb},${alpha * intensity})`);
+      g.addColorStop(0.6, `rgba(${rgb},${alpha * 0.35 * intensity})`);
+      g.addColorStop(1, `rgba(${rgb},0)`);
+      ctx.fillStyle = g;
       ctx.beginPath();
-      ctx.ellipse(x, footY - 27, 27 + pulse * 6 + breathe, 36 + pulse * 6 + breathe, 0, 0, Math.PI * 2);
+      ctx.moveTo(0, -2);
+      ctx.lineTo(len, -len * spread);
+      ctx.quadraticCurveTo(len * 1.08, 0, len, len * spread);
+      ctx.lineTo(0, 2);
+      ctx.closePath();
       ctx.fill();
+    };
+    cone(0.42, 0.22);
+    cone(0.2, 0.32);
+    cone(0.07, 0.5);
+    if (on && !this.reducedEffects) {
+      // Dust motes drifting through the light.
+      for (const m of this.beamMotes) {
+        m.u += dt * 0.12 * m.s;
+        if (m.u > 1) {
+          m.u = 0.05;
+          m.v = Math.random() * 2 - 1;
+        }
+        const px = m.u * len * 0.9;
+        const py = m.v * px * 0.38 + Math.sin(this.clock * 2 + m.s * 9) * 2;
+        ctx.globalAlpha = (1 - m.u) * 0.9;
+        ctx.fillStyle = `rgb(${rgb})`;
+        ctx.fillRect(px, py, 1.4 * m.s + 0.6, 1.4 * m.s + 0.6);
+      }
+      ctx.globalAlpha = 1;
+    }
+    ctx.restore();
+  }
+
+  /** The red shield: a living energy field around the hero instead of a plain circle. */
+  private drawAura(cx: number, cy: number, t: number, dt: number): void {
+    const ctx = this.ctx;
+    const pulse = this.auraPulse;
+    const reduced = this.reducedEffects;
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    // Soft inner glow.
+    const inner = ctx.createRadialGradient(cx, cy, 6, cx, cy, 44 + pulse * 10);
+    inner.addColorStop(0, 'rgba(255,60,80,0)');
+    inner.addColorStop(0.65, `rgba(255,60,80,${0.1 + pulse * 0.15})`);
+    inner.addColorStop(1, 'rgba(255,60,80,0)');
+    ctx.fillStyle = inner;
+    ctx.fillRect(cx - 60, cy - 60, 120, 120);
+    // Wobbling energy shells.
+    const shells = reduced ? 1 : 3;
+    for (let k = 0; k < shells; k++) {
+      ctx.beginPath();
+      for (let i = 0; i <= 48; i++) {
+        const a = (i / 48) * Math.PI * 2;
+        const w =
+          1 +
+          (reduced ? 0 : 0.07 * Math.sin(3 * a + t * (3 + k) + k * 2) + 0.045 * Math.sin(5 * a - t * (5 - k)));
+        const rx = (25 + k * 3 + pulse * 6) * w;
+        const ry = (33 + k * 3 + pulse * 6) * w;
+        const px = cx + Math.cos(a) * rx;
+        const py = cy + Math.sin(a) * ry;
+        if (i === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
+      }
+      ctx.closePath();
+      ctx.strokeStyle = `rgba(255,${80 + k * 40},${90 + k * 30},${0.55 - k * 0.14 + pulse * 0.3})`;
+      ctx.lineWidth = 2.2 - k * 0.5;
       ctx.stroke();
     }
+    if (!reduced) {
+      // Flame tongues licking upward over the head.
+      for (let i = 0; i < 5; i++) {
+        const a = -Math.PI / 2 + (i - 2) * 0.32;
+        const bx = cx + Math.cos(a) * 26;
+        const by = cy + Math.sin(a) * 33;
+        const h = 6 + 5 * Math.sin(t * 6 + i * 1.7);
+        ctx.fillStyle = 'rgba(255,90,90,0.35)';
+        ctx.beginPath();
+        ctx.moveTo(bx - 4, by + 2);
+        ctx.quadraticCurveTo(bx + Math.sin(t * 4 + i) * 3, by - h, bx + 4, by + 2);
+        ctx.fill();
+      }
+      // Sparks orbiting with short trails.
+      for (let i = 0; i < 6; i++) {
+        const a = t * 2.4 + (i * Math.PI) / 3;
+        const px = cx + Math.cos(a) * 30;
+        const py = cy + Math.sin(a) * 38;
+        const tx = cx + Math.cos(a - 0.25) * 30;
+        const ty = cy + Math.sin(a - 0.25) * 38;
+        ctx.strokeStyle = 'rgba(255,170,170,0.5)';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(tx, ty);
+        ctx.lineTo(px, py);
+        ctx.stroke();
+        ctx.fillStyle = 'rgba(255,230,230,0.95)';
+        ctx.fillRect(px - 1.2, py - 1.2, 2.4, 2.4);
+      }
+    }
+    // A blocked hit sends a ring outward.
+    if (pulse > 0) {
+      ctx.strokeStyle = `rgba(255,120,130,${pulse})`;
+      ctx.lineWidth = 3 * pulse;
+      ctx.beginPath();
+      ctx.ellipse(cx, cy, 30 + (1 - pulse) * 30, 38 + (1 - pulse) * 30, 0, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.restore();
+    void dt;
+  }
+
+  /** A colored ribbon behind the hero on a ×3 combo. */
+  private drawTrail(sim: Sim, x: number, worldY: number, toY: (y: number) => number): void {
+    if (this.reducedEffects || sim.multiplier < 3 || sim.dead) {
+      this.trail.length = 0;
+      return;
+    }
+    this.trail.push({ x, y: worldY + 26 });
+    if (this.trail.length > 14) this.trail.shift();
+    const ctx = this.ctx;
+    const rgb = this.flashlightColor.map(Math.round).join(',');
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.lineCap = 'round';
+    for (let i = 1; i < this.trail.length; i++) {
+      const a = this.trail[i - 1];
+      const b = this.trail[i];
+      const k = i / this.trail.length;
+      ctx.strokeStyle = `rgba(${rgb},${0.35 * k})`;
+      ctx.lineWidth = 14 * k;
+      ctx.beginPath();
+      ctx.moveTo(a.x, toY(a.y));
+      ctx.lineTo(b.x, toY(b.y));
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  private drawSparkles(dt: number): void {
+    if (!this.sparkles.length) return;
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    this.sparkles = this.sparkles.filter((p) => (p.t += dt) < 0.6);
+    for (const p of this.sparkles) {
+      const k = p.t / 0.6;
+      const r = 3.5 * (1 - Math.abs(k - 0.5) * 2);
+      ctx.strokeStyle = `rgba(255,245,200,${1 - k})`;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(p.x - r, p.y);
+      ctx.lineTo(p.x + r, p.y);
+      ctx.moveTo(p.x, p.y - r);
+      ctx.lineTo(p.x, p.y + r);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  /** A clothing item hovering over a platform: touch the platform to put it on early. */
+  private drawPickup(item: Item, x: number, sy: number, t: number): void {
+    const ctx = this.ctx;
+    const bob = Math.sin(t * 3) * 2.5;
+    const y = sy - 16 + bob;
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    const g = ctx.createRadialGradient(x, y, 0, x, y, 20);
+    g.addColorStop(0, 'rgba(255,230,140,0.55)');
+    g.addColorStop(1, 'rgba(255,230,140,0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(x - 20, y - 20, 40, 40);
+    ctx.restore();
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(Math.sin(t * 2) * 0.15);
+    ctx.scale(1.25, 1.25);
+    drawItem(ctx, item);
+    ctx.restore();
+    if (Math.random() < 0.05 && !this.reducedEffects) this.sparkles.push({ x: x + (Math.random() - 0.5) * 24, y: y + (Math.random() - 0.5) * 16, t: 0 });
+  }
+
+  /**
+   * Light floating particles that give each scene its mood: dust in the yard, fluff in the
+   * housing estates, fireflies in the garden, gold sparks in the palace, sea spray, star dust.
+   */
+  private drawMotes(tier: number, W: number, H: number, dt: number): void {
+    if (this.reducedEffects) return;
+    const kind = tier === 0 ? 0 : tier <= 3 ? 1 : tier <= 5 ? 2 : tier <= 10 ? 3 : tier === 11 ? 4 : 5;
+    const cap = this.lowQuality ? 10 : 22;
+    if (this.motes.length < cap && Math.random() < dt * 6) {
+      const side = Math.random();
+      this.motes.push({
+        x: side < 0.4 ? Math.random() * 70 : side < 0.8 ? W - Math.random() * 70 : Math.random() * W,
+        y: kind === 1 || kind === 4 ? -6 : kind === 3 || kind === 5 ? H + 6 : Math.random() * H,
+        vx: (Math.random() - 0.5) * (kind === 1 ? 30 : 10),
+        vy: kind === 1 ? 14 + Math.random() * 10 : kind === 4 ? 20 : kind === 3 || kind === 5 ? -(10 + Math.random() * 14) : (Math.random() - 0.5) * 8,
+        life: 0,
+        max: 5 + Math.random() * 5,
+        size: 0.8 + Math.random() * 1.6,
+        kind,
+        seed: Math.random() * 10,
+      });
+    }
+    const ctx = this.ctx;
+    ctx.save();
+    this.motes = this.motes.filter((m) => (m.life += dt) < m.max && m.y > -20 && m.y < H + 20);
+    for (const m of this.motes) {
+      m.x += (m.vx + Math.sin(this.clock * 0.8 + m.seed) * 6) * dt;
+      m.y += m.vy * dt;
+      const fade = Math.min(1, m.life / 0.8, (m.max - m.life) / 0.8);
+      if (m.kind === 2 || m.kind === 3 || m.kind === 5) {
+        // Glowing: fireflies pulse slowly, sparks twinkle gently.
+        ctx.globalCompositeOperation = 'lighter';
+        const tw = 0.55 + 0.45 * Math.sin(this.clock * (m.kind === 2 ? 1.6 : 2.4) + m.seed);
+        const color = m.kind === 2 ? '255,236,120' : m.kind === 3 ? '255,215,120' : '200,220,255';
+        const r = m.size * (m.kind === 2 ? 4 : 3);
+        const g = ctx.createRadialGradient(m.x, m.y, 0, m.x, m.y, r);
+        g.addColorStop(0, `rgba(${color},${0.8 * tw * fade})`);
+        g.addColorStop(1, `rgba(${color},0)`);
+        ctx.fillStyle = g;
+        ctx.fillRect(m.x - r, m.y - r, r * 2, r * 2);
+        ctx.globalCompositeOperation = 'source-over';
+      } else {
+        ctx.globalAlpha = fade * (m.kind === 0 ? 0.35 : 0.6);
+        ctx.fillStyle = m.kind === 0 ? '#c9c2b2' : m.kind === 4 ? '#e9fbff' : '#ffffff';
+        ctx.beginPath();
+        ctx.arc(m.x, m.y, m.size, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.globalAlpha = 1;
+      }
+    }
+    ctx.restore();
   }
 
   private faceFor(sim: Sim): Face {

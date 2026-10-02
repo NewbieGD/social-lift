@@ -217,7 +217,7 @@ export class Sim {
     h.y = best.y;
     h.vy = gameConfig.hero.jumpImpulse;
     h.sinceLand = 0;
-    this.events.push({ type: 'land', x: h.x, y: best.y });
+    this.events.push({ type: 'land', x: h.x, y: best.y, id: best.id });
 
     if (best.kind !== 'start' && !this.runStarted) {
       this.runStarted = true;

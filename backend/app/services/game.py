@@ -47,6 +47,9 @@ async def get_or_create_user(session: AsyncSession, caller: Caller) -> User:
             best_all=0,
             best_tier=0,
             total_runs=0,
+            last_tier=0,
+            best_combo=0,
+            total_captures=0,
             profile_deactivated=False,
         )
         session.add(user)
@@ -118,6 +121,9 @@ async def player_stats(session: AsyncSession, user: User) -> dict:
         "best_week": wb.best_score if wb else 0,
         "last_score": user.last_score,
         "total_runs": user.total_runs,
+        "last_tier": user.last_tier or 0,
+        "best_combo": user.best_combo or 0,
+        "total_captures": user.total_captures or 0,
         "rank_all": await rank_all(session, user.best_all, aware(user.best_all_at)),
         "rank_week": await rank_week(session, wid, wb.best_score, aware(wb.achieved_at)) if wb else None,
     }
@@ -211,6 +217,9 @@ async def finish_run(session: AsyncSession, caller: Caller, body: RunFinishIn) -
         user.last_run_at = now
         user.total_runs += 1
         user.best_tier = max(user.best_tier, body.tier)
+        user.last_tier = body.tier
+        user.best_combo = max(user.best_combo or 0, min(body.max_combo, body.captures))
+        user.total_captures = (user.total_captures or 0) + body.captures
         if body.score > user.best_all:
             user.best_all = body.score
             user.best_all_at = now

@@ -99,33 +99,93 @@ export interface MenuData {
   mode: 'loading' | 'online' | 'offline' | 'outside';
 }
 
+const ICON = {
+  play: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.5v13l10.5-6.5z" fill="currentColor"/></svg>',
+  crown: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 18L2 7l5.5 4L12 4l4.5 7L22 7l-1 11z" fill="#FFD640" stroke="#8a5a00" stroke-width="1.2"/><rect x="3" y="18.5" width="18" height="2.5" rx="1" fill="#E8B23A"/></svg>',
+  book: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4.5A2.5 2.5 0 016.5 2H20v17H6.5A2.5 2.5 0 004 21.5z" fill="#5AA8FF"/><path d="M4 21.5A2.5 2.5 0 016.5 19H20v3H6.5A2.5 2.5 0 014 21.5z" fill="#2257B8"/><path d="M8 6h8M8 9.5h6" stroke="#fff" stroke-width="1.6" stroke-linecap="round"/></svg>',
+  gear: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10.3 2h3.4l.5 2.6 2 .9 2.2-1.5 2.4 2.4-1.5 2.2.9 2 2.6.5v3.4l-2.6.5-.9 2 1.5 2.2-2.4 2.4-2.2-1.5-2 .9-.5 2.6h-3.4l-.5-2.6-2-.9-2.2 1.5-2.4-2.4 1.5-2.2-.9-2L2 13.7v-3.4l2.6-.5.9-2L4 5.6 6.4 3.2l2.2 1.5 2-.9z" fill="#B9C1CD"/><circle cx="12" cy="12" r="3.6" fill="#4A5262"/></svg>',
+  mail: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="5" width="20" height="14" rx="3" fill="#38C673"/><path d="M3 7l9 6.5L21 7" fill="none" stroke="#fff" stroke-width="1.8" stroke-linejoin="round"/></svg>',
+  bill: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="6" width="20" height="12" rx="2" fill="#7FCF8A"/><circle cx="12" cy="12" r="3" fill="#3E8C4C"/><rect x="2" y="6" width="20" height="12" rx="2" fill="none" stroke="#3E8C4C" stroke-width="1.5"/></svg>',
+  floor: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="2" width="16" height="20" rx="2" fill="#8D96A6"/><rect x="6" y="4" width="5.5" height="16" fill="#C7CCD6"/><rect x="12.5" y="4" width="5.5" height="16" fill="#C7CCD6"/><path d="M12 6.5l-2.4 3h4.8z" fill="#FFB547"/></svg>',
+};
+
+function chip(icon: string, label: string, value: string, i: number): string {
+  return `<div class="chip" style="--i:${i}">${icon}<span class="chip-text"><span class="chip-label">${esc(label)}</span><b>${esc(value)}</b></span></div>`;
+}
+
 export function menuView(d: MenuData): string {
-  const lines: string[] = [];
   const s = d.stats;
-  if (!s || (s.total_runs === 0 && !s.best_all)) {
-    lines.push(`<p class="card-main">${ru.menu.firstRun}</p>`);
-  } else {
-    if (s.last_score !== null) lines.push(`<p class="card-main">${ru.menu.lastRun(s.last_score)}</p>`);
-    if (s.rank_all) lines.push(`<p>${ru.menu.rank(s.rank_all)}</p>`);
-    lines.push(`<p>${esc(ru.menu.bestTier(ru.tiers[s.best_tier] ?? ru.tiers[0]))}</p>`);
-  }
+  const fresh = !s || (s.total_runs === 0 && !s.best_all);
+  const tier = s?.last_tier ?? 0;
+  const chips = fresh
+    ? `<div class="chip wide" style="--i:0">${ICON.floor}<span class="chip-text"><b>${ru.menu.firstRun}</b></span></div>`
+    : [
+        chip(ICON.crown, ru.menu.chipRank, s?.rank_all ? String(s.rank_all) : ru.wardrobe.none, 0),
+        chip(ICON.bill, ru.menu.chipLast, String(s?.last_score ?? 0), 1),
+        chip(ICON.floor, ru.menu.chipTier, ru.tiers[tier] ?? ru.tiers[0], 2),
+      ].join('');
   let status = '';
   if (d.mode === 'offline') {
     status = `<p class="status warn">${ru.menu.offline}</p><button class="link-btn" data-action="reconnect">${ru.common.retry}</button>`;
   } else if (d.mode === 'outside') {
-    status = `<p class="status">${ru.menu.outside}</p>`;
+    status = `<p class="status small">${ru.menu.outside}</p>`;
   }
-  return `<div class="menu">
-    <h1 class="logo">${ru.appTitle}</h1>
-    <div class="menu-card">${lines.join('')}</div>
-    <div class="menu-buttons stagger">
-      <button class="primary big" data-action="play">${ru.common.play}</button>
-      <button class="secondary" data-action="open" data-arg="leaders">${ru.menu.leaders}</button>
-      <button class="secondary" data-action="open" data-arg="rules">${ru.menu.rules}</button>
-      <button class="secondary" data-action="open" data-arg="settings">${ru.menu.settings}</button>
-      <button class="secondary" data-action="open" data-arg="contact">${ru.menu.contact}</button>
+  return `<div class="menu2">
+    <p class="mini-logo">${ru.appTitle}</p>
+    <div class="showcase">
+      <button class="hero-stage" data-action="open" data-arg="wardrobe" aria-label="${ru.wardrobe.title}">
+        <span class="stage-glow" aria-hidden="true"></span>
+        <canvas id="menuHero" aria-hidden="true"></canvas>
+        <span class="tap-hint">${ru.wardrobe.hint}</span>
+      </button>
+      <div class="chips">${chips}</div>
     </div>
-    ${status}
+    <div class="menu-actions">
+      <button class="primary big play" data-action="play">${ICON.play}<span>${ru.common.play}</span></button>
+      <div class="grid2 stagger">
+        <button class="tile" data-action="open" data-arg="leaders">${ICON.crown}<span>${ru.menu.leaders}</span></button>
+        <button class="tile" data-action="open" data-arg="rules">${ICON.book}<span>${ru.menu.rules}</span></button>
+        <button class="tile" data-action="open" data-arg="settings">${ICON.gear}<span>${ru.menu.settings}</span></button>
+        <button class="tile" data-action="open" data-arg="contact">${ICON.mail}<span>${ru.menu.contactShort}</span></button>
+      </div>
+      ${status}
+    </div>
+  </div>`;
+}
+
+export function wardrobeView(s: Stats | null): string {
+  const tier = s?.last_tier ?? 0;
+  const best = s?.best_tier ?? 0;
+  const v = (n: number | null | undefined): string => (n === null || n === undefined || n === 0 ? ru.wardrobe.none : String(n));
+  const stats: [string, string][] = [
+    [ru.wardrobe.best, v(s?.best_all)],
+    [ru.wardrobe.rankWeek, v(s?.rank_week)],
+    [ru.wardrobe.rankAll, v(s?.rank_all)],
+    [ru.wardrobe.runs, v(s?.total_runs)],
+    [ru.wardrobe.combo, v(s?.best_combo)],
+    [ru.wardrobe.captures, v(s?.total_captures)],
+  ];
+  return `${header(ru.wardrobe.title)}<div class="scroll wardrobe">
+    <div class="ward-top">
+      <div class="ward-stage"><span class="stage-glow"></span><canvas id="wardHero" aria-hidden="true"></canvas></div>
+      <div class="ward-info">
+        <p class="ward-look">${esc(ru.wardrobe.look(ru.tiers[tier]))}</p>
+        <p class="muted">${ru.wardrobe.bestTier}: ${esc(ru.tiers[best])}</p>
+        <dl class="ward-stats stagger">${stats.map(([k, val]) => `<div><dt>${k}</dt><dd>${val}</dd></div>`).join('')}</dl>
+      </div>
+    </div>
+    <h3>${ru.wardrobe.collection}</h3>
+    <div class="looks stagger">
+      ${ru.tiers
+        .map(
+          (name, i) =>
+            `<div class="look ${i <= best ? '' : 'locked'}" title="${esc(i <= best ? name : ru.wardrobe.locked)}">
+              <canvas data-look="${i}" aria-hidden="true"></canvas>
+              <span>${esc(i <= best ? name : ru.wardrobe.locked)}</span>
+            </div>`,
+        )
+        .join('')}
+    </div>
   </div>`;
 }
 

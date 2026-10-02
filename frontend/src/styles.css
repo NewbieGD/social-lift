@@ -1878,3 +1878,427 @@ body.reduced .paper-headline span,
 body.reduced .floor-arrow {
   animation: none;
 }
+
+/* ===================== Menu 2.0 ===================== */
+
+.screen.menu-screen {
+  background: linear-gradient(180deg, rgba(8, 11, 16, 0) 0%, rgba(8, 11, 16, 0.15) 40%, rgba(8, 11, 16, 0.85) 100%);
+}
+
+.menu2 {
+  display: flex;
+  flex-direction: column;
+  width: min(420px, 100%);
+  min-height: 100%;
+  margin: 0 auto;
+}
+
+.mini-logo {
+  margin: 2px 0 0;
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  color: rgba(245, 241, 230, 0.85);
+  text-shadow: 0 2px 0 rgba(0, 0, 0, 0.35);
+}
+
+.showcase {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 1.15fr 1fr;
+  align-items: center;
+  gap: 8px;
+}
+
+.hero-stage {
+  position: relative;
+  height: min(46vh, 330px);
+  min-height: 190px;
+  border: 0;
+  padding: 0;
+  background: none;
+  cursor: pointer;
+  animation: stage-in 0.6s cubic-bezier(0.34, 1.4, 0.64, 1) both;
+}
+
+.hero-stage canvas,
+.ward-stage canvas {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.stage-glow {
+  position: absolute;
+  left: 10%;
+  right: 10%;
+  bottom: 4%;
+  height: 70%;
+  border-radius: 50%;
+  background: radial-gradient(closest-side, rgba(255, 220, 140, 0.35), rgba(255, 220, 140, 0));
+  animation: breathe-glow 3s ease-in-out infinite;
+}
+
+@keyframes breathe-glow {
+  50% {
+    opacity: 0.55;
+    transform: scale(0.94);
+  }
+}
+
+@keyframes stage-in {
+  from {
+    opacity: 0;
+    transform: translateY(30px) scale(0.9);
+  }
+}
+
+.tap-hint {
+  position: absolute;
+  left: 50%;
+  top: 4px;
+  padding: 3px 9px;
+  border-radius: 10px;
+  background: rgba(10, 14, 20, 0.55);
+  color: var(--ink-dim);
+  font-size: 11px;
+  white-space: nowrap;
+  transform: translateX(-50%);
+  animation: hint-bob 2.4s ease-in-out infinite;
+}
+
+@keyframes hint-bob {
+  50% {
+    transform: translate(-50%, 3px);
+  }
+}
+
+.hero-stage:active canvas {
+  transform: scale(0.97);
+}
+
+.chips {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 14px;
+  background: rgba(14, 18, 26, 0.82);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+  animation: chip-in 0.5s cubic-bezier(0.34, 1.4, 0.64, 1) both;
+  animation-delay: calc(0.15s + var(--i) * 0.1s);
+}
+
+.chip svg {
+  flex: none;
+  width: 26px;
+  height: 26px;
+}
+
+.chip-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.chip-label {
+  font-size: 11px;
+  color: var(--ink-dim);
+}
+
+.chip b {
+  font-size: 16px;
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chip.wide b {
+  white-space: normal;
+}
+
+@keyframes chip-in {
+  from {
+    opacity: 0;
+    transform: translateX(24px);
+  }
+}
+
+.menu-actions {
+  flex: none;
+  padding-top: 6px;
+}
+
+button.primary.play {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 58px;
+  font-size: 22px;
+  position: relative;
+  overflow: hidden;
+  animation: play-pulse 2.4s ease-in-out infinite;
+}
+
+button.primary.play svg {
+  width: 26px;
+  height: 26px;
+}
+
+/* A light sheen runs across the Play button. */
+button.primary.play::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 40%;
+  left: -50%;
+  background: linear-gradient(100deg, rgba(255, 255, 255, 0), rgba(255, 255, 255, 0.55), rgba(255, 255, 255, 0));
+  animation: sheen 3.2s ease-in-out infinite;
+}
+
+@keyframes sheen {
+  0%,
+  55% {
+    transform: translateX(0);
+  }
+  100% {
+    transform: translateX(400%);
+  }
+}
+
+@keyframes play-pulse {
+  50% {
+    transform: scale(1.025);
+  }
+}
+
+.grid2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.tile {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 52px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 16px;
+  background: rgba(24, 30, 42, 0.92);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.08),
+    0 4px 0 rgba(0, 0, 0, 0.3);
+  color: var(--ink);
+  font: 700 15px/1 var(--font);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: transform 0.12s;
+}
+
+.tile svg {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  transition: transform 0.3s cubic-bezier(0.34, 1.6, 0.64, 1);
+}
+
+.tile:active {
+  transform: translateY(3px) scale(0.97);
+}
+
+.tile:active svg {
+  transform: rotate(-12deg) scale(1.15);
+}
+
+.status.small {
+  font-size: 12px;
+  margin: 8px 0 0;
+}
+
+/* ===================== Wardrobe ===================== */
+
+.wardrobe h3 {
+  margin: 18px 0 10px;
+  font-size: 15px;
+}
+
+.ward-top {
+  display: grid;
+  grid-template-columns: 1fr 1.1fr;
+  gap: 10px;
+  align-items: center;
+}
+
+.ward-stage {
+  position: relative;
+  height: 250px;
+}
+
+.ward-look {
+  margin: 0 0 4px;
+  font-size: 18px;
+  font-weight: 800;
+}
+
+.ward-stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin: 10px 0 0;
+}
+
+.ward-stats div {
+  padding: 8px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.ward-stats dt {
+  font-size: 11px;
+  color: var(--ink-dim);
+}
+
+.ward-stats dd {
+  margin: 2px 0 0;
+  font-size: 17px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+.looks {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(86px, 1fr));
+  gap: 8px;
+  padding-bottom: 20px;
+}
+
+.look {
+  padding: 6px 4px 8px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.06);
+  text-align: center;
+}
+
+.look canvas {
+  display: block;
+  width: 100%;
+  height: 96px;
+}
+
+.look span {
+  display: block;
+  margin-top: 4px;
+  font-size: 11px;
+  line-height: 1.25;
+  color: var(--ink);
+}
+
+.look.locked span {
+  color: var(--ink-dim);
+}
+
+/* ===================== Suit-up caption and photo flashes ===================== */
+
+.caption {
+  position: absolute;
+  left: 50%;
+  bottom: 18%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 8px 18px;
+  border-radius: 14px;
+  background: rgba(10, 12, 18, 0.78);
+  box-shadow: inset 0 0 0 1.5px rgba(255, 214, 64, 0.6);
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transform: translate(-50%, 16px) scale(0.92);
+  transition:
+    opacity 0.3s,
+    transform 0.45s cubic-bezier(0.34, 1.4, 0.64, 1);
+}
+
+.caption.on {
+  opacity: 1;
+  transform: translate(-50%, 0) scale(1);
+}
+
+.cap-label {
+  font-size: 12px;
+  color: var(--accent);
+  font-weight: 800;
+}
+
+.cap-items {
+  font-size: 17px;
+  font-weight: 800;
+}
+
+.confetti .flash {
+  position: absolute;
+  width: 46px;
+  height: 46px;
+  margin: -23px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(255, 255, 245, 0.95), rgba(255, 255, 245, 0) 70%);
+  opacity: 0;
+  animation: photo 0.45s ease-out var(--d) forwards;
+}
+
+@keyframes photo {
+  20% {
+    opacity: 1;
+    transform: scale(1.2);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(0.8);
+  }
+}
+
+body.reduced .stage-glow,
+body.reduced .tap-hint,
+body.reduced button.primary.play,
+body.reduced button.primary.play::after,
+body.reduced .chip,
+body.reduced .hero-stage {
+  animation: none;
+}
+
+body.in-menu #controls {
+  visibility: hidden;
+}
+
+.showcase {
+  grid-template-columns: 1.35fr 1fr;
+}
+.tile {
+  gap: 6px;
+  padding: 0 10px;
+  font-size: clamp(12px, 3.9vw, 15px);
+}
+@media (max-width: 360px) {
+  .tile svg {
+    width: 22px;
+    height: 22px;
+  }
+  .chip b {
+    font-size: 14px;
+  }
+}

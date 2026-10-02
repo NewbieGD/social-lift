@@ -45,6 +45,9 @@ class User(Base):
     last_score: Mapped[int | None] = mapped_column(Integer)
     last_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     total_runs: Mapped[int] = mapped_column(Integer, default=0)
+    last_tier: Mapped[int] = mapped_column(Integer, default=0)
+    best_combo: Mapped[int] = mapped_column(Integer, default=0)
+    total_captures: Mapped[int] = mapped_column(Integer, default=0)
 
     runs: Mapped[list[Run]] = relationship(back_populates="user", cascade="all, delete-orphan", passive_deletes=True)
     weeks: Mapped[list[WeekBest]] = relationship(cascade="all, delete-orphan", passive_deletes=True)
