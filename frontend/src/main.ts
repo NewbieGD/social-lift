@@ -20,9 +20,11 @@ const hintEl = $('hint');
 const toastEl = $('toast');
 const walletEl = scoreEl.parentElement as HTMLElement;
 const buttonsEl = $('buttons');
+const controlsEl = $('controls');
+const padEl = $('pad');
 
 const renderer = new Renderer(canvas);
-const input = new InputController(field);
+const input = new InputController([field, padEl]);
 const isTouch = window.matchMedia('(pointer: coarse)').matches;
 
 let sim = new Sim(randomSeed(), 700);
@@ -49,7 +51,7 @@ function layout(): void {
   renderer.resize(cssW, cssH, scale);
   input.scale = scale;
   sim.setViewHeight(viewH);
-  buttonsEl.style.maxWidth = `${Math.max(cssW, 300)}px`;
+  controlsEl.style.maxWidth = `${Math.max(cssW, 300)}px`;
 }
 
 new ResizeObserver(layout).observe(field);
@@ -57,7 +59,7 @@ window.addEventListener('orientationchange', () => setTimeout(layout, 200));
 
 // ---------- Light buttons ----------
 
-const LIGHTS: LightId[] = ['yellow', 'blue', 'green', 'red'];
+const LIGHTS: LightId[] = ['red', 'yellow', 'blue', 'green'];
 const ICONS: Record<LightId, string> = {
   yellow: '<path d="M12 2l2.9 6.6 7.1.6-5.4 4.7 1.6 7L12 17.3 5.8 20.9l1.6-7L2 9.2l7.1-.6z"/>',
   blue: '<path d="M12 2l8 10-8 10-8-10z"/>',
@@ -93,7 +95,7 @@ function renderButtons(): void {
     b.classList.toggle('locked', locked);
     b.classList.toggle('active', sim.light === light);
     const label = light === 'red' ? 'Щит' : `+${gameConfig.colors[light as ColorId].points}`;
-    const html = `<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">${locked ? LOCK : ICONS[light]}</svg><span>${locked ? ru.hud.locked : label}</span>`;
+    const html = `<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">${locked ? LOCK : ICONS[light]}</svg><span>${label}</span>`;
     if (b.dataset.html !== html) {
       b.innerHTML = html;
       b.dataset.html = html;
@@ -241,6 +243,27 @@ $('startRed').textContent = ru.start.redHint;
 $('startBtn').textContent = ru.start.play;
 $('protoNote').textContent = ru.proto;
 $('startBtn').addEventListener('click', startRun);
+
+// Which side the color buttons sit on. Default: left thumb on colors, right thumb steers.
+type Side = 'left' | 'right';
+function readSide(): Side {
+  try {
+    return localStorage.getItem('sl_side') === 'right' ? 'right' : 'left';
+  } catch {
+    return 'left';
+  }
+}
+function applySide(side: Side): void {
+  controlsEl.classList.toggle('mirror', side === 'right');
+  $('sideBtn').textContent = side === 'left' ? ru.start.sideLeft : ru.start.sideRight;
+  try {
+    localStorage.setItem('sl_side', side);
+  } catch {
+    /* storage unavailable: ignore */
+  }
+}
+applySide(readSide());
+$('sideBtn').addEventListener('click', () => applySide(readSide() === 'left' ? 'right' : 'left'));
 $('againBtn').addEventListener('click', startRun);
 $('pauseBtn').addEventListener('click', pause);
 $('resumeBtn').addEventListener('click', resume);

@@ -23,14 +23,21 @@ export class InputController {
   /** Pixels per world unit, updated on resize. */
   scale = 1;
 
-  constructor(private field: HTMLElement) {
+  private steerSurface: HTMLElement | null = null;
+
+  constructor(surfaces: HTMLElement[]) {
     window.addEventListener('keydown', this.onKeyDown);
     window.addEventListener('keyup', this.onKeyUp);
     window.addEventListener('blur', () => this.reset());
-    field.addEventListener('pointerdown', this.onPointerDown);
-    field.addEventListener('pointermove', this.onPointerMove);
-    field.addEventListener('pointerup', this.onPointerUp);
-    field.addEventListener('pointercancel', this.onPointerUp);
+    for (const el of surfaces) this.addSurface(el);
+  }
+
+  /** Any element that should accept steering drags (play field, side pad). */
+  addSurface(el: HTMLElement): void {
+    el.addEventListener('pointerdown', this.onPointerDown);
+    el.addEventListener('pointermove', this.onPointerMove);
+    el.addEventListener('pointerup', this.onPointerUp);
+    el.addEventListener('pointercancel', this.onPointerUp);
   }
 
   /** Called by light buttons and keyboard shortcuts. */
@@ -103,9 +110,11 @@ export class InputController {
   private onPointerDown = (e: PointerEvent): void => {
     if (this.steerPointer !== null) return;
     this.steerPointer = e.pointerId;
-    this.field.setPointerCapture?.(e.pointerId);
+    const el = e.currentTarget as HTMLElement;
+    this.steerSurface = el;
+    el.setPointerCapture?.(e.pointerId);
     if (this.mode === 'zones') {
-      const rect = this.field.getBoundingClientRect();
+      const rect = el.getBoundingClientRect();
       this.zoneDir = e.clientX < rect.left + rect.width / 2 ? -1 : 1;
     } else {
       this.dragStartPx = e.clientX;
@@ -118,7 +127,7 @@ export class InputController {
   private onPointerMove = (e: PointerEvent): void => {
     if (e.pointerId !== this.steerPointer) return;
     if (this.mode === 'zones') {
-      const rect = this.field.getBoundingClientRect();
+      const rect = (this.steerSurface ?? (e.currentTarget as HTMLElement)).getBoundingClientRect();
       this.zoneDir = e.clientX < rect.left + rect.width / 2 ? -1 : 1;
       return;
     }
@@ -136,6 +145,7 @@ export class InputController {
   private onPointerUp = (e: PointerEvent): void => {
     if (e.pointerId !== this.steerPointer) return;
     this.steerPointer = null;
+    this.steerSurface = null;
     this.dragTargetX = null;
     this.zoneDir = 0;
   };

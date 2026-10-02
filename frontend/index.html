@@ -35,7 +35,15 @@
             <div id="toast" class="toast"></div>
           </div>
         </div>
-        <div id="buttons"></div>
+        <div id="controls">
+          <div id="buttons"></div>
+          <div id="pad" aria-hidden="true">
+            <svg viewBox="0 0 64 24" width="64" height="24">
+              <path d="M10 12l8-7v14zM54 12l-8-7v14z" fill="currentColor" />
+              <rect x="22" y="10.5" width="20" height="3" rx="1.5" fill="currentColor" />
+            </svg>
+          </div>
+        </div>
       </div>
 
       <div id="startScreen" class="overlay">
@@ -45,6 +53,7 @@
           <p id="startControls" class="muted"></p>
           <p id="startRed" class="muted"></p>
           <button id="startBtn" class="primary"></button>
+          <button id="sideBtn" class="secondary"></button>
           <p id="protoNote" class="note"></p>
         </div>
       </div>
