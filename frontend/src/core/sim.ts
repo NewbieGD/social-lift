@@ -13,6 +13,8 @@ import type { DeathReason, Hero, Platform, SimEvent, SimInput } from './types';
 export const DT = 1 / gameConfig.sim.hz;
 
 const START_Y = 120;
+const TUTORIAL_WARN_SEC = 1.2;
+const TUTORIAL_RED_SEC = 4;
 
 /** Compact input record: [tick, axis * 8 rounded, press code]. */
 export type InputRecord = [number, number, number];
@@ -52,13 +54,18 @@ export class Sim {
   private gen: Generator;
   private phaseRng: Rng;
 
-  constructor(seed: number, viewH: number) {
+  /** Guided tutorial: no wave, no random hazards, red phases only when forced. */
+  readonly tutorial: boolean;
+
+  constructor(seed: number, viewH: number, opts: { tutorial?: boolean } = {}) {
     this.seed = seed >>> 0;
+    this.tutorial = !!opts.tutorial;
     this.viewH = viewH;
     const W = gameConfig.world.width;
     const genRng = new Rng(this.seed);
     this.phaseRng = new Rng(this.seed ^ 0x9e3779b9);
     this.gen = new Generator(genRng, W / 2, START_Y);
+    this.gen.noHazards = this.tutorial;
     this.platforms.push(this.gen.makeStart(W / 2, START_Y));
     this.hero = {
       x: W / 2,
@@ -184,10 +191,11 @@ export class Sim {
         this.events.push({ type: 'warn', id: p.id });
       } else if (p.phase === 'warn') {
         p.phase = 'red';
-        p.phaseLen = p.phaseT = this.phaseRng.range(t.redSec[0], t.redSec[1]);
+        p.phaseLen = p.phaseT = this.tutorial ? TUTORIAL_RED_SEC : this.phaseRng.range(t.redSec[0], t.redSec[1]);
       } else {
         p.phase = 'normal';
         p.phaseLen = p.phaseT = this.phaseRng.range(t.phaseInterval[0], t.phaseInterval[1]);
+        if (this.tutorial) p.phases = false;
       }
     }
   }
@@ -276,7 +284,31 @@ export class Sim {
     }
   }
 
+  /**
+   * Tutorial helper: starts a long, clearly telegraphed red phase on the nearest
+   * colored platform above the hero. Returns false if there is none yet.
+   */
+  forceRedPhase(): boolean {
+    let best: Platform | null = null;
+    for (const p of this.platforms) {
+      if (p.kind !== 'color' || p.y < this.hero.y + 40) continue;
+      if (!best || p.y < best.y) best = p;
+    }
+    if (!best) return false;
+    best.phases = true;
+    best.phase = 'warn';
+    best.phaseLen = best.phaseT = TUTORIAL_WARN_SEC;
+    this.events.push({ type: 'warn', id: best.id });
+    return true;
+  }
+
+  /** True while any platform is warning or red (tutorial uses it to re-trigger). */
+  get hasRedPhase(): boolean {
+    return this.platforms.some((p) => p.phase !== 'normal');
+  }
+
   private updateWave(): void {
+    if (this.tutorial) return;
     if (!this.waveActive && this.runStarted && this.runTime >= gameConfig.wave.delaySec) {
       this.waveActive = true;
     }

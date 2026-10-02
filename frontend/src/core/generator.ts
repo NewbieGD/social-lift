@@ -37,6 +37,9 @@ export class Generator {
   private sameCount = 0;
   private lastWasRed = false;
 
+  /** Tutorial mode: no red platforms and no random red phases. */
+  noHazards = false;
+
   constructor(private rng: Rng, startX: number, startY: number) {
     this.anchorX = startX;
     this.anchorY = startY;
@@ -72,7 +75,7 @@ export class Generator {
     const W = gameConfig.world.width;
 
     // Base red platform: placed beside the safe path, never on it.
-    if (!this.lastWasRed && t.redChance > 0 && this.rng.chance(t.redChance)) {
+    if (!this.noHazards && !this.lastWasRed && t.redChance > 0 && this.rng.chance(t.redChance)) {
       const d1 = this.rng.range(cfg.redGap[0], cfg.redGap[1]);
       const d2 = this.rng.range(cfg.redGap[0], cfg.redGap[1]);
       const reach = safeReachX(d1 + d2);
@@ -118,7 +121,7 @@ export class Generator {
       const y = main.y + this.rng.range(-22, 30);
       const clash = all.some((p) => Math.abs(p.y - y) < 40 && Math.abs(p.x - x) < cfg.width + 18);
       if (clash) continue;
-      if (t.redChance > 0 && this.rng.chance(Math.min(0.6, t.redChance * 1.6))) {
+      if (!this.noHazards && t.redChance > 0 && this.rng.chance(Math.min(0.6, t.redChance * 1.6))) {
         // A red platform must never hang right above another platform:
         // bouncing in place would otherwise land on it without warning.
         const overHead = all.some((p) => y > p.y && y - p.y < 170 && Math.abs(p.x - x) < cfg.width + 12);
@@ -132,7 +135,7 @@ export class Generator {
   private makeColored(x: number, y: number, tier: number): Platform {
     const color = this.pickColor(tier);
     const t = gameConfig.tiers[tier];
-    const phases = this.rng.chance(t.phaseChance);
+    const phases = !this.noHazards && this.rng.chance(t.phaseChance);
     return this.make(x, y, 'color', color, phases, tier);
   }
 

@@ -67,6 +67,8 @@ export class Renderer {
   private flashlightColor: [number, number, number] = [235, 235, 225];
   private auraPulse = 0;
   reducedEffects = false;
+  /** Stronger shapes and patterns so colors never carry meaning alone. */
+  colorblind = false;
 
   constructor(private canvas: HTMLCanvasElement) {
     const ctx = canvas.getContext('2d', { alpha: false });
@@ -282,8 +284,36 @@ export class Renderer {
       ctx.stroke();
     }
 
-    if (icon) drawIcon(ctx, icon, x + pw / 2, sy + ph / 2, 5, 'rgba(255,255,255,0.92)');
+    if (this.colorblind && icon && icon !== 'red') this.drawPattern(icon, x, sy, pw, ph);
+    if (icon) drawIcon(ctx, icon, x + pw / 2, sy + ph / 2, this.colorblind ? 6.5 : 5, 'rgba(255,255,255,0.95)');
     ctx.globalAlpha = 1;
+  }
+
+  private drawPattern(color: ColorId, x: number, y: number, w: number, h: number): void {
+    const ctx = this.ctx;
+    ctx.save();
+    roundRect(ctx, x, y, w, h, 7);
+    ctx.clip();
+    ctx.fillStyle = 'rgba(0,0,0,0.28)';
+    if (color === 'yellow') {
+      for (let i = 6; i < w; i += 9) {
+        ctx.beginPath();
+        ctx.arc(x + i, y + h / 2, 1.6, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    } else if (color === 'blue') {
+      for (let i = -h; i < w; i += 8) {
+        ctx.beginPath();
+        ctx.moveTo(x + i, y + h);
+        ctx.lineTo(x + i + 3, y + h);
+        ctx.lineTo(x + i + 3 + h, y);
+        ctx.lineTo(x + i + h, y);
+        ctx.fill();
+      }
+    } else {
+      for (let i = 4; i < w; i += 8) ctx.fillRect(x + i, y, 2.5, h);
+    }
+    ctx.restore();
   }
 
   private drawWave(sim: Sim, toY: (y: number) => number, W: number, H: number): void {

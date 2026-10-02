@@ -23,7 +23,7 @@
               </div>
               <div class="hud-right">
                 <span id="tier" class="tier"></span>
-                <button id="pauseBtn" class="icon-btn" aria-label="Пауза">
+                <button id="pauseBtn" class="icon-btn">
                   <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
                     <rect x="6" y="5" width="4" height="14" rx="1.5" fill="currentColor" />
                     <rect x="14" y="5" width="4" height="14" rx="1.5" fill="currentColor" />
@@ -33,6 +33,7 @@
             </div>
             <div id="hint" class="hint"></div>
             <div id="toast" class="toast"></div>
+            <button id="skipBtn" class="skip-btn" data-action="skipTutorial"></button>
           </div>
         </div>
         <div id="controls">
@@ -40,45 +41,8 @@
         </div>
       </div>
 
-      <div id="startScreen" class="overlay">
-        <div class="panel">
-          <h1 id="startTitle"></h1>
-          <p id="startLead"></p>
-          <p id="startControls" class="muted"></p>
-          <p id="startRed" class="muted"></p>
-          <div class="controls-picker"></div>
-          <p id="netStatus" class="status"></p>
-          <label id="consentBox" class="consent hidden">
-            <input type="checkbox" id="consentCheck" />
-            <span id="consentText"></span>
-          </label>
-          <button id="startBtn" class="primary"></button>
-          <button id="retryBtn" class="secondary hidden"></button>
-          <p id="ageNote" class="note"></p>
-        </div>
-      </div>
-
-      <div id="pauseScreen" class="overlay hidden">
-        <div class="panel">
-          <h2>Пауза</h2>
-          <div class="controls-picker"></div>
-          <button id="resumeBtn" class="primary">Продолжить</button>
-          <button id="restartBtn" class="secondary">Начать заново</button>
-        </div>
-      </div>
-
-      <div id="resultScreen" class="overlay hidden">
-        <div class="panel">
-          <p class="muted" id="resultReason"></p>
-          <p class="headline-label" id="resultLabel"></p>
-          <h2 id="resultTier"></h2>
-          <div class="big-score" id="resultScore">0</div>
-          <div class="record hidden" id="resultRecord"></div>
-          <p class="rank" id="resultRank"></p>
-          <dl class="stats" id="resultStats"></dl>
-          <button id="againBtn" class="primary"></button>
-        </div>
-      </div>
+      <div id="screens"></div>
+      <div id="countdown" class="countdown" aria-live="polite"></div>
     </div>
     <script type="module" src="/src/main.ts"></script>
   </body>

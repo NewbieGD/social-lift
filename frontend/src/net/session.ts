@@ -1,6 +1,6 @@
 // Server session: bootstrap, consent, runs (with prefetch and retry queue), settings sync.
 // The server is the source of truth; localStorage is only a cache.
-import { RUN_START_TIMEOUT_MS } from '../config';
+import { LEADERBOARD_CACHE_MS, RUN_START_TIMEOUT_MS } from '../config';
 import { isInVk } from '../platform/vk';
 import { api, ApiError } from './api';
 
@@ -59,6 +59,24 @@ export interface FinishResult {
   prev_rank_week: number | null;
 }
 
+export interface LeaderRow {
+  rank: number;
+  user_id: number;
+  name: string | null;
+  photo: string | null;
+  deactivated: boolean;
+  score: number;
+}
+
+export interface Leaderboard {
+  scope: 'week' | 'all';
+  week_id: string;
+  reset_at: number;
+  server_time: number;
+  rows: LeaderRow[];
+  me: { score: number; rank: number | null; next_rank: number | null; gap_to_next: number | null };
+}
+
 export type Mode = 'loading' | 'online' | 'offline' | 'outside';
 
 const QUEUE_KEY = 'sl_pending_runs';
@@ -69,6 +87,8 @@ export class Session {
   data: Bootstrap | null = null;
   private prefetched: RunTicket | null = null;
   private prefetching: Promise<RunTicket | null> | null = null;
+
+  private lbCache = new Map<string, { at: number; data: Leaderboard }>();
 
   get ranked(): boolean {
     return this.mode === 'online' && !!this.data?.flags.consent_ok;
@@ -141,9 +161,38 @@ export class Session {
     }
   }
 
-  async saveSettings(settings: Record<string, string | number | boolean>): Promise<void> {
+  async leaderboard(scope: 'week' | 'all', force = false): Promise<Leaderboard> {
+    const hit = this.lbCache.get(scope);
+    if (!force && hit && Date.now() - hit.at < LEADERBOARD_CACHE_MS) return hit.data;
+    const data = await api<Leaderboard>('GET', `/leaderboard?scope=${scope}`);
+    this.lbCache.set(scope, { at: Date.now(), data });
+    return data;
+  }
+
+  async completeTutorial(): Promise<void> {
+    if (this.data) this.data.flags.tutorial_done = true;
     if (this.mode !== 'online') return;
-    const updated_at = Date.now();
+    try {
+      await api('POST', '/tutorial/complete');
+    } catch {
+      /* local flag is enough until the next bootstrap */
+    }
+  }
+
+  async deleteMe(): Promise<void> {
+    await api('DELETE', '/me');
+    this.data = null;
+    this.prefetched = null;
+    this.lbCache.clear();
+    try {
+      localStorage.removeItem(QUEUE_KEY);
+    } catch {
+      /* ignore */
+    }
+  }
+
+  async saveSettings(settings: Record<string, string | number | boolean>, updated_at: number): Promise<void> {
+    if (this.mode !== 'online') return;
     try {
       await api('PUT', '/settings', { settings, updated_at });
       if (this.data) {
@@ -157,6 +206,7 @@ export class Session {
 
   private applyResult(r: FinishResult): void {
     if (!this.data || r.status !== 'finished') return;
+    this.lbCache.clear();
     const s = this.data.stats;
     s.best_all = r.best_all;
     s.best_tier = r.best_tier;

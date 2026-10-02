@@ -108,6 +108,8 @@ export class InputController {
   };
 
   private onPointerDown = (e: PointerEvent): void => {
+    // Buttons on the field (pause, skip, floating shield) handle their own taps.
+    if ((e.target as HTMLElement).closest('button')) return;
     if (this.steerPointer !== null) return;
     this.steerPointer = e.pointerId;
     const el = e.currentTarget as HTMLElement;
