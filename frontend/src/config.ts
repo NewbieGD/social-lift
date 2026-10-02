@@ -2,7 +2,7 @@
 export const API_BASE_URL = 'https://sociallift1-vkgamer.mia0.amvera.tech';
 
 /** VK community or profile page for support (only VK pages are allowed). Empty until created. */
-export const SUPPORT_URL = '';
+export const SUPPORT_URL = 'https://vk.ru/club241338960';
 
 /** Leaderboard rows open the player's VK profile. */
 export const PROFILE_URL = 'https://vk.ru/id';

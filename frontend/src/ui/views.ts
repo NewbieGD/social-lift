@@ -83,6 +83,15 @@ export function docView(kind: 'terms' | 'privacy' | 'rules'): string {
   return `${header(doc.title)}<div class="scroll doc">${sections(doc.sections)}</div>`;
 }
 
+export function preparingView(): string {
+  return `<div class="doors" aria-hidden="true"><span class="door left"></span><span class="door right"></span></div>
+  <div class="center-col prep">
+    <p class="prep-floor">${ru.loading.floors}</p>
+    <div class="progress"><div class="progress-fill timed"></div></div>
+    <p class="status">${ru.loading.preparing}</p>
+  </div>`;
+}
+
 // ---------- Menu ----------
 
 export interface MenuData {
@@ -293,9 +302,13 @@ export function contactView(hasLink: boolean, playerId: number | null): string {
 
 // ---------- In-run ----------
 
-export function pauseView(): string {
+export function pauseView(s: Settings): string {
   return `<div class="panel stagger">
     <h2>${ru.pause.title}</h2>
+    <div class="pause-sound">
+      ${toggle('music', ru.settings.music, s.music)}
+      ${slider('sfxVol', ru.settings.sfxVol, s.sfxVol, 0, 1, 0.05)}
+    </div>
     <button class="primary" data-action="resume">${ru.pause.resume}</button>
     <button class="secondary" data-action="open" data-arg="rules">${ru.pause.rules}</button>
     <button class="secondary" data-action="open" data-arg="settings">${ru.pause.settings}</button>
@@ -361,7 +374,7 @@ export function tutorialDoneView(): string {
 
 export type StubKind = 'offline' | 'server' | 'maintenance' | 'unsupported';
 
-export function stubView(kind: StubKind): string {
+export function stubView(kind: StubKind, code: string | null): string {
   const t = ru.stub;
   const map: Record<StubKind, [string, string]> = {
     offline: [t.offlineTitle, t.offlineText],
@@ -375,5 +388,6 @@ export function stubView(kind: StubKind): string {
     <p>${text}</p>
     ${kind === 'unsupported' ? '' : `<button class="primary" data-action="retryBoot">${ru.common.retry}</button>`}
     ${kind === 'offline' || kind === 'server' ? `<button class="secondary" data-action="playOffline">${t.playOffline}</button>` : ''}
+    ${code ? `<p class="note">${esc(t.errorCode(code))}</p>` : ''}
   </div>`;
 }

@@ -68,6 +68,29 @@ export class Generator {
     return out;
   }
 
+  /** Safe platforms of the last batch: the next main platform must be reachable from all of them. */
+  private prevSafe: { x: number; y: number }[] = [];
+
+  /**
+   * X interval reachable from every previous safe platform for a platform at height y.
+   * Returns null if some previous platform cannot reach that height.
+   */
+  private commonX(y: number): [number, number] | null {
+    const half = gameConfig.platform.width / 2;
+    const W = gameConfig.world.width;
+    let lo = half + 4;
+    let hi = W - half - 4;
+    const from = this.prevSafe.length ? this.prevSafe : [{ x: this.anchorX, y: this.anchorY }];
+    for (const p of from) {
+      const dy = y - p.y;
+      if (dy <= 16 || dy > safeReachY()) return null;
+      const r = safeReachX(dy);
+      lo = Math.max(lo, p.x - r);
+      hi = Math.min(hi, p.x + r);
+    }
+    return lo <= hi ? [lo, hi] : null;
+  }
+
   private placeMain(tier: number, out: Platform[]): Platform {
     const cfg = gameConfig.platform;
     const t = gameConfig.tiers[tier];
@@ -78,37 +101,81 @@ export class Generator {
     if (!this.noHazards && !this.lastWasRed && t.redChance > 0 && this.rng.chance(t.redChance)) {
       const d1 = this.rng.range(cfg.redGap[0], cfg.redGap[1]);
       const d2 = this.rng.range(cfg.redGap[0], cfg.redGap[1]);
-      const reach = safeReachX(d1 + d2);
-      const safeX = clamp(this.anchorX + this.rng.range(-reach, reach), half + 4, W - half - 4);
-      const goRight = safeX >= this.anchorX;
-      const offset = this.rng.range(96, 140);
-      let redX = goRight ? Math.min(this.anchorX, safeX) - offset : Math.max(this.anchorX, safeX) + offset;
-      if (redX < half + 4 || redX > W - half - 4) {
-        redX = goRight ? Math.max(this.anchorX, safeX) + offset : Math.min(this.anchorX, safeX) - offset;
-      }
-      if (redX >= half + 4 && redX <= W - half - 4) {
-        out.push(this.make(redX, this.anchorY + d1, 'red', null, false, tier));
-        const safe = this.makeColored(safeX, this.anchorY + d1 + d2, tier);
-        out.push(safe);
-        this.anchorX = safeX;
-        this.anchorY = safe.y;
-        this.lastWasRed = true;
-        return safe;
+      const safeY = this.anchorY + d1 + d2;
+      const range = this.commonX(safeY);
+      if (range) {
+        const safeX = this.rng.range(range[0], range[1]);
+        const goRight = safeX >= this.anchorX;
+        const offset = this.rng.range(96, 140);
+        let redX = goRight ? Math.min(this.anchorX, safeX) - offset : Math.max(this.anchorX, safeX) + offset;
+        if (redX < half + 4 || redX > W - half - 4) {
+          redX = goRight ? Math.max(this.anchorX, safeX) + offset : Math.min(this.anchorX, safeX) - offset;
+        }
+        if (redX >= half + 4 && redX <= W - half - 4) {
+          out.push(this.make(redX, this.anchorY + d1, 'red', null, false, tier));
+          const safe = this.makeColored(safeX, safeY, tier);
+          out.push(safe);
+          this.setAnchor(safe);
+          this.lastWasRed = true;
+          return safe;
+        }
       }
     }
 
-    const dy = this.rng.range(cfg.gap[0], Math.min(cfg.gap[1], safeReachY()));
-    const reach = safeReachX(dy);
+    // Height: inside the usual gap from the anchor and reachable from every previous safe platform.
+    const maxReach = safeReachY();
+    let lo = this.anchorY + cfg.gap[0];
+    let hi = this.anchorY + Math.min(cfg.gap[1], maxReach);
+    for (const p of this.prevSafe) {
+      lo = Math.max(lo, p.y + 17);
+      hi = Math.min(hi, p.y + maxReach);
+    }
+    // Pick among heights where a common x range exists.
+    const ys: number[] = [];
+    for (let cy = lo; cy <= hi; cy += 3) if (this.commonX(cy)) ys.push(cy);
+    let y = ys.length ? ys[Math.floor(this.rng.next() * ys.length)] : this.anchorY + cfg.gap[0];
+    let range = this.commonX(y);
+    if (!range) {
+      // Fallback: reachable from the anchor alone (extras are placed so this is rare).
+      this.prevSafe = [];
+      y = this.anchorY + this.rng.range(cfg.gap[0], Math.min(cfg.gap[1], maxReach));
+      range = this.commonX(y)!;
+    }
     // Prefer visible horizontal movement so the path zig-zags.
-    let x = this.anchorX + this.rng.range(-reach, reach);
-    if (Math.abs(x - this.anchorX) < 30) x += this.rng.chance(0.5) ? 40 : -40;
+    let x = this.rng.range(range[0], range[1]);
+    if (Math.abs(x - this.anchorX) < 30) {
+      const alt = x + (x < this.anchorX ? -40 : 40);
+      if (alt >= range[0] && alt <= range[1]) x = alt;
+    }
     x = clamp(x, half + 4, W - half - 4);
-    const p = this.makeColored(x, this.anchorY + dy, tier);
+    const p = this.makeColored(x, y, tier);
     out.push(p);
-    this.anchorX = x;
-    this.anchorY = p.y;
+    this.setAnchor(p);
     this.lastWasRed = false;
     return p;
+  }
+
+  /** True if a platform above could be reached from all current safe platforms plus `extra`. */
+  private successorExists(extra: { x: number; y: number }): boolean {
+    const saved = this.prevSafe;
+    this.prevSafe = [...saved, extra];
+    const maxReach = safeReachY();
+    let lo = this.anchorY + gameConfig.platform.gap[0];
+    let hi = this.anchorY + Math.min(gameConfig.platform.gap[1], maxReach);
+    for (const p of this.prevSafe) {
+      lo = Math.max(lo, p.y + 17);
+      hi = Math.min(hi, p.y + maxReach);
+    }
+    let ok = false;
+    for (let y = lo; y <= hi && !ok; y += 4) ok = this.commonX(y) !== null;
+    this.prevSafe = saved;
+    return ok;
+  }
+
+  private setAnchor(p: Platform): void {
+    this.anchorX = p.x;
+    this.anchorY = p.y;
+    this.prevSafe = [{ x: p.x, y: p.y }];
   }
 
   private placeExtra(main: Platform, tier: number, all: Platform[]): Platform | null {
@@ -119,6 +186,8 @@ export class Generator {
     for (let attempt = 0; attempt < 6; attempt++) {
       const x = this.rng.range(half + 4, W - half - 4);
       const y = main.y + this.rng.range(-22, 30);
+      // Only where one platform above can still be reached from every safe platform of the batch.
+      if (!this.successorExists({ x, y })) continue;
       const clash = all.some((p) => Math.abs(p.y - y) < 40 && Math.abs(p.x - x) < cfg.width + 18);
       if (clash) continue;
       if (!this.noHazards && t.redChance > 0 && this.rng.chance(Math.min(0.6, t.redChance * 1.6))) {
@@ -127,7 +196,9 @@ export class Generator {
         const overHead = all.some((p) => y > p.y && y - p.y < 170 && Math.abs(p.x - x) < cfg.width + 12);
         if (!overHead) return this.make(x, y, 'red', null, false, tier);
       }
-      return this.makeColored(x, y, tier);
+      const extra = this.makeColored(x, y, tier);
+      this.prevSafe.push({ x, y });
+      return extra;
     }
     return null;
   }

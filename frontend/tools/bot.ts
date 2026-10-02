@@ -6,7 +6,12 @@ import { DT, Sim } from '../src/core/sim';
 import type { Platform } from '../src/core/types';
 import type { LightId } from '../src/core/gameConfig';
 
-export function playBot(seed: number, reaction: number, maxSec = 900): Sim {
+export function playBot(
+  seed: number,
+  reaction: number,
+  maxSec = 900,
+  onTier: (tier: number, t: number) => void = () => undefined,
+): Sim {
   const sim = new Sim(seed, 700);
   let standY = sim.hero.y;
   let target: Platform | null = null;
@@ -32,7 +37,12 @@ export function playBot(seed: number, reaction: number, maxSec = 900): Sim {
       pendingLight = null;
     }
     sim.step({ axis, press });
-    for (const e of sim.events) if (e.type === 'land') { standY = e.y; target = null; }
+    for (const e of sim.events) {
+      if (e.type === 'land') {
+        standY = e.y;
+        target = null;
+      } else if (e.type === 'tier') onTier(e.tier, sim.runTime);
+    }
   }
   return sim;
 }
@@ -64,16 +74,49 @@ function desiredLight(sim: Sim, target: Platform | null): LightId | null {
   return null;
 }
 
-// CLI
-const runs = Number(process.argv[2] || 30);
-const reaction = Number(process.argv[3] || 0.3);
-const tierTimes: number[][] = gameConfig.tiers.map(() => []);
-let totalTime = 0, totalScore = 0;
-for (let i = 0; i < runs; i++) {
-  const sim = playBot(1000 + i, reaction);
-  totalTime += sim.runTime;
-  totalScore += sim.score;
-  tierTimes[sim.tier].push(sim.runTime);
+// CLI: average time to reach each tier, share of runs reaching it, peak scoring rate.
+export interface BotReport {
+  runs: number;
+  reaction: number;
+  avgTime: number;
+  reached: number[];
+  medianTime: (number | null)[];
+  maxRate: number;
 }
-console.log(`runs=${runs} reaction=${reaction}s avgTime=${(totalTime / runs).toFixed(1)}s avgScore=${(totalScore / runs).toFixed(0)}`);
-console.log('final tier distribution:', tierTimes.map((t) => t.length).join(' '));
+
+export function report(runs: number, reaction: number, maxSec = 1500): BotReport {
+  const times: number[][] = gameConfig.tiers.map(() => []);
+  let total = 0;
+  let maxRate = 0;
+  for (let i = 0; i < runs; i++) {
+    const tierAt: number[] = [];
+    const sim = playBot(1000 + i, reaction, maxSec, (tier, t) => (tierAt[tier] = t));
+    total += sim.runTime;
+    if (sim.runTime > 3) maxRate = Math.max(maxRate, sim.score / sim.runTime);
+    tierAt.forEach((t, tier) => t !== undefined && times[tier].push(t));
+  }
+  const median = (a: number[]): number | null => {
+    if (!a.length) return null;
+    const s = [...a].sort((x, y) => x - y);
+    return s[Math.floor(s.length / 2)];
+  };
+  return {
+    runs,
+    reaction,
+    avgTime: total / runs,
+    reached: times.map((t) => t.length / runs),
+    medianTime: times.map(median),
+    maxRate,
+  };
+}
+
+if (process.argv[1]?.endsWith('bot.ts')) {
+  const runs = Number(process.argv[2] || 30);
+  const reaction = Number(process.argv[3] || 0.3);
+  const r = report(runs, reaction);
+  console.log(`runs=${r.runs} reaction=${r.reaction}s avgRun=${r.avgTime.toFixed(0)}s peakRate=${r.maxRate.toFixed(1)} pts/s`);
+  gameConfig.tiers.forEach((t, i) => {
+    const m = r.medianTime[i];
+    console.log(`tier ${String(i).padStart(2)} from ${String(t.from).padStart(5)}: reached ${(r.reached[i] * 100).toFixed(0).padStart(3)}%  median ${m === null ? '   -' : m.toFixed(0).padStart(4) + 's'}`);
+  });
+}

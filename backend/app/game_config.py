@@ -1,6 +1,8 @@
 """Server-side game numbers. Keep TIER_THRESHOLDS in sync with frontend gameConfig.ts."""
 
-TIER_THRESHOLDS: list[int] = [0, 60, 150, 280, 450, 650, 900, 1200, 1600, 2100, 2700, 3500, 4500]
+import os
+
+TIER_THRESHOLDS: list[int] = [0, 200, 550, 900, 1300, 1750, 2250, 2800, 3400, 4050, 4700, 5350, 6100]
 
 # Anti-cheat limits for a finished run (design doc, section 8).
 MAX_POINTS_PER_SECOND = 16
@@ -24,9 +26,11 @@ LEADERBOARD_CACHE_SEC = 20
 WEEKS_TO_KEEP = 8
 PROFILE_TTL_SEC = 24 * 3600
 
-# Interstitial ads (design doc, section 9). Sent to the client in bootstrap.
+# Interstitial ads (design doc, section 9). Sent to the client in bootstrap, so they can be
+# switched on or tuned without publishing a new game version. Turn on with ADS_ENABLED=1
+# only after accepting the ad offer and enabling monetization in the VK developer panel.
 ADS = {
-    "enabled": False,
+    "enabled": os.environ.get("ADS_ENABLED", "0").strip().lower() in {"1", "true", "yes", "on"},
     "min_runs_before": 2,
     "every_n_runs": 3,
     "min_interval_sec": 120,

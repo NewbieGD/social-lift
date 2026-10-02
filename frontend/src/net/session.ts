@@ -85,6 +85,8 @@ const MAX_QUEUE = 10;
 export class Session {
   mode: Mode = 'loading';
   data: Bootstrap | null = null;
+  /** Short code of the last bootstrap failure, shown on the error screen for support. */
+  lastError: { code: string; status: number } | null = null;
   private prefetched: RunTicket | null = null;
   private prefetching: Promise<RunTicket | null> | null = null;
 
@@ -103,9 +105,11 @@ export class Session {
     try {
       this.data = await api<Bootstrap>('POST', '/session/bootstrap');
       this.mode = 'online';
+      this.lastError = null;
       void this.flushQueue();
-    } catch {
+    } catch (e) {
       this.mode = 'offline';
+      this.lastError = e instanceof ApiError ? { code: e.code, status: e.status } : { code: 'unknown', status: 0 };
     }
   }
 
@@ -167,6 +171,12 @@ export class Session {
     const data = await api<Leaderboard>('GET', `/leaderboard?scope=${scope}`);
     this.lbCache.set(scope, { at: Date.now(), data });
     return data;
+  }
+
+  /** Anonymous funnel event; failures are ignored. */
+  event(type: 'tutorial_start' | 'tutorial_end' | 'run_start' | 'run_end' | 'tier_reached' | 'ad_shown' | 'settings_changed', value?: number): void {
+    if (this.mode !== 'online') return;
+    api('POST', '/events', value === undefined ? { type } : { type, value }).catch(() => undefined);
   }
 
   async completeTutorial(): Promise<void> {

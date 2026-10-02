@@ -1,0 +1,58 @@
+# Баланс и настройка
+
+Все числа игры лежат в `frontend/src/core/gameConfig.ts`, серверные — в `backend/app/game_config.py`.
+Пороги этапов (`tiers[].from`) и `TIER_THRESHOLDS` на сервере **должны совпадать**: сервер отклоняет забег, если этап не соответствует очкам.
+
+## Как проверить баланс
+
+```bash
+cd frontend
+npm install
+npm run bot            # 60 забегов сильного бота (реакция 0,25 с)
+npx tsx tools/bot.ts 60 0.4   # средний игрок
+npm test               # детерминизм, достижимость на 1000 seed, таблица приземления, множитель
+```
+
+Бот играет на той же симуляции, что и игра (фиксированный шаг 60 Гц, тот же генератор). Он видит платформы и ошибается только реакцией на смену цвета.
+
+## Отчёт бота (2 октября 2026)
+
+Сильный игрок, реакция 0,25 с, 60 забегов:
+
+```
+runs=60 reaction=0.25s avgRun=217s peakRate=9.2 pts/s
+tier  0 from     0: reached   0%  median    -
+tier  1 from   200: reached  92%  median   29s
+tier  2 from   550: reached  78%  median   73s
+tier  3 from   900: reached  68%  median  116s
+tier  4 from  1300: reached  43%  median  166s
+tier  5 from  1750: reached  30%  median  231s
+tier  6 from  2250: reached  18%  median  297s
+tier  7 from  2800: reached  12%  median  371s
+tier  8 from  3400: reached   7%  median  446s
+tier  9 from  4050: reached   5%  median  524s
+tier 10 from  4700: reached   5%  median  594s
+tier 11 from  5350: reached   5%  median  660s
+tier 12 from  6100: reached   3%  median  728s
+```
+
+Выводы:
+
+- Первый этап — за ~30 с (цель ТЗ 30–40 с).
+- Верхний этап «Космодром» — около 12 минут чистой игры, и до него доходят единицы забегов: требование п. 4.2.7 (больше 10 минут) выполняется с запасом.
+- Пиковая скорость набора — около 9 очков/с; серверный порог `MAX_POINTS_PER_SECOND = 16` с запасом выше, честных игроков он не задевает.
+
+## Что крутить
+
+| Хочется | Параметр |
+| --- | --- |
+| Дольше/короче этапы | `tiers[].from` (и `TIER_THRESHOLDS` на сервере) |
+| Больше времени на реакцию | `telegraphSec` (не меньше 0,4) |
+| Реже краснеют платформы | `phaseChance`, `phaseInterval` |
+| Больше красных платформ | `redChance` |
+| Сильнее давит волна | `riseSpeed`, `wave.delaySec`, `wave.maxLag` |
+| Прыжок | `hero.gravity`, `hero.jumpImpulse`, `hero.maxSpeedX` |
+| Множитель серии | `combo.windowSec`, `combo.steps` |
+| Реклама | серверный `ADS` (`ADS_ENABLED` в переменных Amvera) |
+
+После изменения генератора или прыжка запускайте `npm test`: тест достижимости ловит «тупики».

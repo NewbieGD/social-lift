@@ -25,3 +25,11 @@ npm run dev
 Все числа баланса — в `frontend/src/core/gameConfig.ts`.
 
 Инструкция по деплою: `docs/DEPLOY.md`. Тесты бэкенда запускаются в GitHub Actions при каждом пуше в `backend/`.
+
+## Документы
+
+- `docs/DEPLOY.md` — деплой и чек-лист перед модерацией
+- `docs/COMPLIANCE.md` — соответствие правилам VK по пунктам
+- `docs/TUNING.md` — баланс, отчёт бота, что настраивать
+- `docs/CATALOG_ASSETS.md` — материалы для карточки, иконка и обложка в `docs/catalog/`
+- `docs/USER_AGREEMENT.md`, `docs/PRIVACY_POLICY.md`, `docs/RULES_TEXT.md` — тексты (публичные страницы генерирует `npm run docs`)

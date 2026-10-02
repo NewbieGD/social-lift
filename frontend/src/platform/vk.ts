@@ -16,10 +16,22 @@ export function initVk(handlers: { onHide: () => void; onRestore?: () => void })
   if (!isInVk()) return;
   bridge.subscribe((event) => {
     const type = (event.detail as { type?: string } | undefined)?.type;
+    if (type === 'VKWebAppUpdateConfig') applyInsets((event.detail as { data?: unknown }).data);
     if (type === 'VKWebAppViewHide') handlers.onHide();
     if (type === 'VKWebAppViewRestore') handlers.onRestore?.();
   });
   bridge.send('VKWebAppInit').catch(() => {
     /* The game still works; the server rejects unsigned calls anyway. */
   });
+}
+
+/** Safe areas reported by VK clients (rule 3.2.2), combined with the CSS env() values. */
+function applyInsets(data: unknown): void {
+  const insets = (data as { insets?: { top?: number; bottom?: number } } | undefined)?.insets;
+  if (!insets) return;
+  const root = document.documentElement.style;
+  if (typeof insets.top === 'number') root.setProperty('--safe-top', `max(env(safe-area-inset-top, 0px), ${insets.top}px)`);
+  if (typeof insets.bottom === 'number')
+    root.setProperty('--safe-bottom', `max(env(safe-area-inset-bottom, 0px), ${insets.bottom}px)`);
+  window.dispatchEvent(new Event('resize'));
 }

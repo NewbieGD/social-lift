@@ -1,4 +1,6 @@
+import '@fontsource-variable/rubik';
 import './styles.css';
+import { audio } from './audio/audio';
 import { PROFILE_URL, SUPPORT_URL, TERMS_VERSION } from './config';
 import { gameConfig, isColorUnlocked, type ColorId, type LightId } from './core/gameConfig';
 import { randomSeed } from './core/prng';
@@ -9,6 +11,7 @@ import { InputController } from './input/input';
 import { ApiError } from './net/api';
 import { Session, type RunTicket, type Stats } from './net/session';
 import { haptic, hapticsSupported, initHaptics } from './platform/haptics';
+import { ads, DEFAULT_ADS, type AdsConfig } from './platform/ads';
 import { initVk } from './platform/vk';
 import { scenes } from './render/palette';
 import { Renderer } from './render/renderer';
@@ -32,6 +35,7 @@ const walletEl = scoreEl.parentElement as HTMLElement;
 const buttonsEl = $('buttons');
 const controlsEl = $('controls');
 const countdownEl = $('countdown');
+const pressEl = $('press');
 
 const renderer = new Renderer(canvas);
 const input = new InputController([field]);
@@ -134,6 +138,10 @@ function applySettings(s: Settings, changed?: (keyof Settings)[]): void {
   renderer.reducedEffects = s.reducedFx;
   renderer.colorblind = s.colorblind;
   document.body.classList.toggle('reduced', s.reducedFx);
+  audio.musicOn = s.music;
+  audio.musicVol = s.musicVol;
+  audio.sfxVol = s.sfxVol;
+  audio.applyVolumes();
   if (!changed || changed.some((k) => k === 'layout' || k === 'side')) layout();
 }
 
@@ -147,6 +155,32 @@ applySettings(settingsStore.get());
 
 // ---------- HUD & feedback ----------
 
+let prevLight: LightId | null = null;
+
+renderer.onBillArrive = () => {
+  walletEl.classList.remove('bump');
+  void walletEl.offsetWidth;
+  walletEl.classList.add('bump');
+};
+
+/** Buttons and panels change material with wealth: cardboard, glass, metal, gold. */
+function setSkin(tier: number): void {
+  const skin = tier >= 9 ? 3 : tier >= 6 ? 2 : tier >= 3 ? 1 : 0;
+  for (let i = 0; i < 4; i++) document.body.classList.toggle(`skin-${i}`, i === skin);
+}
+
+let pressTimer = 0;
+/** Fictional press notes at the edge of the field (never over the HUD or buttons), at most 2.5 s. */
+function showPress(outlet: string, title: string, kind: 'news' | 'cover'): void {
+  if (settingsStore.get().reducedFx) return;
+  pressEl.className = `press ${kind}`;
+  pressEl.innerHTML = `<span class="press-outlet">${outlet}</span><span class="press-title">${title}</span>`;
+  void pressEl.offsetWidth;
+  pressEl.classList.add('on');
+  clearTimeout(pressTimer);
+  pressTimer = window.setTimeout(() => pressEl.classList.remove('on'), 2500);
+}
+
 let toastTimer = 0;
 function toast(text: string): void {
   toastEl.textContent = text;
@@ -158,19 +192,33 @@ function toast(text: string): void {
 function handleUiEvents(events: SimEvent[]): void {
   for (const e of events) {
     if (e.type === 'capture') {
-      walletEl.classList.remove('bump');
-      void walletEl.offsetWidth;
-      walletEl.classList.add('bump');
+      audio.play('capture', { color: e.color });
       if (settingsStore.get().vibration) haptic('light');
+    } else if (e.type === 'land') {
+      audio.play('jump', { tier: sim.tier });
+    } else if (e.type === 'warn') {
+      audio.play('tick');
+    } else if (e.type === 'light') {
+      if (e.light === 'red') audio.play('auraOn');
+      else if (prevLight === 'red') audio.play('auraOff');
+      prevLight = e.light;
     } else if (e.type === 'unlock') {
       const b = buttons.get(e.color)!;
       b.classList.add('unlocking');
       setTimeout(() => b.classList.remove('unlocking'), 800);
       toast(`${ru.hud.newColor} ${ru.colors[e.color]}`);
+      audio.play('unlock');
     } else if (e.type === 'tier') {
       if (!events.some((x) => x.type === 'unlock')) toast(ru.tiers[e.tier]);
       document.body.style.backgroundColor = scenes[e.tier].page;
+      audio.setTier(e.tier);
+      audio.play('bell');
+      setSkin(e.tier);
+      if (mode === 'run') session.event('tier_reached', e.tier);
+      if (e.tier === 7) showPress(ru.press.outlet, ru.press.talked, 'news');
+      if (e.tier === 10) showPress(ru.press.magazine, ru.press.cover, 'cover');
     } else if (e.type === 'death') {
+      audio.play('death');
       if (settingsStore.get().vibration) haptic('heavy');
       if (mode === 'tutorial') tutorialDeath();
       else deathTimer = 0;
@@ -237,6 +285,7 @@ function advanceTutorial(): void {
       /* ignore */
     }
     void session.completeTutorial();
+    session.event('tutorial_end');
     mode = 'result';
     router.reset('tutorialDone');
   }
@@ -262,6 +311,7 @@ function tutorialDone(): boolean {
 }
 
 function startTutorial(): void {
+  session.event('tutorial_start');
   tutStep = 0;
   tutRetry = false;
   ticket = null;
@@ -283,30 +333,87 @@ function newSim(seed: number, tutorial = false): void {
   paused = false;
   last = performance.now();
   document.body.style.backgroundColor = scenes[0].page;
-  renderer.handleEvents([{ type: 'tier', tier: 0 }]);
+  renderer.setScene(0);
+  renderer.heroTierOverride = null;
+  renderer.camShift = 0;
+  renderer.prewarm(1, sim.viewH);
+  prevLight = null;
+  audio.setTier(0);
+  setSkin(0);
 }
 
+/**
+ * New run: the "Preparing a new run" screen with elevator doors is a real load
+ * (server ticket, next scene sprites, at least 1.2 s). Interstitial ads may only
+ * appear here, and only under the server-side conditions (rule 5.1.5.1 "а").
+ */
 async function startRun(): Promise<void> {
   if (starting) return;
   starting = true;
-  setBusy(true);
-  ticket = await session.takeTicket();
+  router.reset('preparing');
+  const t0 = performance.now();
+  const ticketP = session.takeTicket();
+  renderer.prewarm(0, sim.viewH);
+  renderer.prewarm(1, sim.viewH);
+  if (adAllowed()) {
+    audio.suspend();
+    const shown = await ads.showInterstitial(adsConfig().timeout_sec);
+    audio.resume();
+    if (shown) {
+      adState.runsSince = 0;
+      adState.lastAt = Date.now();
+      saveAdState();
+      session.event('ad_shown');
+    }
+  }
+  ticket = await ticketP;
+  const left = 1200 - (performance.now() - t0);
+  if (left > 0) await new Promise((r) => setTimeout(r, left));
   starting = false;
-  setBusy(false);
   newSim(ticket ? ticket.seed : randomSeed());
   mode = 'run';
   router.clear();
+  session.event('run_start');
   if (!ticket && session.mode !== 'outside') toast(ru.result.unranked);
 }
 
-function setBusy(busy: boolean): void {
-  document.querySelectorAll<HTMLButtonElement>('[data-action="play"],[data-action="again"],[data-action="playFromCard"],[data-action="afterTutorial"]').forEach((b) => {
-    b.disabled = busy;
-    if (busy) {
-      b.dataset.label = b.textContent ?? '';
-      b.textContent = ru.loading.preparing;
-    } else if (b.dataset.label) b.textContent = b.dataset.label;
-  });
+// ---------- Ads policy (numbers come from the server) ----------
+
+interface AdState {
+  completed: number;
+  runsSince: number;
+  lastAt: number;
+}
+const adState: AdState = (() => {
+  try {
+    return { completed: 0, runsSince: 0, lastAt: 0, ...JSON.parse(localStorage.getItem('sl_ads') || '{}') } as AdState;
+  } catch {
+    return { completed: 0, runsSince: 0, lastAt: 0 };
+  }
+})();
+
+function saveAdState(): void {
+  try {
+    localStorage.setItem('sl_ads', JSON.stringify(adState));
+  } catch {
+    /* ignore */
+  }
+}
+
+function adsConfig(): AdsConfig {
+  return { ...DEFAULT_ADS, ...((session.data?.ads ?? {}) as Partial<AdsConfig>) };
+}
+
+function adAllowed(): boolean {
+  const c = adsConfig();
+  return (
+    c.enabled &&
+    session.mode === 'online' &&
+    tutorialDone() &&
+    adState.completed >= c.min_runs_before &&
+    adState.runsSince >= c.every_n_runs &&
+    Date.now() - adState.lastAt >= Math.max(30, c.min_interval_sec) * 1000
+  );
 }
 
 function play(): void {
@@ -327,6 +434,10 @@ let resultData: V.ResultData | null = null;
 
 function finishRun(): void {
   mode = 'result';
+  adState.completed++;
+  adState.runsSince++;
+  saveAdState();
+  session.event('run_end', sim.score);
   const runTicket = ticket;
   ticket = null;
   const best = session.data?.stats.best_all ?? readLocalBest();
@@ -397,10 +508,20 @@ function countUp(el: HTMLElement): void {
   requestAnimationFrame(step);
 }
 
+function bestTier(): number {
+  return session.data?.stats.best_tier ?? 0;
+}
+
 function goMenu(): void {
   mode = 'menu';
   ticket = null;
   newSim(randomSeed());
+  const best = bestTier();
+  renderer.heroTierOverride = best;
+  renderer.camShift = -sim.viewH * 0.45;
+  audio.setTier(best);
+  setSkin(best);
+  document.body.style.backgroundColor = scenes[best].page;
   router.reset('menu');
 }
 
@@ -465,6 +586,7 @@ router.register('menu', {
   html: () => V.menuView({ stats: session.data?.stats ?? localStats(), mode: session.mode }),
   cls: 'menu-screen',
 });
+router.register('preparing', { html: () => V.preparingView(), cls: 'solid preparing' });
 router.register('rulesCard', { html: () => V.rulesCardView(), modal: true });
 router.register('settings', {
   html: () =>
@@ -478,7 +600,7 @@ router.register('settings', {
 router.register('confirmDelete', { html: () => V.confirmDeleteView(deleteError), modal: true });
 router.register('leaders', { html: () => V.leadersShell(lbScope), cls: 'solid', mount: () => void loadLeaders(false) });
 router.register('contact', { html: () => V.contactView(!!SUPPORT_URL, session.data?.profile.id ?? null), cls: 'solid' });
-router.register('pause', { html: () => V.pauseView(), modal: true });
+router.register('pause', { html: () => V.pauseView(settingsStore.get()), modal: true });
 router.register('result', {
   html: () => V.resultView(resultData!),
   modal: true,
@@ -486,7 +608,13 @@ router.register('result', {
 });
 router.register('tutorialDone', { html: () => V.tutorialDoneView(), modal: true });
 let stubKind: V.StubKind = 'offline';
-router.register('stub', { html: () => V.stubView(stubKind), cls: 'solid' });
+router.register('stub', { html: () => V.stubView(stubKind, errorCode()), cls: 'solid' });
+
+function errorCode(): string | null {
+  const e = session.lastError;
+  if (!e) return null;
+  return e.status ? `${e.status} ${e.code}` : e.code;
+}
 
 router.onChange = (top) => {
   document.body.classList.toggle('playing', top === null && (mode === 'run' || mode === 'tutorial'));
@@ -586,7 +714,10 @@ document.addEventListener('click', (e) => {
   const el = (e.target as HTMLElement).closest<HTMLElement>('[data-action]');
   if (!el || (el as HTMLButtonElement).disabled) return;
   const fn = actions[el.dataset.action!];
-  if (fn) fn(el.dataset.arg ?? '', el);
+  if (fn) {
+    audio.play('click');
+    fn(el.dataset.arg ?? '', el);
+  }
 });
 
 // Toggles and sliders on the settings screen.
@@ -602,15 +733,22 @@ $('pauseBtn').setAttribute('aria-label', ru.pause.title);
 $('skipBtn').textContent = ru.tutorial.skip;
 
 document.addEventListener('visibilitychange', () => {
-  if (document.hidden) pause();
+  if (document.hidden) {
+    pause();
+    audio.suspend();
+  } else audio.resume();
 });
+// Audio may only start after a user gesture.
+const unlockAudio = (): void => audio.unlock();
+window.addEventListener('pointerdown', unlockAudio, { capture: true });
+window.addEventListener('keydown', unlockAudio, { capture: true });
 window.addEventListener('blur', pause);
 window.addEventListener('keydown', (e) => {
   if (e.code !== 'Escape') return;
   const top = router.top;
   if (top === 'pause') resume();
   else if (top === null) pause();
-  else if (top !== 'menu' && top !== 'result' && top !== 'loading' && top !== 'consent' && top !== 'tutorialDone') router.back();
+  else if (!['menu', 'result', 'loading', 'consent', 'tutorialDone', 'preparing'].includes(top)) router.back();
 });
 
 // ---------- Consent & data ----------
@@ -635,7 +773,7 @@ async function acceptConsent(): Promise<void> {
     if (session.mode === 'online') await session.acceptConsent();
     localStorage.setItem('sl_consent', String(TERMS_VERSION));
     consentError = null;
-    router.reset('menu');
+    goMenu();
   } catch {
     consentError = ru.consent.failed;
     router.refresh();
@@ -686,7 +824,10 @@ async function boot(): Promise<void> {
   }
   bootState = { progress: 0.05, label: ru.loading.fonts, error: null };
   router.reset('loading');
-  await Promise.race([document.fonts?.ready, new Promise((r) => setTimeout(r, 1500))]);
+  await Promise.race([
+    Promise.all([document.fonts?.load("700 16px 'Rubik Variable'"), document.fonts?.load("400 16px 'Rubik Variable'")]),
+    new Promise((r) => setTimeout(r, 2000)),
+  ]).catch(() => undefined);
   setBoot(0.35, ru.loading.graphics);
   await initHaptics();
   await new Promise((r) => requestAnimationFrame(r));
@@ -695,7 +836,8 @@ async function boot(): Promise<void> {
   setBoot(1, ru.loading.profile);
   if (session.mode === 'offline') {
     // A clear stub with retry instead of endless loading (rule 2.2.2).
-    stubKind = 'offline';
+    const st = session.lastError?.status ?? 0;
+    stubKind = st === 503 ? 'maintenance' : st >= 500 || st === 401 ? 'server' : 'offline';
     router.reset('stub');
     return;
   }
@@ -722,6 +864,7 @@ function frame(now: number): void {
       const { hitStopMs, slowMoSec, slowMoScale } = gameConfig.death;
       const stop = hitStopMs / 1000;
       scale = deathTimer < stop ? 0 : slowMoScale;
+      renderer.deathK = Math.min(1, deathTimer / (stop + slowMoSec));
       if (deathTimer > stop + slowMoSec) finishRun();
     } else if (mode === 'tutorial') {
       scale = 0.8; // the tutorial runs a little slower
@@ -729,7 +872,7 @@ function frame(now: number): void {
     acc += realDt * scale;
     while (acc >= DT && (mode === 'run' || mode === 'tutorial')) {
       sim.step({ axis: input.axis(sim.hero.x), press: input.takePress() });
-      renderer.handleEvents(sim.events);
+      renderer.handleEvents(sim.events, sim);
       handleUiEvents(sim.events);
       if (mode === 'tutorial') tutorialTick();
       acc -= DT;
@@ -749,7 +892,13 @@ function frame(now: number): void {
 }
 
 input.heroXProvider = () => sim.hero.x;
-initVk({ onHide: pause });
+initVk({
+  onHide: () => {
+    pause();
+    audio.suspend();
+  },
+  onRestore: () => audio.resume(),
+});
 layout();
 requestAnimationFrame(frame);
 void boot();

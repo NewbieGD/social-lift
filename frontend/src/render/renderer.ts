@@ -1,21 +1,16 @@
 import { gameConfig, type ColorId, type LightId } from '../core/gameConfig';
 import type { Sim } from '../core/sim';
 import type { Platform, SimEvent } from '../core/types';
-import { palette, scenes } from './palette';
+import { drawHeroBody } from './hero';
+import { palette } from './palette';
+import { paintScene, paintSky } from './scenes';
 
-interface Floater {
-  x: number;
-  y: number;
-  vy: number;
-  life: number;
-  max: number;
-  text: string;
-  color: string;
-}
+const MAX_PARTICLES = 220;
+const MAX_BILLS = 60;
+/** Wallet position in the HUD, in world units from the top-left (bills fly there). */
+const WALLET = { x: 30, y: 26 };
 
-const MAX_PARTICLES = 160;
-
-/** Simple typed-array particle pool (bills and dust). */
+/** Typed-array particle pool: 0 dust, 1 bill, 2 spark. */
 class Particles {
   x = new Float32Array(MAX_PARTICLES);
   y = new Float32Array(MAX_PARTICLES);
@@ -23,13 +18,14 @@ class Particles {
   vy = new Float32Array(MAX_PARTICLES);
   life = new Float32Array(MAX_PARTICLES);
   max = new Float32Array(MAX_PARTICLES);
-  kind = new Uint8Array(MAX_PARTICLES); // 0 dust, 1 bill
+  kind = new Uint8Array(MAX_PARTICLES);
   rot = new Float32Array(MAX_PARTICLES);
   next = 0;
+  cap = MAX_PARTICLES;
 
   spawn(kind: number, x: number, y: number, vx: number, vy: number, life: number): void {
     const i = this.next;
-    this.next = (this.next + 1) % MAX_PARTICLES;
+    this.next = (this.next + 1) % this.cap;
     this.kind[i] = kind;
     this.x[i] = x;
     this.y[i] = y;
@@ -44,7 +40,7 @@ class Particles {
     for (let i = 0; i < MAX_PARTICLES; i++) {
       if (this.life[i] <= 0) continue;
       this.life[i] -= dt;
-      const g = this.kind[i] === 1 ? 260 : 120;
+      const g = this.kind[i] === 0 ? 120 : this.kind[i] === 1 ? 260 : 60;
       this.vy[i] -= g * dt;
       this.vx[i] *= 1 - 2 * dt;
       this.x[i] += this.vx[i] * dt;
@@ -52,6 +48,40 @@ class Particles {
       this.rot[i] += dt * 6;
     }
   }
+
+  clear(): void {
+    this.life.fill(0);
+  }
+}
+
+/** A bill flying from a captured platform to the wallet along a Bezier curve (screen space). */
+interface FlyBill {
+  x0: number;
+  y0: number;
+  cx: number;
+  cy: number;
+  t: number;
+  dur: number;
+  rot: number;
+}
+
+interface Floater {
+  x: number;
+  y: number;
+  life: number;
+  max: number;
+  text: string;
+  color: string;
+  big: boolean;
+}
+
+interface Ambient {
+  kind: 'flash' | 'heli' | 'launch';
+  x: number;
+  y: number;
+  t: number;
+  dur: number;
+  dir: number;
 }
 
 export class Renderer {
@@ -59,16 +89,30 @@ export class Renderer {
   scale = 1;
   dpr = 1;
   private floaters: Floater[] = [];
+  private bills: FlyBill[] = [];
   private particles = new Particles();
-  private skylines = new Map<number, HTMLCanvasElement>();
-  private shownTier = 0;
-  private tierBlend = 1;
-  private prevTier = 0;
+  private skies = new Map<number, HTMLCanvasElement>();
+  private tiles = new Map<number, HTMLCanvasElement>();
+  private ambient: Ambient[] = [];
+  private ambientTimer = 0;
+  private sceneTier = 0;
+  private doorT = -1;
+  private pendingTier = 0;
   private flashlightColor: [number, number, number] = [235, 235, 225];
   private auraPulse = 0;
+  private frameTimes: number[] = [];
+  private lowQuality = false;
+
   reducedEffects = false;
-  /** Stronger shapes and patterns so colors never carry meaning alone. */
   colorblind = false;
+  /** Menu override: dress the hero and the scene by the player's best tier. */
+  heroTierOverride: number | null = null;
+  /** 0..1 darkening after death. */
+  deathK = 0;
+  /** Menu shifts the view so the hero stands above the menu card. */
+  camShift = 0;
+  /** Called when bills of a capture reach the wallet. */
+  onBillArrive: () => void = () => undefined;
 
   constructor(private canvas: HTMLCanvasElement) {
     const ctx = canvas.getContext('2d', { alpha: false });
@@ -83,21 +127,53 @@ export class Renderer {
     this.canvas.style.height = `${cssH}px`;
     this.canvas.width = Math.round(cssW * this.dpr);
     this.canvas.height = Math.round(cssH * this.dpr);
-    this.skylines.clear();
+    this.skies.clear();
+    this.tiles.clear();
   }
 
-  handleEvents(events: SimEvent[]): void {
+  /** Instantly shows a scene (new run, menu) and clears effects. */
+  setScene(tier: number): void {
+    this.sceneTier = tier;
+    this.pendingTier = tier;
+    this.doorT = -1;
+    this.bills.length = 0;
+    this.floaters.length = 0;
+    this.ambient.length = 0;
+    this.particles.clear();
+    this.deathK = 0;
+  }
+
+  /** Builds a scene's sprites ahead of time, when the browser is idle. */
+  prewarm(tier: number, viewH: number): void {
+    const run = (): void => {
+      this.sky(tier, gameConfig.world.width, viewH);
+      this.tile(tier, gameConfig.world.width, viewH);
+    };
+    const ric = (window as unknown as { requestIdleCallback?: (cb: () => void) => void }).requestIdleCallback;
+    if (ric) ric(run);
+    else setTimeout(run, 200);
+  }
+
+  handleEvents(events: SimEvent[], sim: Sim): void {
+    const H = sim.viewH;
+    const toScreenY = (y: number): number => H - (y - sim.camY);
     for (const e of events) {
       if (e.type === 'capture') {
         const c = palette.light[e.color];
-        this.floaters.push({ x: e.x, y: e.y + 26, vy: 70, life: 0.9, max: 0.9, text: `+${e.points}`, color: c });
-        if (!this.reducedEffects) {
-          const n = 8 + Math.floor(Math.random() * 6);
-          for (let i = 0; i < n; i++) {
-            const a = Math.PI * (0.15 + 0.7 * (i / n));
-            const sp = 160 + Math.random() * 120;
-            this.particles.spawn(1, e.x, e.y + 6, Math.cos(a) * sp, Math.sin(a) * sp + 80, 0.9);
-          }
+        this.floaters.push({ x: e.x, y: e.y + 28, life: 0.9, max: 0.9, text: `+${e.points}`, color: c, big: e.mult > 1 });
+        const n = this.reducedEffects ? 3 : this.lowQuality ? 6 : 8 + Math.floor(Math.random() * 7);
+        const sy = toScreenY(e.y);
+        for (let i = 0; i < n && this.bills.length < MAX_BILLS; i++) {
+          const spread = (i / Math.max(1, n - 1) - 0.5) * 120;
+          this.bills.push({
+            x0: e.x,
+            y0: sy,
+            cx: e.x + spread,
+            cy: sy - 90 - Math.random() * 60,
+            t: -i * 0.025,
+            dur: 0.55 + Math.random() * 0.2,
+            rot: Math.random() * 6,
+          });
         }
       } else if (e.type === 'land' && !this.reducedEffects) {
         for (let i = 0; i < 5; i++) {
@@ -106,14 +182,28 @@ export class Renderer {
       } else if (e.type === 'aura') {
         this.auraPulse = 1;
       } else if (e.type === 'tier') {
-        this.prevTier = this.shownTier;
-        this.shownTier = e.tier;
-        this.tierBlend = 0;
+        this.pendingTier = e.tier;
+        this.prewarm(Math.min(e.tier + 1, 12), H);
+        if (this.reducedEffects) {
+          this.sceneTier = e.tier;
+        } else {
+          this.doorT = 0;
+          for (let i = 0; i < 18; i++) {
+            const a = Math.random() * Math.PI * 2;
+            this.particles.spawn(2, sim.hero.x, sim.hero.y + 26, Math.cos(a) * 140, Math.sin(a) * 140 + 40, 0.7);
+          }
+        }
+      } else if (e.type === 'death' && !this.reducedEffects) {
+        for (let i = 0; i < 16; i++) {
+          const a = Math.random() * Math.PI * 2;
+          this.particles.spawn(1, sim.hero.x, sim.hero.y + 26, Math.cos(a) * 220, Math.sin(a) * 220 + 120, 1.2);
+        }
       }
     }
   }
 
   draw(sim: Sim, alpha: number, frameDt: number): void {
+    this.trackQuality(frameDt);
     const ctx = this.ctx;
     const W = gameConfig.world.width;
     const H = sim.viewH;
@@ -121,13 +211,14 @@ export class Renderer {
     ctx.setTransform(s, 0, 0, s, 0, 0);
 
     this.particles.update(frameDt);
-    this.tierBlend = Math.min(1, this.tierBlend + frameDt / 0.8);
     this.auraPulse = Math.max(0, this.auraPulse - frameDt * 2.5);
 
-    const cam = sim.prevCamY + (sim.camY - sim.prevCamY) * alpha;
+    const cam = sim.prevCamY + (sim.camY - sim.prevCamY) * alpha + this.camShift;
     const toY = (y: number): number => H - (y - cam);
+    const tier = this.heroTierOverride ?? sim.tier;
 
-    this.drawBackground(W, H, cam);
+    this.drawBackground(W, H, cam, frameDt);
+    this.drawAmbient(tier, W, H, frameDt);
 
     for (const p of sim.platforms) this.drawPlatform(p, toY(p.y), sim.time);
 
@@ -137,75 +228,139 @@ export class Renderer {
     const hero = sim.hero;
     const hx = hero.prevX + (hero.x - hero.prevX) * alpha;
     const hy = hero.prevY + (hero.y - hero.prevY) * alpha;
-    this.drawHero(sim, hx, toY(hy), frameDt);
+    this.drawHero(sim, hx, toY(hy), frameDt, tier);
 
     this.drawFloaters(toY, frameDt);
-  }
+    this.drawBills(frameDt);
 
-  private drawBackground(W: number, H: number, cam: number): void {
-    const ctx = this.ctx;
-    const fill = (tier: number, a: number): void => {
-      const sc = scenes[Math.min(tier, scenes.length - 1)];
-      const g = ctx.createLinearGradient(0, 0, 0, H);
-      g.addColorStop(0, sc.skyTop);
-      g.addColorStop(1, sc.skyBottom);
-      ctx.globalAlpha = a;
-      ctx.fillStyle = g;
+    if (this.deathK > 0) {
+      ctx.fillStyle = `rgba(5,6,10,${0.45 * this.deathK})`;
       ctx.fillRect(0, 0, W, H);
-      const sky = this.skyline(tier, W, H);
-      // Slow parallax: the skyline drifts down as the camera rises, wrapping.
-      const off = (cam * 0.12) % H;
-      ctx.drawImage(sky, 0, off - H, W, H);
-      ctx.drawImage(sky, 0, off, W, H);
-      ctx.globalAlpha = 1;
-    };
-    if (this.tierBlend < 1) fill(this.prevTier, 1);
-    fill(this.shownTier, this.tierBlend < 1 ? this.tierBlend : 1);
+    }
   }
 
-  /** Pre-rendered decorative silhouettes for each scene (cached offscreen). */
-  private skyline(tier: number, W: number, H: number): HTMLCanvasElement {
-    const cached = this.skylines.get(tier);
-    if (cached) return cached;
-    const c = document.createElement('canvas');
-    c.width = Math.round(W * this.scale * this.dpr);
-    c.height = Math.round(H * this.scale * this.dpr);
-    const g = c.getContext('2d')!;
-    const k = (this.scale * this.dpr);
-    g.scale(k, k);
-    const sc = scenes[Math.min(tier, scenes.length - 1)];
-    let seed = 1234 + tier * 77;
-    const rnd = (): number => {
-      seed = (seed * 16807) % 2147483647;
-      return seed / 2147483647;
-    };
-    // Two loose columns of windows/blocks at the edges keep the center readable.
-    for (let i = 0; i < 9; i++) {
-      const side = i % 2 === 0 ? 0 : 1;
-      const w = 40 + rnd() * 50;
-      const x = side === 0 ? -10 + rnd() * 30 : W - w + 10 - rnd() * 30;
-      const y = rnd() * H;
-      const h = 60 + rnd() * 140;
-      g.fillStyle = sc.block;
-      roundRect(g, x, y, w, h, 6);
-      g.fill();
-      g.fillStyle = sc.window;
-      for (let wy = y + 10; wy < y + h - 12; wy += 18) {
-        for (let wx = x + 8; wx < x + w - 10; wx += 14) {
-          if (rnd() < 0.55) g.fillRect(wx, wy, 6, 8);
-        }
-      }
+  // ---------- Background ----------
+
+  private sky(tier: number, W: number, H: number): HTMLCanvasElement {
+    let c = this.skies.get(tier);
+    if (!c) {
+      c = this.offscreen(W, H);
+      paintSky(this.ctxOf(c), tier, W, H);
+      this.skies.set(tier, c);
     }
-    for (let i = 0; i < 26; i++) {
-      g.fillStyle = sc.dot;
-      g.globalAlpha = 0.25 + rnd() * 0.4;
-      g.beginPath();
-      g.arc(rnd() * W, rnd() * H, 0.8 + rnd() * 1.6, 0, Math.PI * 2);
-      g.fill();
-    }
-    this.skylines.set(tier, c);
     return c;
   }
+
+  private tile(tier: number, W: number, H: number): HTMLCanvasElement {
+    let c = this.tiles.get(tier);
+    if (!c) {
+      c = this.offscreen(W, H);
+      paintScene(this.ctxOf(c), tier, W, H);
+      this.tiles.set(tier, c);
+    }
+    return c;
+  }
+
+  private offscreen(W: number, H: number): HTMLCanvasElement {
+    const c = document.createElement('canvas');
+    c.width = Math.max(1, Math.round(W * this.scale * this.dpr));
+    c.height = Math.max(1, Math.round(H * this.scale * this.dpr));
+    return c;
+  }
+
+  private ctxOf(c: HTMLCanvasElement): CanvasRenderingContext2D {
+    const g = c.getContext('2d')!;
+    const k = this.scale * this.dpr;
+    g.scale(k, k);
+    return g;
+  }
+
+  private drawBackground(W: number, H: number, cam: number, dt: number): void {
+    const ctx = this.ctx;
+    const shown = this.heroTierOverride ?? this.sceneTier;
+    ctx.drawImage(this.sky(shown, W, H), 0, 0, W, H);
+    const tile = this.tile(shown, W, H);
+    // Parallax: the edge buildings scroll slower than the platforms.
+    const off = (((cam * 0.35) % H) + H) % H;
+    ctx.drawImage(tile, 0, off - H, W, H);
+    ctx.drawImage(tile, 0, off, W, H);
+
+    // Elevator doors on the background layer when the tier changes; gameplay continues.
+    if (this.doorT >= 0) {
+      this.doorT += dt;
+      const k = this.doorT / 0.9;
+      if (k >= 0.5 && this.sceneTier !== this.pendingTier) this.sceneTier = this.pendingTier;
+      const close = k < 0.5 ? easeInOut(k * 2) : 1 - easeInOut((k - 0.5) * 2);
+      const half = (W / 2) * close;
+      ctx.fillStyle = '#9AA3B2';
+      ctx.fillRect(0, 0, half, H);
+      ctx.fillRect(W - half, 0, half, H);
+      ctx.fillStyle = 'rgba(255,255,255,0.25)';
+      ctx.fillRect(half - 3, 0, 2, H);
+      ctx.fillRect(W - half + 1, 0, 2, H);
+      if (k >= 1) this.doorT = -1;
+    }
+  }
+
+  /** Photographers' flashes, a helicopter and rocket launches at the edges (never over the HUD). */
+  private drawAmbient(tier: number, W: number, H: number, dt: number): void {
+    if (this.reducedEffects) return;
+    this.ambientTimer -= dt;
+    if (this.ambientTimer <= 0) {
+      this.ambientTimer = 0.9 + Math.random() * 1.4;
+      const left = Math.random() < 0.5;
+      if (tier >= 5 && tier <= 10 && this.ambient.filter((a) => a.kind === 'flash').length < 2) {
+        // Small flashes at the screen edge, never more often than 3 times a second.
+        this.ambient.push({ kind: 'flash', x: left ? 14 : W - 14, y: H * (0.35 + Math.random() * 0.4), t: 0, dur: 0.4, dir: 0 });
+      }
+      if (tier === 9 && Math.random() < 0.15 && !this.ambient.some((a) => a.kind === 'heli')) {
+        this.ambient.push({ kind: 'heli', x: left ? -40 : W + 40, y: 100 + Math.random() * 60, t: 0, dur: 7, dir: left ? 1 : -1 });
+      }
+      if (tier === 12 && Math.random() < 0.12 && !this.ambient.some((a) => a.kind === 'launch')) {
+        this.ambient.push({ kind: 'launch', x: left ? 40 : W - 40, y: H, t: 0, dur: 4, dir: 0 });
+      }
+    }
+    const ctx = this.ctx;
+    this.ambient = this.ambient.filter((a) => (a.t += dt) < a.dur);
+    for (const a of this.ambient) {
+      const k = a.t / a.dur;
+      if (a.kind === 'flash') {
+        ctx.fillStyle = 'rgba(20,20,28,0.85)';
+        ctx.beginPath();
+        ctx.arc(a.x, a.y - 12, 5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillRect(a.x - 5, a.y - 7, 10, 14);
+        ctx.fillRect(a.x - 4, a.y - 12, 8, 5);
+        if (k < 0.3) {
+          const fk = 1 - k / 0.3;
+          ctx.fillStyle = `rgba(255,255,240,${0.75 * fk})`;
+          ctx.beginPath();
+          ctx.arc(a.x, a.y - 10, 6 + 10 * (1 - fk), 0, Math.PI * 2);
+          ctx.fill();
+        }
+      } else if (a.kind === 'heli') {
+        const x = a.x + a.dir * (W + 80) * k;
+        ctx.fillStyle = 'rgba(25,25,35,0.75)';
+        ctx.beginPath();
+        ctx.ellipse(x, a.y, 16, 7, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillRect(x - a.dir * 30 - 9, a.y - 2, 18, 3);
+        ctx.fillRect(x - 20, a.y - 10, 40, 2);
+      } else {
+        const y = a.y - k * (H + 120);
+        ctx.fillStyle = 'rgba(255,170,60,0.55)';
+        ctx.beginPath();
+        ctx.moveTo(a.x - 4, y + 18);
+        ctx.lineTo(a.x + 4, y + 18);
+        ctx.lineTo(a.x, y + 50);
+        ctx.fill();
+        ctx.fillStyle = '#E8EDF3';
+        ctx.fillRect(a.x - 4, y - 14, 8, 30);
+      }
+    }
+  }
+
+  // ---------- Platforms ----------
 
   private drawPlatform(p: Platform, sy: number, time: number): void {
     const ctx = this.ctx;
@@ -241,19 +396,17 @@ export class Renderer {
     }
 
     ctx.globalAlpha = alpha;
-    // Edge (thickness) then top face.
     ctx.fillStyle = edge;
     roundRect(ctx, x, sy, pw, ph + 4, 7);
     ctx.fill();
     ctx.fillStyle = fill;
     roundRect(ctx, x, sy, pw, ph, 7);
     ctx.fill();
-    ctx.fillStyle = 'rgba(255,255,255,0.28)';
+    ctx.fillStyle = 'rgba(255,255,255,0.3)';
     roundRect(ctx, x + 5, sy + 2, pw - 10, 3, 2);
     ctx.fill();
 
     if (p.kind === 'red') {
-      // Hazard stripes distinguish base red platforms from red phases.
       ctx.save();
       roundRect(ctx, x, sy, pw, ph, 7);
       ctx.clip();
@@ -269,18 +422,33 @@ export class Renderer {
       ctx.restore();
     }
 
-    // Capture flash: a light sweep over a freshly used platform.
-    if (p.kind === 'white' && p.whiteAge < 0.35) {
-      const k = p.whiteAge / 0.35;
-      ctx.fillStyle = `rgba(255,255,240,${0.8 * (1 - k)})`;
+    // Capture: a wave of light runs across the platform as it turns white.
+    if (p.kind === 'white' && p.whiteAge < 0.4) {
+      const k = p.whiteAge / 0.4;
+      ctx.save();
+      roundRect(ctx, x, sy, pw, ph, 7);
+      ctx.clip();
+      const wx = x - 20 + (pw + 40) * k;
+      const grad = ctx.createLinearGradient(wx - 18, 0, wx + 18, 0);
+      grad.addColorStop(0, 'rgba(255,255,240,0)');
+      grad.addColorStop(0.5, 'rgba(255,255,240,0.95)');
+      grad.addColorStop(1, 'rgba(255,255,240,0)');
+      ctx.fillStyle = grad;
+      ctx.fillRect(wx - 18, sy, 36, ph);
+      ctx.restore();
+      ctx.fillStyle = `rgba(255,255,240,${0.5 * (1 - k)})`;
       roundRect(ctx, x - 4 * k, sy - 3 * k, pw + 8 * k, ph + 6 * k, 9);
       ctx.fill();
     }
 
     if (warnK > 0) {
-      ctx.strokeStyle = `rgba(255,50,60,${0.25 + 0.75 * warnK})`;
-      ctx.lineWidth = 2 + warnK * 2.5;
+      // The red outline glows up during the warning (layered strokes instead of blur).
+      ctx.strokeStyle = `rgba(255,50,60,${0.15 + 0.35 * warnK})`;
+      ctx.lineWidth = 6 + warnK * 3;
       roundRect(ctx, x - 1, sy - 1, pw + 2, ph + 6, 8);
+      ctx.stroke();
+      ctx.strokeStyle = `rgba(255,60,70,${0.3 + 0.7 * warnK})`;
+      ctx.lineWidth = 2 + warnK * 1.5;
       ctx.stroke();
     }
 
@@ -346,14 +514,10 @@ export class Renderer {
       const sy = toY(P.y[i]);
       ctx.globalAlpha = a;
       if (P.kind[i] === 1) {
-        ctx.save();
-        ctx.translate(sx, sy);
-        ctx.rotate(P.rot[i]);
-        ctx.fillStyle = palette.bill;
-        ctx.fillRect(-6, -3.5, 12, 7);
-        ctx.fillStyle = palette.billMark;
-        ctx.fillRect(-2, -2, 4, 4);
-        ctx.restore();
+        drawBill(ctx, sx, sy, P.rot[i]);
+      } else if (P.kind[i] === 2) {
+        ctx.fillStyle = '#FFE58A';
+        ctx.fillRect(sx - 1.5, sy - 1.5, 3, 3);
       } else {
         ctx.fillStyle = 'rgba(255,255,255,0.7)';
         ctx.beginPath();
@@ -364,92 +528,64 @@ export class Renderer {
     ctx.globalAlpha = 1;
   }
 
-  private drawHero(sim: Sim, x: number, footY: number, dt: number): void {
+  private drawBills(dt: number): void {
+    if (!this.bills.length) return;
+    const ctx = this.ctx;
+    let arrived = false;
+    this.bills = this.bills.filter((b) => {
+      b.t += dt;
+      if (b.t < 0) return true;
+      const k = Math.min(1, b.t / b.dur);
+      const e = k * k * (3 - 2 * k);
+      const u = 1 - e;
+      const x = u * u * b.x0 + 2 * u * e * b.cx + e * e * WALLET.x;
+      const y = u * u * b.y0 + 2 * u * e * b.cy + e * e * WALLET.y;
+      ctx.globalAlpha = k > 0.85 ? (1 - k) / 0.15 : 1;
+      drawBill(ctx, x, y, b.rot + k * 4);
+      if (k >= 1) arrived = true;
+      return k < 1;
+    });
+    ctx.globalAlpha = 1;
+    if (arrived) this.onBillArrive();
+  }
+
+  private drawHero(sim: Sim, x: number, footY: number, dt: number, tier: number): void {
     const ctx = this.ctx;
     const hero = sim.hero;
     const target = lightRgb(sim.light);
-    // Smooth flashlight color change (~0.12 s).
-    const k = Math.min(1, dt / 0.12);
+    const k = Math.min(1, dt / 0.12); // flashlight color changes in about 0.12 s
     for (let i = 0; i < 3; i++) this.flashlightColor[i] += (target[i] - this.flashlightColor[i]) * k;
     const [r, g, b] = this.flashlightColor.map(Math.round);
-    const neutral = sim.light === null;
 
-    // Squash on landing, stretch while rising fast.
+    // Squash on landing, stretch while rising fast, a small overshoot after landing.
     const land = Math.exp(-hero.sinceLand * 18);
+    const overshoot = Math.sin(Math.min(1, hero.sinceLand * 6) * Math.PI) * 0.04 * Math.exp(-hero.sinceLand * 4);
     const stretch = Math.min(0.12, Math.max(0, hero.vy) / 6000);
-    const sy = 1 - land * 0.2 + stretch;
+    const sy = 1 - land * 0.2 + stretch + overshoot;
     const sx = 1 + land * 0.16 - stretch * 0.6;
 
     ctx.save();
     ctx.translate(x, footY);
     if (sim.dead) ctx.rotate(hero.spin);
     ctx.scale(sx * hero.facing, sy);
-
-    // Flashlight beam: points down-forward, toward the platforms below.
-    ctx.globalAlpha = neutral ? 0.18 : 0.38;
-    const beam = ctx.createLinearGradient(10, -26, 60, 30);
-    beam.addColorStop(0, `rgba(${r},${g},${b},0.9)`);
-    beam.addColorStop(1, `rgba(${r},${g},${b},0)`);
-    ctx.fillStyle = beam;
-    ctx.beginPath();
-    ctx.moveTo(14, -24);
-    ctx.lineTo(70, 18);
-    ctx.lineTo(30, 34);
-    ctx.closePath();
-    ctx.fill();
-    ctx.globalAlpha = 1;
-
-    // Legs
-    ctx.fillStyle = palette.skinDark;
-    roundRect(ctx, -10, -16, 7, 16, 3);
-    ctx.fill();
-    roundRect(ctx, 3, -16, 7, 16, 3);
-    ctx.fill();
-    // Shorts
-    ctx.fillStyle = palette.shorts;
-    roundRect(ctx, -12, -24, 24, 12, 4);
-    ctx.fill();
-    // Torso (tank top)
-    ctx.fillStyle = palette.shirt;
-    roundRect(ctx, -12, -42, 24, 20, 7);
-    ctx.fill();
-    // Back arm
-    ctx.fillStyle = palette.skin;
-    roundRect(ctx, -16, -40, 6, 15, 3);
-    ctx.fill();
-    // Front arm holding the flashlight
-    ctx.save();
-    ctx.translate(9, -38);
-    ctx.rotate(0.9);
-    roundRect(ctx, -3, 0, 6, 14, 3);
-    ctx.fill();
-    ctx.fillStyle = palette.torch;
-    roundRect(ctx, -4, 12, 8, 9, 2);
-    ctx.fill();
-    ctx.fillStyle = `rgb(${r},${g},${b})`;
-    ctx.fillRect(-4, 19, 8, 3);
-    ctx.restore();
-    // Head
-    ctx.fillStyle = palette.skin;
-    ctx.beginPath();
-    ctx.arc(0, -50, 9, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = palette.hair;
-    ctx.beginPath();
-    ctx.arc(-1, -53, 8.5, Math.PI * 1.05, Math.PI * 2.05);
-    ctx.fill();
-    ctx.fillStyle = '#1d1a24';
-    ctx.fillRect(4, -51, 2, 3);
+    drawHeroBody(ctx, {
+      tier,
+      light: `${r},${g},${b}`,
+      neutral: sim.light === null,
+      sinceLand: hero.sinceLand,
+      vy: hero.vy,
+      time: sim.time,
+    });
     ctx.restore();
 
-    // Red aura bubble with a pulsing rim.
     if (sim.light === 'red' && !sim.dead) {
       const pulse = this.auraPulse;
+      const breathe = this.reducedEffects ? 0 : Math.sin(sim.time * 5) * 1.5;
       ctx.strokeStyle = `rgba(255,70,80,${0.55 + 0.45 * pulse})`;
       ctx.lineWidth = 2.5 + pulse * 3;
       ctx.fillStyle = 'rgba(255,60,70,0.12)';
       ctx.beginPath();
-      ctx.ellipse(x, footY - 27, 27 + pulse * 6, 36 + pulse * 6, 0, 0, Math.PI * 2);
+      ctx.ellipse(x, footY - 27, 27 + pulse * 6 + breathe, 36 + pulse * 6 + breathe, 0, 0, Math.PI * 2);
       ctx.fill();
       ctx.stroke();
     }
@@ -458,11 +594,13 @@ export class Renderer {
   private drawFloaters(toY: (y: number) => number, dt: number): void {
     const ctx = this.ctx;
     ctx.textAlign = 'center';
-    ctx.font = '700 18px system-ui, sans-serif';
     this.floaters = this.floaters.filter((f) => f.life > 0);
     for (const f of this.floaters) {
       f.life -= dt;
-      f.y += f.vy * dt;
+      f.y += 70 * dt;
+      const k = 1 - f.life / f.max;
+      const pop = k < 0.15 ? 0.6 + (k / 0.15) * 0.5 : 1.1 - Math.min(0.1, (k - 0.15) * 0.4);
+      ctx.font = `800 ${Math.round((f.big ? 22 : 18) * pop)}px 'Rubik Variable', Rubik, system-ui, sans-serif`;
       ctx.globalAlpha = Math.max(0, f.life / f.max);
       ctx.fillStyle = 'rgba(0,0,0,0.45)';
       ctx.fillText(f.text, f.x + 1, toY(f.y) + 2);
@@ -471,6 +609,37 @@ export class Renderer {
     }
     ctx.globalAlpha = 1;
   }
+
+  /** Adaptive quality: if frames average over 20 ms for about 2 s, halve particles. */
+  private trackQuality(dt: number): void {
+    if (dt <= 0) return;
+    this.frameTimes.push(dt);
+    if (this.frameTimes.length < 120) return;
+    const avg = this.frameTimes.reduce((a, b) => a + b, 0) / this.frameTimes.length;
+    this.frameTimes.length = 0;
+    const low = avg > 0.02;
+    if (low !== this.lowQuality) {
+      this.lowQuality = low;
+      this.particles.cap = low ? MAX_PARTICLES / 2 : MAX_PARTICLES;
+      this.particles.next %= this.particles.cap;
+    }
+  }
+}
+
+function easeInOut(t: number): number {
+  const k = Math.max(0, Math.min(1, t));
+  return k < 0.5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2;
+}
+
+function drawBill(ctx: CanvasRenderingContext2D, x: number, y: number, rot: number): void {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(rot);
+  ctx.fillStyle = palette.bill;
+  ctx.fillRect(-6, -3.5, 12, 7);
+  ctx.fillStyle = palette.billMark;
+  ctx.fillRect(-2, -2, 4, 4);
+  ctx.restore();
 }
 
 function lightRgb(light: LightId | null): [number, number, number] {
@@ -514,7 +683,6 @@ export function drawIcon(
     ctx.lineTo(cx + r, cy + r * 0.8);
     ctx.lineTo(cx - r, cy + r * 0.8);
   } else {
-    // Shield
     ctx.moveTo(cx - r * 0.85, cy - r * 0.8);
     ctx.lineTo(cx + r * 0.85, cy - r * 0.8);
     ctx.lineTo(cx + r * 0.85, cy);

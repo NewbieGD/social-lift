@@ -116,7 +116,8 @@ export class Sim {
     }
 
     this.applyPress(input.press);
-    this.moveHero(input.axis);
+    // Axis is quantized exactly as recorded, so the input log replays the run bit for bit.
+    this.moveHero(Math.round(input.axis * 8) / 8);
     this.updatePlatforms();
     this.checkLanding();
     this.updateCombo();
