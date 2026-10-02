@@ -1,0 +1,205 @@
+// Server session: bootstrap, consent, runs (with prefetch and retry queue), settings sync.
+// The server is the source of truth; localStorage is only a cache.
+import { RUN_START_TIMEOUT_MS } from '../config';
+import { isInVk } from '../platform/vk';
+import { api, ApiError } from './api';
+
+export interface Stats {
+  best_all: number;
+  best_tier: number;
+  best_week: number;
+  last_score: number | null;
+  total_runs: number;
+  rank_all: number | null;
+  rank_week: number | null;
+}
+
+export interface Bootstrap {
+  profile: { id: number; name: string | null; photo: string | null };
+  flags: { consent_ok: boolean; tutorial_done: boolean };
+  terms_version: number;
+  settings: Record<string, string | number | boolean>;
+  settings_updated_at: number;
+  stats: Stats;
+  server_time: number;
+  ads: Record<string, number | boolean>;
+}
+
+export interface RunTicket {
+  run_id: string;
+  seed: number;
+  started_at: number;
+  token: string;
+}
+
+export interface RunReport {
+  run_id: string;
+  token: string;
+  score: number;
+  duration_ms: number;
+  tier: number;
+  captures: number;
+  max_combo: number;
+  input_log: number[][];
+}
+
+export interface FinishResult {
+  run_id: string;
+  status: 'finished' | 'rejected';
+  reason: string | null;
+  score: number;
+  best_all: number;
+  best_tier: number;
+  best_week: number;
+  is_record: boolean;
+  is_week_record: boolean;
+  rank_all: number | null;
+  rank_week: number | null;
+  prev_rank_all: number | null;
+  prev_rank_week: number | null;
+}
+
+export type Mode = 'loading' | 'online' | 'offline' | 'outside';
+
+const QUEUE_KEY = 'sl_pending_runs';
+const MAX_QUEUE = 10;
+
+export class Session {
+  mode: Mode = 'loading';
+  data: Bootstrap | null = null;
+  private prefetched: RunTicket | null = null;
+  private prefetching: Promise<RunTicket | null> | null = null;
+
+  get ranked(): boolean {
+    return this.mode === 'online' && !!this.data?.flags.consent_ok;
+  }
+
+  async bootstrap(): Promise<void> {
+    if (!isInVk()) {
+      this.mode = 'outside';
+      return;
+    }
+    this.mode = 'loading';
+    try {
+      this.data = await api<Bootstrap>('POST', '/session/bootstrap');
+      this.mode = 'online';
+      void this.flushQueue();
+    } catch {
+      this.mode = 'offline';
+    }
+  }
+
+  async acceptConsent(): Promise<void> {
+    if (!this.data) return;
+    await api('POST', '/consent', { version: this.data.terms_version });
+    this.data.flags.consent_ok = true;
+  }
+
+  /** Returns a server ticket, or null to play an unranked run. */
+  async takeTicket(): Promise<RunTicket | null> {
+    if (!this.ranked) return null;
+    if (this.prefetched) {
+      const t = this.prefetched;
+      this.prefetched = null;
+      return t;
+    }
+    if (this.prefetching) {
+      const t = await this.prefetching;
+      this.prefetched = null;
+      if (t) return t;
+    }
+    return this.requestTicket();
+  }
+
+  /** While the player looks at the results, fetch the next ticket in advance. */
+  prefetch(): void {
+    if (!this.ranked || this.prefetched || this.prefetching) return;
+    this.prefetching = this.requestTicket().then((t) => {
+      this.prefetched = t;
+      this.prefetching = null;
+      return t;
+    });
+  }
+
+  private async requestTicket(): Promise<RunTicket | null> {
+    try {
+      return await api<RunTicket>('POST', '/runs/start', undefined, RUN_START_TIMEOUT_MS);
+    } catch {
+      return null;
+    }
+  }
+
+  async finish(report: RunReport): Promise<FinishResult | null> {
+    try {
+      const res = await api<FinishResult>('POST', '/runs/finish', report);
+      this.applyResult(res);
+      return res;
+    } catch (e) {
+      // Only network trouble is worth retrying; a rejected request will not change.
+      if (e instanceof ApiError && (e.offline || e.status >= 500 || e.status === 429)) this.enqueue(report);
+      return null;
+    }
+  }
+
+  async saveSettings(settings: Record<string, string | number | boolean>): Promise<void> {
+    if (this.mode !== 'online') return;
+    const updated_at = Date.now();
+    try {
+      await api('PUT', '/settings', { settings, updated_at });
+      if (this.data) {
+        this.data.settings = settings;
+        this.data.settings_updated_at = updated_at;
+      }
+    } catch {
+      /* keep local value; next change will sync */
+    }
+  }
+
+  private applyResult(r: FinishResult): void {
+    if (!this.data || r.status !== 'finished') return;
+    const s = this.data.stats;
+    s.best_all = r.best_all;
+    s.best_tier = r.best_tier;
+    s.best_week = r.best_week;
+    s.last_score = r.score;
+    s.rank_all = r.rank_all;
+    s.rank_week = r.rank_week;
+    s.total_runs += 1;
+  }
+
+  private enqueue(report: RunReport): void {
+    try {
+      const q = JSON.parse(localStorage.getItem(QUEUE_KEY) || '[]') as RunReport[];
+      // Keep the queue small: long input logs are dropped from queued copies.
+      const slim = JSON.stringify(report).length > 60_000 ? { ...report, input_log: [] } : report;
+      q.push(slim);
+      localStorage.setItem(QUEUE_KEY, JSON.stringify(q.slice(-MAX_QUEUE)));
+    } catch {
+      /* storage unavailable */
+    }
+  }
+
+  private async flushQueue(): Promise<void> {
+    let q: RunReport[];
+    try {
+      q = JSON.parse(localStorage.getItem(QUEUE_KEY) || '[]') as RunReport[];
+    } catch {
+      return;
+    }
+    if (!q.length) return;
+    const left: RunReport[] = [];
+    for (const report of q) {
+      try {
+        const res = await api<FinishResult>('POST', '/runs/finish', report);
+        this.applyResult(res);
+      } catch (e) {
+        if (e instanceof ApiError && (e.offline || e.status >= 500 || e.status === 429)) left.push(report);
+      }
+    }
+    try {
+      localStorage.setItem(QUEUE_KEY, JSON.stringify(left));
+    } catch {
+      /* ignore */
+    }
+  }
+}

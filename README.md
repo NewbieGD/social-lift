@@ -3,7 +3,7 @@
 HTML5-игра для каталога игр VK Mini Apps.
 
 - `frontend/` — игра (TypeScript, Vite, Canvas 2D)
-- `backend/` — сервер (FastAPI, PostgreSQL), появится на этапе 2
+- `backend/` — сервер (FastAPI, PostgreSQL, Alembic), деплой на Amvera
 - `docs/` — документы для модерации
 
 ## Локальный запуск фронтенда
@@ -23,3 +23,5 @@ npm run dev
 - Телефон: ведите пальцем по полю; кнопки цветов внизу.
 
 Все числа баланса — в `frontend/src/core/gameConfig.ts`.
+
+Инструкция по деплою: `docs/DEPLOY.md`. Тесты бэкенда запускаются в GitHub Actions при каждом пуше в `backend/`.

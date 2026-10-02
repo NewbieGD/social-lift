@@ -47,8 +47,14 @@
           <p id="startControls" class="muted"></p>
           <p id="startRed" class="muted"></p>
           <div class="controls-picker"></div>
+          <p id="netStatus" class="status"></p>
+          <label id="consentBox" class="consent hidden">
+            <input type="checkbox" id="consentCheck" />
+            <span id="consentText"></span>
+          </label>
           <button id="startBtn" class="primary"></button>
-          <p id="protoNote" class="note"></p>
+          <button id="retryBtn" class="secondary hidden"></button>
+          <p id="ageNote" class="note"></p>
         </div>
       </div>
 
@@ -68,6 +74,7 @@
           <h2 id="resultTier"></h2>
           <div class="big-score" id="resultScore">0</div>
           <div class="record hidden" id="resultRecord"></div>
+          <p class="rank" id="resultRank"></p>
           <dl class="stats" id="resultStats"></dl>
           <button id="againBtn" class="primary"></button>
         </div>

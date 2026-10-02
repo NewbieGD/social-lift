@@ -561,7 +561,7 @@ button:focus-visible {
 }
 
 /* Narrow phones: stack picker options so labels never get cut. */
-@media (max-width: 360px) {
+@media (max-width: 420px) {
   .seg:not(.seg-2) {
     grid-template-columns: 1fr;
   }
@@ -574,4 +574,52 @@ button:focus-visible {
   h1 {
     font-size: 26px;
   }
+}
+
+/* Start screen: connection state and consent */
+.status {
+  min-height: 20px;
+  margin: 0 0 12px;
+  font-size: 14px;
+  color: var(--ink-dim);
+}
+.status.warn {
+  color: #ffc56b;
+}
+.consent {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  margin: 0 0 14px;
+  padding: 12px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.07);
+  text-align: left;
+  font-size: 14px;
+  line-height: 1.4;
+  cursor: pointer;
+}
+.consent.hidden,
+button.hidden {
+  display: none;
+}
+.consent input {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+button.primary:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.rank {
+  min-height: 20px;
+  margin: 0 0 4px;
+  font-size: 14px;
+  color: var(--ink);
+}
+.rank .up {
+  color: #7be08f;
 }

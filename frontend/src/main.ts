@@ -6,7 +6,10 @@ import type { SimEvent } from './core/types';
 import { ru } from './i18n/ru';
 import { InputController } from './input/input';
 import { scenes } from './render/palette';
-import { applyControls, loadControls, mountPickers } from './ui/controlsLayout';
+import { AGE_LABEL } from './config';
+import { Session, type RunTicket } from './net/session';
+import { initVk } from './platform/vk';
+import { adoptServerControls, applyControls, loadControls, mountPickers, refreshPickers } from './ui/controlsLayout';
 import { Renderer } from './render/renderer';
 
 const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
@@ -158,8 +161,23 @@ function updateHud(dt: number): void {
 
 // ---------- Game flow ----------
 
-function startRun(): void {
-  sim = new Sim(randomSeed(), sim.viewH);
+const session = new Session();
+let ticket: RunTicket | null = null;
+let starting = false;
+
+const startBtn = $<HTMLButtonElement>('startBtn');
+const againBtn = $<HTMLButtonElement>('againBtn');
+const consentCheck = $<HTMLInputElement>('consentCheck');
+
+async function startRun(): Promise<void> {
+  if (starting) return;
+  starting = true;
+  setBusy(true);
+  ticket = await session.takeTicket();
+  starting = false;
+  setBusy(false);
+
+  sim = new Sim(ticket ? ticket.seed : randomSeed(), sim.viewH);
   input.heroXProvider = () => sim.hero.x;
   input.reset();
   layout();
@@ -168,14 +186,27 @@ function startRun(): void {
   acc = 0;
   running = true;
   paused = false;
+  last = performance.now();
   document.body.style.backgroundColor = scenes[0].page;
   renderer.handleEvents([{ type: 'tier', tier: 0 }]);
   hide('startScreen');
   hide('resultScreen');
   hide('pauseScreen');
+  if (!ticket && session.mode !== 'outside') toast(ru.net.unranked);
 }
 
-function readBest(): number {
+function setBusy(busy: boolean): void {
+  for (const b of [startBtn, againBtn]) {
+    b.disabled = busy;
+    if (busy) b.textContent = ru.net.preparing;
+  }
+  if (!busy) {
+    againBtn.textContent = ru.result.again;
+    renderStartScreen();
+  }
+}
+
+function readLocalBest(): number {
   try {
     return Number(localStorage.getItem('sl_best') || 0);
   } catch {
@@ -183,7 +214,7 @@ function readBest(): number {
   }
 }
 
-function writeBest(v: number): void {
+function writeLocalBest(v: number): void {
   try {
     localStorage.setItem('sl_best', String(v));
   } catch {
@@ -193,28 +224,76 @@ function writeBest(v: number): void {
 
 function showResult(): void {
   running = false;
-  const best = readBest();
-  const isRecord = sim.score > best;
-  if (isRecord) writeBest(sim.score);
+  const runTicket = ticket;
+  ticket = null;
+  const serverBest = session.data?.stats.best_all;
+  const best = serverBest ?? readLocalBest();
+  const localRecord = sim.score > best;
+  if (!runTicket && session.mode === 'outside' && localRecord) writeLocalBest(sim.score);
+
   $('resultReason').textContent = sim.deathReason ? ru.result.reasons[sim.deathReason] : '';
   $('resultLabel').textContent = ru.result.title;
   $('resultTier').textContent = ru.tiers[sim.tier];
   $('resultScore').textContent = String(sim.score);
   const rec = $('resultRecord');
   rec.textContent = ru.result.record;
-  rec.classList.toggle('hidden', !isRecord || sim.score === 0);
+  rec.classList.toggle('hidden', !localRecord || sim.score === 0);
+  renderStats(Math.max(best, sim.score));
+  againBtn.textContent = ru.result.again;
+  show('resultScreen');
+
+  const rankEl = $('resultRank');
+  if (!runTicket) {
+    rankEl.textContent = session.mode === 'outside' ? '' : ru.net.unranked;
+    return;
+  }
+  rankEl.textContent = ru.net.saving;
+  const report = {
+    run_id: runTicket.run_id,
+    token: runTicket.token,
+    score: sim.score,
+    duration_ms: Math.round(sim.runTime * 1000),
+    tier: sim.tier,
+    captures: sim.captures,
+    max_combo: sim.maxCombo,
+    input_log: sim.inputLog,
+  };
+  void session.finish(report).then((res) => {
+    if (!res) {
+      rankEl.textContent = ru.net.saveFailed;
+    } else if (res.status === 'rejected') {
+      rankEl.textContent = res.reason === 'too_short' ? ru.net.tooShort : ru.net.rejected;
+    } else {
+      rec.classList.toggle('hidden', !res.is_record);
+      renderStats(res.best_all);
+      rankEl.innerHTML = [
+        rankLine(ru.net.rankWeek, res.rank_week, res.prev_rank_week),
+        rankLine(ru.net.rankAll, res.rank_all, res.prev_rank_all),
+      ]
+        .filter(Boolean)
+        .join('<br>');
+    }
+    session.prefetch();
+  });
+}
+
+function rankLine(label: string, rank: number | null, prev: number | null): string {
+  if (!rank) return '';
+  const up = prev && rank < prev ? ` <span class="up">↑${prev - rank}</span>` : '';
+  return `${label}: ${rank}${up}`;
+}
+
+function renderStats(best: number): void {
   const secs = Math.floor(sim.runTime);
   const time = `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`;
   $('resultStats').innerHTML = [
-    [ru.result.best, String(Math.max(best, sim.score))],
+    [ru.result.best, String(best)],
     [ru.result.captures, String(sim.captures)],
     [ru.result.combo, String(sim.maxCombo)],
     [ru.result.time, time],
   ]
     .map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`)
     .join('');
-  $('againBtn').textContent = ru.result.again;
-  show('resultScreen');
 }
 
 function pause(): void {
@@ -238,24 +317,86 @@ function hide(id: string): void {
   $(id).classList.add('hidden');
 }
 
+// ---------- Start screen: connection and consent ----------
+
+function needsConsent(): boolean {
+  return session.mode === 'online' && !!session.data && !session.data.flags.consent_ok;
+}
+
+function renderStartScreen(): void {
+  if (starting) return;
+  const status = $('netStatus');
+  status.classList.remove('warn');
+  $('retryBtn').classList.toggle('hidden', session.mode !== 'offline');
+  $('consentBox').classList.toggle('hidden', !needsConsent());
+  startBtn.disabled = session.mode === 'loading' || (needsConsent() && !consentCheck.checked);
+  startBtn.textContent = needsConsent() ? ru.net.acceptAndPlay : ru.start.play;
+  if (session.mode === 'loading') status.textContent = ru.net.loading;
+  else if (session.mode === 'outside') status.textContent = ru.net.outside;
+  else if (session.mode === 'offline') {
+    status.textContent = ru.net.offline;
+    status.classList.add('warn');
+  } else if (session.data && !needsConsent()) {
+    status.textContent = ru.net.stats(session.data.stats.best_all, session.data.stats.rank_week);
+  } else status.textContent = '';
+}
+
+async function onStartClick(): Promise<void> {
+  if (needsConsent()) {
+    if (!consentCheck.checked) return;
+    startBtn.disabled = true;
+    try {
+      await session.acceptConsent();
+    } catch {
+      $('netStatus').textContent = ru.net.consentFailed;
+      $('netStatus').classList.add('warn');
+      startBtn.disabled = false;
+      return;
+    }
+  }
+  await startRun();
+}
+
+async function connect(): Promise<void> {
+  session.mode = 'loading';
+  renderStartScreen();
+  await session.bootstrap();
+  if (session.data) {
+    const adopted = adoptServerControls(session.data.settings, session.data.settings_updated_at);
+    if (adopted) {
+      applyPrefs(adopted);
+      refreshPickers();
+    }
+  }
+  renderStartScreen();
+}
+
 $('startTitle').textContent = ru.start.title;
 $('startLead').textContent = ru.start.lead;
 $('startControls').textContent = isTouch ? ru.start.controlsTouch : ru.start.controlsKeys;
 $('startRed').textContent = ru.start.redHint;
-$('startBtn').textContent = ru.start.play;
-$('protoNote').textContent = ru.proto;
-$('startBtn').addEventListener('click', startRun);
+$('consentText').textContent = ru.net.consent;
+$('retryBtn').textContent = ru.net.retry;
+$('ageNote').textContent = ru.net.age(AGE_LABEL);
+startBtn.addEventListener('click', () => void onStartClick());
+consentCheck.addEventListener('change', renderStartScreen);
+$('retryBtn').addEventListener('click', () => void connect());
 
-const applyPrefs = (p = loadControls()): void => {
+function applyPrefs(p = loadControls()): void {
   applyControls(p, { controls: controlsEl, buttons: buttonsEl, board, shield: buttons.get('red')! });
   layout();
-};
-mountPickers(applyPrefs);
+}
+mountPickers((p) => {
+  applyPrefs(p);
+  void session.saveSettings({ layout: p.layout, side: p.side });
+});
 applyPrefs();
-$('againBtn').addEventListener('click', startRun);
+againBtn.addEventListener('click', () => void startRun());
 $('pauseBtn').addEventListener('click', pause);
 $('resumeBtn').addEventListener('click', resume);
-$('restartBtn').addEventListener('click', startRun);
+$('restartBtn').addEventListener('click', () => void startRun());
+initVk({ onHide: pause });
+void connect();
 
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) pause();
@@ -263,7 +404,7 @@ document.addEventListener('visibilitychange', () => {
 window.addEventListener('blur', pause);
 window.addEventListener('keydown', (e) => {
   if (e.code === 'Escape') (paused ? resume : pause)();
-  if (e.code === 'Enter' && !running) startRun();
+  if (e.code === 'Enter' && !running && !$('startScreen').classList.contains('hidden')) void onStartClick();
 });
 
 // ---------- Main loop ----------
