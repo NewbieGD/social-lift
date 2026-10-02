@@ -14,6 +14,7 @@ import { haptic, hapticsSupported, initHaptics } from './platform/haptics';
 import { ads, DEFAULT_ADS, type AdsConfig } from './platform/ads';
 import { initVk } from './platform/vk';
 import { scenes } from './render/palette';
+import { drawHeroBody } from './render/hero';
 import { Renderer } from './render/renderer';
 import { applyControls } from './ui/controlsLayout';
 import { $ } from './ui/dom';
@@ -36,6 +37,11 @@ const buttonsEl = $('buttons');
 const controlsEl = $('controls');
 const countdownEl = $('countdown');
 const pressEl = $('press');
+const floorEl = $('floor');
+const comboBar = $('comboBar');
+const shatterEl = $('shatter');
+const edgeGlow = $('edgeGlow');
+const walletIcon = $('walletIcon');
 
 const renderer = new Renderer(canvas);
 const input = new InputController([field]);
@@ -157,6 +163,64 @@ applySettings(settingsStore.get());
 
 let prevLight: LightId | null = null;
 
+let lastMult = 1;
+let slowTimer = 0;
+
+renderer.onItemSnap = (item) => {
+  audio.play('snap', { item });
+  if (settingsStore.get().vibration) haptic('light');
+};
+
+const WALLETS = [
+  // Worn wallet, billfold, briefcase, safe.
+  '<svg viewBox="0 0 28 20"><rect x="1" y="3" width="26" height="15" rx="3" fill="#8A6A4A"/><rect x="1" y="3" width="26" height="5" rx="2" fill="#6B5038"/><circle cx="21" cy="12" r="2" fill="#C9A77A"/></svg>',
+  '<svg viewBox="0 0 28 20"><rect x="1" y="2" width="26" height="16" rx="3" fill="#2E2A28"/><rect x="4" y="0" width="16" height="7" rx="1" fill="#8FDC98"/><rect x="1" y="6" width="26" height="12" rx="3" fill="#3A3432"/><rect x="18" y="9" width="9" height="5" rx="2" fill="#C9A77A"/></svg>',
+  '<svg viewBox="0 0 28 20"><rect x="10" y="0" width="8" height="4" rx="1.5" fill="none" stroke="#C7CCD6" stroke-width="2"/><rect x="1" y="4" width="26" height="15" rx="2.5" fill="#1F2A44"/><rect x="1" y="9" width="26" height="2" fill="#C7CCD6"/><rect x="12" y="8" width="4" height="4" rx="1" fill="#E8C060"/></svg>',
+  '<svg viewBox="0 0 28 20"><rect x="1" y="1" width="26" height="18" rx="3" fill="#D9A520"/><rect x="3" y="3" width="22" height="14" rx="2" fill="#F1C84B"/><circle cx="14" cy="10" r="4.5" fill="none" stroke="#8A5A00" stroke-width="2"/><path d="M14 6v8M10 10h8" stroke="#8A5A00" stroke-width="1.5"/></svg>',
+];
+
+/** The wallet in the HUD grows with wealth. */
+function setWallet(tier: number): void {
+  const i = tier >= 9 ? 3 : tier >= 6 ? 2 : tier >= 3 ? 1 : 0;
+  if (walletIcon.dataset.i === String(i)) return;
+  walletIcon.dataset.i = String(i);
+  walletIcon.innerHTML = WALLETS[i];
+}
+
+let floorTimer = 0;
+/** Elevator floor display at the top of the field when a new tier is reached. */
+function showFloor(tier: number): void {
+  const prev = Math.max(1, tier);
+  floorEl.innerHTML = `<span class="floor-arrow">▲</span><span class="floor-num"><b class="old">${prev}</b><b class="new">${tier + 1}</b></span><span class="floor-name">${ru.tiers[tier]}</span>`;
+  floorEl.classList.remove('on');
+  void floorEl.offsetWidth;
+  floorEl.classList.add('on');
+  clearTimeout(floorTimer);
+  floorTimer = window.setTimeout(() => floorEl.classList.remove('on'), 2200);
+}
+
+/** A soft golden glow along the field edges for each combo step. */
+function comboStep(mult: number): void {
+  audio.play('combo');
+  audio.setIntense(mult >= 3);
+  if (settingsStore.get().reducedFx) return;
+  edgeGlow.classList.remove('on');
+  void edgeGlow.offsetWidth;
+  edgeGlow.classList.add('on');
+}
+
+/** The multiplier cracks and crumbles when the streak breaks. */
+function comboBreak(mult: number): void {
+  audio.play('break');
+  audio.setIntense(false);
+  if (settingsStore.get().reducedFx) return;
+  const text = ru.hud.combo(mult);
+  shatterEl.innerHTML = [0, 1, 2, 3].map((i) => `<span class="shard s${i}">${text}</span>`).join('');
+  shatterEl.classList.remove('on');
+  void shatterEl.offsetWidth;
+  shatterEl.classList.add('on');
+}
+
 renderer.onBillArrive = () => {
   walletEl.classList.remove('bump');
   void walletEl.offsetWidth;
@@ -192,7 +256,10 @@ function toast(text: string): void {
 function handleUiEvents(events: SimEvent[]): void {
   for (const e of events) {
     if (e.type === 'capture') {
-      audio.play('capture', { color: e.color });
+      audio.play('capture', { color: e.color, streak: sim.streak });
+      const m = sim.multiplier;
+      if (m > lastMult && m >= 2) comboStep(m);
+      lastMult = m;
       if (settingsStore.get().vibration) haptic('light');
     } else if (e.type === 'land') {
       audio.play('jump', { tier: sim.tier });
@@ -209,7 +276,9 @@ function handleUiEvents(events: SimEvent[]): void {
       toast(`${ru.hud.newColor} ${ru.colors[e.color]}`);
       audio.play('unlock');
     } else if (e.type === 'tier') {
-      if (!events.some((x) => x.type === 'unlock')) toast(ru.tiers[e.tier]);
+      showFloor(e.tier);
+      setWallet(e.tier);
+      if (mode === 'run' && !settingsStore.get().reducedFx) slowTimer = 0.2; // a beat for the suit-up
       document.body.style.backgroundColor = scenes[e.tier].page;
       audio.setTier(e.tier);
       audio.play('bell');
@@ -217,6 +286,11 @@ function handleUiEvents(events: SimEvent[]): void {
       if (mode === 'run') session.event('tier_reached', e.tier);
       if (e.tier === 7) showPress(ru.press.outlet, ru.press.talked, 'news');
       if (e.tier === 10) showPress(ru.press.magazine, ru.press.cover, 'cover');
+    } else if (e.type === 'comboReset') {
+      if (lastMult >= 2) comboBreak(lastMult);
+      lastMult = 1;
+    } else if (e.type === 'close') {
+      audio.play('close');
     } else if (e.type === 'death') {
       audio.play('death');
       if (settingsStore.get().vibration) haptic('heavy');
@@ -236,6 +310,11 @@ function updateHud(dt: number): void {
   const mult = sim.multiplier;
   comboEl.textContent = ru.hud.combo(mult);
   comboEl.classList.toggle('on', mult > 1);
+  // Remaining time of the 2.5 s combo window, as a shrinking bar (transform only).
+  const left = sim.streak > 0 ? Math.max(0, 1 - (sim.time - sim.lastCaptureTime) / gameConfig.combo.windowSec) : 0;
+  comboBar.style.transform = `scaleX(${left.toFixed(3)})`;
+  comboBar.parentElement!.classList.toggle('on', sim.streak > 0 && mode !== 'menu');
+  audio.setDanger(mode === 'run' && !paused ? renderer.danger : 0);
   tierEl.textContent = mode === 'tutorial' ? ru.tutorial.badge : ticket || mode !== 'run' ? ru.tiers[sim.tier] : ru.hud.unranked;
   const hint = mode === 'tutorial' ? tutorialHint() : '';
   if (hintEl.dataset.text !== hint) {
@@ -335,6 +414,11 @@ function newSim(seed: number, tutorial = false): void {
   document.body.style.backgroundColor = scenes[0].page;
   renderer.setScene(0);
   renderer.heroTierOverride = null;
+  renderer.menuGesture = null;
+  lastMult = 1;
+  slowTimer = 0;
+  audio.setIntense(false);
+  setWallet(0);
   renderer.camShift = 0;
   renderer.prewarm(1, sim.viewH);
   prevLight = null;
@@ -495,6 +579,36 @@ function finishRun(): void {
     });
 }
 
+/** The hero portrait for the glossy magazine cover on high tiers. */
+function drawCoverHero(c: HTMLCanvasElement, tier: number): void {
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  c.width = 72 * dpr;
+  c.height = 96 * dpr;
+  const g = c.getContext('2d');
+  if (!g) return;
+  g.scale(dpr, dpr);
+  g.translate(36, 90);
+  g.scale(1.45, 1.45);
+  drawHeroBody(g, { tier, light: '255,214,64', neutral: true, sinceLand: 1, vy: 0, time: 0, face: 'grin', gesture: 'pocket' });
+}
+
+let confettiTimer = 0;
+/** New record: a shower of bills over the results and a fanfare. */
+function celebrate(): void {
+  audio.play('fanfare');
+  if (settingsStore.get().reducedFx) return;
+  const host = document.getElementById('confetti') ?? document.body.appendChild(Object.assign(document.createElement('div'), { id: 'confetti' }));
+  host.className = 'confetti';
+  host.innerHTML = Array.from({ length: 26 }, (_, i) => {
+    const x = Math.round(Math.random() * 100);
+    const d = (Math.random() * 0.6).toFixed(2);
+    const r = Math.round(Math.random() * 720 - 360);
+    return `<i style="left:${x}%;--d:${d}s;--r:${r}deg;--s:${(0.8 + Math.random() * 0.6).toFixed(2)}" class="${i % 3 === 0 ? 'gold' : ''}"></i>`;
+  }).join('');
+  clearTimeout(confettiTimer);
+  confettiTimer = window.setTimeout(() => (host.innerHTML = ''), 2600);
+}
+
 /** Score counts up on the results card. */
 function countUp(el: HTMLElement): void {
   const target = Number(el.dataset.target || 0);
@@ -518,6 +632,7 @@ function goMenu(): void {
   newSim(randomSeed());
   const best = bestTier();
   renderer.heroTierOverride = best;
+  renderer.menuGesture = best >= 12 ? 'wave' : best >= 8 ? 'tie' : best >= 3 ? 'pocket' : 'scratch';
   renderer.camShift = -sim.viewH * 0.45;
   audio.setTier(best);
   setSkin(best);
@@ -604,7 +719,12 @@ router.register('pause', { html: () => V.pauseView(settingsStore.get()), modal: 
 router.register('result', {
   html: () => V.resultView(resultData!),
   modal: true,
-  mount: (root) => countUp(root.querySelector<HTMLElement>('#resultScore')!),
+  mount: (root) => {
+    countUp(root.querySelector<HTMLElement>('#resultScore')!);
+    const thumb = root.querySelector<HTMLCanvasElement>('#coverHero');
+    if (thumb) drawCoverHero(thumb, resultData?.tier ?? 0);
+    if (resultData?.record && resultData.score > 0) celebrate();
+  },
 });
 router.register('tutorialDone', { html: () => V.tutorialDoneView(), modal: true });
 let stubKind: V.StubKind = 'offline';
@@ -868,6 +988,9 @@ function frame(now: number): void {
       if (deathTimer > stop + slowMoSec) finishRun();
     } else if (mode === 'tutorial') {
       scale = 0.8; // the tutorial runs a little slower
+    } else if (slowTimer > 0) {
+      slowTimer -= realDt;
+      scale = 0.4;
     }
     acc += realDt * scale;
     while (acc >= DT && (mode === 'run' || mode === 'tutorial')) {

@@ -55,4 +55,5 @@ export type SimEvent =
   | { type: 'light'; light: LightId }
   | { type: 'warn'; id: number }
   | { type: 'comboReset' }
-  | { type: 'runStart' };
+  | { type: 'runStart' }
+  | { type: 'close'; x: number; y: number };

@@ -329,12 +329,28 @@ export interface ResultData {
 
 export function resultView(d: ResultData): string {
   const time = `${Math.floor(d.seconds / 60)}:${String(Math.floor(d.seconds % 60)).padStart(2, '0')}`;
+  const words = ru.tiers[d.tier].split(' ');
+  // Words of the headline appear one by one, like a press run.
+  const headline = words.map((w, i) => `<span style="--w:${i}">${esc(w)}</span>`).join(' ');
+  const magazine = d.tier >= 8;
+  const cover = magazine
+    ? `<div class="paper magazine">
+        <p class="mag-title">${ru.press.magazine}</p>
+        <canvas id="coverHero" class="cover-hero" width="72" height="96" aria-hidden="true"></canvas>
+        <div class="mag-text">
+          <p class="paper-kicker">${esc(d.reason)}</p>
+          <p class="paper-label">${ru.result.reachedTitle}</p>
+          <h2 class="paper-headline">${headline}</h2>
+        </div>
+      </div>`
+    : `<div class="paper">
+        <p class="paper-outlet">${ru.press.outlet}</p>
+        <p class="paper-kicker">${esc(d.reason)}</p>
+        <p class="paper-label">${ru.result.reachedTitle}</p>
+        <h2 class="paper-headline">${headline}</h2>
+      </div>`;
   return `<div class="panel result">
-    <div class="paper">
-      <p class="paper-kicker">${esc(d.reason)}</p>
-      <p class="paper-label">${ru.result.reachedTitle}</p>
-      <h2 class="paper-headline">${esc(ru.tiers[d.tier])}</h2>
-    </div>
+    ${cover}
     <div class="big-score" id="resultScore" data-target="${d.score}">0</div>
     <div class="record ${d.record && d.score > 0 ? '' : 'hidden'}" id="resultRecord">${ru.result.record}</div>
     <p class="rank" id="resultRank"></p>

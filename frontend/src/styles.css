@@ -1602,3 +1602,279 @@ body.skin-3 button.primary {
     transform: scaleX(1);
   }
 }
+
+/* ===================== Motion polish ===================== */
+
+.wallet-icon {
+  width: 28px;
+  height: 20px;
+  background: none;
+  box-shadow: none;
+  display: grid;
+}
+.wallet-icon svg {
+  width: 100%;
+  height: 100%;
+}
+
+/* Combo: multiplier with a shrinking timer bar and a shatter on break. */
+.combo-wrap {
+  position: relative;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
+.combo-timer {
+  display: block;
+  width: 30px;
+  height: 3px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.15);
+  overflow: hidden;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+.combo-timer.on {
+  opacity: 1;
+}
+.combo-timer i {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: var(--accent);
+  transform-origin: left center;
+}
+.shatter {
+  position: absolute;
+  left: 0;
+  top: 0;
+  pointer-events: none;
+}
+.shard {
+  position: absolute;
+  left: 0;
+  top: 0;
+  font-size: 15px;
+  color: var(--accent);
+  opacity: 0;
+}
+.shard.s0 { clip-path: polygon(0 0, 55% 0, 40% 50%, 0 60%); }
+.shard.s1 { clip-path: polygon(55% 0, 100% 0, 100% 45%, 40% 50%); }
+.shard.s2 { clip-path: polygon(0 60%, 40% 50%, 60% 100%, 0 100%); }
+.shard.s3 { clip-path: polygon(40% 50%, 100% 45%, 100% 100%, 60% 100%); }
+.shatter.on .shard {
+  animation: shard 0.6s ease-in forwards;
+}
+.shatter.on .s0 { --x: -10px; --y: 14px; --r: -40deg; }
+.shatter.on .s1 { --x: 12px; --y: 10px; --r: 35deg; }
+.shatter.on .s2 { --x: -6px; --y: 24px; --r: -20deg; }
+.shatter.on .s3 { --x: 8px; --y: 26px; --r: 50deg; }
+@keyframes shard {
+  0% {
+    opacity: 1;
+    transform: none;
+  }
+  100% {
+    opacity: 0;
+    transform: translate(var(--x), var(--y)) rotate(var(--r));
+  }
+}
+
+/* Golden edge glow on each combo step (opacity only, slow, never a flash). */
+.edge-glow {
+  position: absolute;
+  inset: 0;
+  border-radius: 14px;
+  pointer-events: none;
+  box-shadow:
+    inset 0 0 24px 6px rgba(255, 214, 64, 0.55),
+    inset 0 0 0 2px rgba(255, 230, 140, 0.6);
+  opacity: 0;
+}
+.edge-glow.on {
+  animation: glow 0.8s ease-out;
+}
+@keyframes glow {
+  30% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+/* Elevator floor display on a new tier. */
+.floor {
+  position: absolute;
+  top: 54px;
+  left: 50%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px 6px 10px;
+  border-radius: 12px;
+  background: linear-gradient(180deg, #2a2f3a, #14171d);
+  box-shadow: inset 0 0 0 2px #8d96a6;
+  color: #ffb547;
+  font-weight: 800;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transform: translate(-50%, -16px);
+  transition:
+    opacity 0.25s,
+    transform 0.4s cubic-bezier(0.34, 1.4, 0.64, 1);
+}
+.floor.on {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+.floor-arrow {
+  font-size: 12px;
+  animation: none;
+}
+.floor.on .floor-arrow {
+  animation: arrow 0.6s ease-in-out 3;
+}
+@keyframes arrow {
+  50% {
+    transform: translateY(-3px);
+  }
+}
+.floor-num {
+  position: relative;
+  display: inline-block;
+  width: 26px;
+  height: 22px;
+  overflow: hidden;
+  font-size: 20px;
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0 0 6px rgba(255, 181, 71, 0.5);
+}
+.floor-num b {
+  position: absolute;
+  inset: 0;
+  text-align: center;
+  line-height: 22px;
+}
+.floor.on .floor-num .old {
+  animation: num-out 0.35s ease-in 0.25s forwards;
+}
+.floor-num .new {
+  transform: translateY(100%);
+}
+.floor.on .floor-num .new {
+  animation: num-in 0.35s ease-out 0.25s forwards;
+}
+@keyframes num-out {
+  to {
+    transform: translateY(-100%);
+  }
+}
+@keyframes num-in {
+  to {
+    transform: translateY(0);
+  }
+}
+.floor-name {
+  color: #f5f1e6;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+/* Results: the newspaper rolls in and the headline is printed word by word. */
+.paper {
+  animation: paper-in 0.6s cubic-bezier(0.34, 1.4, 0.64, 1) both;
+}
+@keyframes paper-in {
+  from {
+    opacity: 0;
+    transform: translateY(-30px) rotate(-8deg) scale(0.9);
+  }
+}
+.paper-outlet {
+  margin: 0 0 4px;
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+}
+.paper-headline span {
+  display: inline-block;
+  animation: word 0.3s ease-out both;
+  animation-delay: calc(0.35s + var(--w) * 0.12s);
+}
+@keyframes word {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(1.2);
+  }
+}
+.paper.magazine {
+  display: grid;
+  grid-template-columns: 72px 1fr;
+  grid-template-rows: auto 1fr;
+  gap: 4px 10px;
+  text-align: left;
+  background: linear-gradient(150deg, #c0283a, #5a0c1c 70%);
+  color: #fff;
+}
+.paper.magazine .paper-kicker {
+  border-color: #fff;
+}
+.mag-title {
+  grid-column: 1 / -1;
+  margin: 0;
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: 16px;
+  font-weight: 900;
+  font-style: italic;
+}
+.cover-hero {
+  width: 72px;
+  height: 96px;
+  border-radius: 8px;
+  background: linear-gradient(180deg, #ffd640, #f2a22d);
+}
+.mag-text {
+  min-width: 0;
+}
+.magazine .paper-headline {
+  font-size: 21px;
+}
+
+/* New record: a shower of bills (transform and opacity only). */
+.confetti {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 30;
+  overflow: hidden;
+}
+.confetti i {
+  position: absolute;
+  top: -20px;
+  width: 16px;
+  height: 9px;
+  border-radius: 2px;
+  background: #7fcf8a;
+  box-shadow: inset 0 0 0 2px #3e8c4c;
+  animation: fall 2.2s cubic-bezier(0.3, 0.6, 0.6, 1) var(--d) forwards;
+}
+.confetti i.gold {
+  background: #f1c84b;
+  box-shadow: inset 0 0 0 2px #b98a1a;
+}
+@keyframes fall {
+  to {
+    transform: translateY(110vh) rotate(var(--r)) scale(var(--s));
+    opacity: 0.2;
+  }
+}
+
+body.reduced .paper,
+body.reduced .paper-headline span,
+body.reduced .floor-arrow {
+  animation: none;
+}

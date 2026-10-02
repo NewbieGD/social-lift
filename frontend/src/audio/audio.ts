@@ -2,7 +2,9 @@
 // Buses: master -> music / sfx. Starts after the first user gesture.
 import type { ColorId } from '../core/gameConfig';
 
-type Sfx = 'jump' | 'land' | 'capture' | 'tick' | 'auraOn' | 'auraOff' | 'death' | 'bell' | 'click' | 'unlock';
+type Sfx =
+  | 'jump' | 'land' | 'capture' | 'tick' | 'auraOn' | 'auraOff' | 'death' | 'bell' | 'click' | 'unlock'
+  | 'snap' | 'fanfare' | 'combo' | 'break' | 'close';
 
 interface MusicStyle {
   bpm: number;
@@ -39,6 +41,10 @@ export class AudioEngine {
   private pendingStyle: MusicStyle | null = null;
   private lastTick = 0;
   private external: AudioBufferSourceNode | null = null;
+
+  /** Extra lead layer while the combo is at ×3. */
+  private intense = false;
+  private drone: { osc: OscillatorNode; gain: GainNode } | null = null;
 
   musicOn = true;
   musicVol = 0.6;
@@ -104,7 +110,33 @@ export class AudioEngine {
     window.clearInterval(this.timer);
   }
 
-  play(name: Sfx, opts: { tier?: number; color?: ColorId } = {}): void {
+  setIntense(on: boolean): void {
+    this.intense = on;
+  }
+
+  /** A low drone that swells as the debt wave gets close (0..1). */
+  setDanger(k: number): void {
+    const ctx = this.ctx;
+    if (!ctx) return;
+    if (!this.drone) {
+      const osc = ctx.createOscillator();
+      const f = ctx.createBiquadFilter();
+      const gain = ctx.createGain();
+      osc.type = 'sawtooth';
+      osc.frequency.value = 55;
+      f.type = 'lowpass';
+      f.frequency.value = 220;
+      gain.gain.value = 0;
+      osc.connect(f);
+      f.connect(gain);
+      gain.connect(this.music);
+      osc.start();
+      this.drone = { osc, gain };
+    }
+    this.drone.gain.gain.setTargetAtTime(Math.max(0, Math.min(1, k)) * 0.22, ctx.currentTime, 0.3);
+  }
+
+  play(name: Sfx, opts: { tier?: number; color?: ColorId; streak?: number; item?: string } = {}): void {
     const ctx = this.ctx;
     if (!ctx || ctx.state !== 'running') return;
     const t = ctx.currentTime + 0.005;
@@ -123,11 +155,43 @@ export class AudioEngine {
         this.noiseHit(t, 0.06, 900, 0.12);
         break;
       case 'capture': {
-        const base = opts.color === 'blue' ? 659 : opts.color === 'green' ? 784 : 523;
+        // Each catch in a streak goes one note up the major scale: a streak becomes a tune.
+        const scale = [0, 2, 4, 5, 7, 9, 11, 12, 14, 16, 17, 19];
+        const step = scale[Math.min(scale.length - 1, Math.max(0, (opts.streak ?? 1) - 1))];
+        const base = (opts.color === 'blue' ? 659 : opts.color === 'green' ? 784 : 523) * Math.pow(2, step / 12) * 0.75;
         this.tone(t, 'triangle', base, base, 0.12, 0.28);
         this.tone(t + 0.07, 'triangle', base * 1.5, base * 1.5, 0.16, 0.22);
         break;
       }
+      case 'snap': {
+        const item = opts.item ?? '';
+        if (item === 'watch') {
+          this.tone(t, 'square', 3200, 3200, 0.02, 0.1);
+          this.tone(t + 0.09, 'square', 2800, 2800, 0.02, 0.1);
+        } else if (item === 'shoes' || item === 'slippers') {
+          this.noiseHit(t, 0.05, 3000, 0.2, undefined, true);
+          this.noiseHit(t + 0.1, 0.05, 3000, 0.2, undefined, true);
+        } else {
+          this.tone(t, 'square', 180, 90, 0.08, 0.18);
+          this.noiseHit(t, 0.06, 2500, 0.12);
+        }
+        this.tone(t + 0.05, 'sine', 1568, 1568, 0.35, 0.12);
+        break;
+      }
+      case 'combo':
+        this.tone(t, 'triangle', 880, 1760, 0.18, 0.12);
+        break;
+      case 'break':
+        this.noiseHit(t, 0.2, 5000, 0.12, undefined, true);
+        this.tone(t, 'triangle', 600, 200, 0.25, 0.1);
+        break;
+      case 'close':
+        this.tone(t, 'sine', 1200, 1600, 0.12, 0.12);
+        break;
+      case 'fanfare':
+        [523, 659, 784, 1046].forEach((f, i) => this.tone(t + i * 0.11, 'square', f, f, i === 3 ? 0.6 : 0.14, 0.12));
+        [523, 659, 784].forEach((f) => this.tone(t + 0.33, 'triangle', f, f, 0.7, 0.1));
+        break;
       case 'tick':
         if (t - this.lastTick < 0.2) return; // many warnings must not turn into noise
         this.lastTick = t;
@@ -235,6 +299,12 @@ export class AudioEngine {
       if (s === 0 || s === 8) this.tone(t, 'sine', 120, 45, 0.18, 0.4, bus);
       if (s === 4 || s === 12) this.noiseHit(t, 0.12, 1800, 0.12, bus);
       if (s % 2 === 0) this.noiseHit(t, 0.03, 7000, 0.04, bus, true);
+    }
+    if (this.intense && s % 4 === 2) {
+      // ×3 combo: a bright lead joins the music.
+      const lead = [12, 16, 19, 24];
+      const n = root + 24 + lead[(s / 4 + bar) % lead.length | 0];
+      this.tone(t, 'sawtooth', mtof(n), mtof(n), beat * 0.4, 0.03, bus);
     }
     if (st.arp && s % 2 === 0) {
       const notes = [0, third, 7, 12, 7, third, 0, 7];

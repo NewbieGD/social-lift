@@ -15,11 +15,16 @@
         <div id="field">
           <div id="board">
             <canvas id="game"></canvas>
+            <div id="edgeGlow" class="edge-glow" aria-hidden="true"></div>
             <div id="hud">
               <div class="wallet">
-                <span class="wallet-icon" aria-hidden="true"></span>
+                <span id="walletIcon" class="wallet-icon" aria-hidden="true"></span>
                 <span id="score">0</span>
-                <span id="combo" class="combo"></span>
+                <span class="combo-wrap">
+                  <span id="combo" class="combo"></span>
+                  <span class="combo-timer" aria-hidden="true"><i id="comboBar"></i></span>
+                  <span id="shatter" class="shatter" aria-hidden="true"></span>
+                </span>
               </div>
               <div class="hud-right">
                 <span id="tier" class="tier"></span>
@@ -34,6 +39,7 @@
             <div id="hint" class="hint"></div>
             <div id="toast" class="toast"></div>
             <div id="press" class="press" aria-hidden="true"></div>
+            <div id="floor" class="floor" aria-hidden="true"></div>
             <button id="skipBtn" class="skip-btn" data-action="skipTutorial"></button>
           </div>
         </div>

@@ -241,6 +241,8 @@ export class Sim {
     if (p.kind === 'color' && p.color && this.light === p.color) {
       this.capture(p, p.color);
     }
+    // Landed just before the platform turned red: a "close call".
+    if (p.phase === 'warn' && p.phaseT < 0.25) this.events.push({ type: 'close', x: p.x, y: p.y });
   }
 
   private capture(p: Platform, color: ColorId): void {

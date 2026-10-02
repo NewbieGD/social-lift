@@ -1,7 +1,8 @@
 import { gameConfig, type ColorId, type LightId } from '../core/gameConfig';
 import type { Sim } from '../core/sim';
 import type { Platform, SimEvent } from '../core/types';
-import { drawHeroBody } from './hero';
+import { ru } from '../i18n/ru';
+import { drawHeroBody, drawItem, outfitChanges, type Face, type Gesture, type Item } from './hero';
 import { palette } from './palette';
 import { paintScene, paintSky } from './scenes';
 
@@ -75,6 +76,29 @@ interface Floater {
   big: boolean;
 }
 
+/** A clothing item flying onto the hero (in) or knocked off (out), in world coordinates. */
+interface FlyItem {
+  item: Item;
+  dir: 'in' | 'out';
+  x0: number;
+  y0: number;
+  vx: number;
+  vy: number;
+  ax: number;
+  ay: number;
+  t: number;
+  dur: number;
+  rot: number;
+  done: boolean;
+}
+
+interface Spot {
+  x: number;
+  y: number;
+  t: number;
+  color: string;
+}
+
 interface Ambient {
   kind: 'flash' | 'heli' | 'launch';
   x: number;
@@ -113,6 +137,17 @@ export class Renderer {
   camShift = 0;
   /** Called when bills of a capture reach the wallet. */
   onBillArrive: () => void = () => undefined;
+  /** Called when a piece of clothing snaps onto the hero. */
+  onItemSnap: (item: Item) => void = () => undefined;
+  /** Menu pose of the hero. */
+  menuGesture: Gesture | null = null;
+
+  private items: FlyItem[] = [];
+  private outfitTier = 0;
+  private pendingOutfit = -1;
+  private impulse = 0;
+  private spots: Spot[] = [];
+  private moneyTier = 0;
 
   constructor(private canvas: HTMLCanvasElement) {
     const ctx = canvas.getContext('2d', { alpha: false });
@@ -141,6 +176,11 @@ export class Renderer {
     this.ambient.length = 0;
     this.particles.clear();
     this.deathK = 0;
+    this.items.length = 0;
+    this.spots.length = 0;
+    this.outfitTier = tier;
+    this.pendingOutfit = -1;
+    this.moneyTier = tier;
   }
 
   /** Builds a scene's sprites ahead of time, when the browser is idle. */
@@ -160,6 +200,7 @@ export class Renderer {
     for (const e of events) {
       if (e.type === 'capture') {
         const c = palette.light[e.color];
+        if (!this.reducedEffects) this.spots.push({ x: e.x, y: e.y, t: 0, color: c });
         this.floaters.push({ x: e.x, y: e.y + 28, life: 0.9, max: 0.9, text: `+${e.points}`, color: c, big: e.mult > 1 });
         const n = this.reducedEffects ? 3 : this.lowQuality ? 6 : 8 + Math.floor(Math.random() * 7);
         const sy = toScreenY(e.y);
@@ -181,8 +222,12 @@ export class Renderer {
         }
       } else if (e.type === 'aura') {
         this.auraPulse = 1;
+      } else if (e.type === 'close') {
+        this.floaters.push({ x: e.x, y: e.y + 46, life: 0.9, max: 0.9, text: ru.hud.close, color: '#FFE58A', big: true });
       } else if (e.type === 'tier') {
         this.pendingTier = e.tier;
+        this.moneyTier = e.tier;
+        this.startSuitUp(e.tier, sim);
         this.prewarm(Math.min(e.tier + 1, 12), H);
         if (this.reducedEffects) {
           this.sceneTier = e.tier;
@@ -202,6 +247,113 @@ export class Renderer {
     }
   }
 
+  /** Iron-Man style: new pieces fly in from the screen edges and snap on; old ones get knocked off. */
+  private startSuitUp(tier: number, sim: Sim): void {
+    const from = this.pendingOutfit >= 0 ? this.pendingOutfit : this.outfitTier;
+    const changes = outfitChanges(from, tier);
+    this.pendingOutfit = tier;
+    if (this.reducedEffects || !changes.length) {
+      this.outfitTier = tier;
+      this.pendingOutfit = -1;
+      return;
+    }
+    const W = gameConfig.world.width;
+    changes.forEach((c, i) => {
+      const left = (i + Math.floor(sim.hero.x)) % 2 === 0;
+      this.items.push({
+        item: c.item,
+        dir: 'in',
+        x0: left ? -30 : W + 30,
+        y0: sim.hero.y + 140 + i * 30,
+        vx: c.anchor[0],
+        vy: c.anchor[1],
+        ax: 0,
+        ay: 0,
+        t: -i * 0.12,
+        dur: 0.5,
+        rot: (left ? -1 : 1) * (3 + Math.random() * 2),
+        done: false,
+      });
+      if (c.replaces) {
+        this.items.push({
+          item: c.replaces,
+          dir: 'out',
+          x0: 0,
+          y0: 0,
+          vx: (Math.random() < 0.5 ? -1 : 1) * (60 + Math.random() * 60),
+          vy: 260,
+          ax: c.anchor[0],
+          ay: c.anchor[1],
+          t: -(i * 0.12 + 0.5),
+          dur: 1.3,
+          rot: 0,
+          done: false,
+        });
+      }
+    });
+  }
+
+  private drawItems(sim: Sim, heroX: number, heroY: number, toY: (y: number) => number, dt: number): void {
+    if (!this.items.length) return;
+    const ctx = this.ctx;
+    const facing = sim.hero.facing;
+    for (const it of this.items) {
+      it.t += dt;
+      if (it.t < 0) continue;
+      const k = Math.min(1, it.t / it.dur);
+      ctx.save();
+      if (it.dir === 'in') {
+        // Arc from the screen edge to the attach point on the moving hero.
+        const tx = heroX + it.vx * facing;
+        const ty = heroY - it.vy;
+        const e = 1 - Math.pow(1 - k, 3);
+        const cx = (it.x0 + tx) / 2;
+        const cy = Math.max(it.y0, ty) + 90;
+        const u = 1 - e;
+        const x = u * u * it.x0 + 2 * u * e * cx + e * e * tx;
+        const y = u * u * it.y0 + 2 * u * e * cy + e * e * ty;
+        ctx.translate(x, toY(y));
+        ctx.rotate(it.rot * (1 - e));
+        const sc = 1.7 - 0.7 * e;
+        ctx.scale(sc * facing, sc);
+        drawItem(ctx, it.item);
+        if (k >= 1 && !it.done) {
+          it.done = true;
+          this.impulse = 1;
+          this.onItemSnap(it.item);
+          for (let i = 0; i < 10; i++) {
+            const a = Math.random() * Math.PI * 2;
+            this.particles.spawn(2, tx, ty, Math.cos(a) * 120, Math.sin(a) * 120, 0.45);
+          }
+        }
+      } else {
+        // Knocked-off piece tumbles down toward the debt wave.
+        if (!it.done) {
+          it.done = true;
+          it.x0 = heroX + it.ax * facing;
+          it.y0 = heroY - it.ay;
+        }
+        const tt = it.t;
+        const x = it.x0 + it.vx * tt;
+        const y = it.y0 + it.vy * tt - 900 * tt * tt;
+        ctx.globalAlpha = 1 - k;
+        ctx.translate(x, toY(y));
+        ctx.rotate(tt * 8 * Math.sign(it.vx));
+        ctx.scale(facing, 1);
+        drawItem(ctx, it.item);
+      }
+      ctx.restore();
+    }
+    ctx.globalAlpha = 1;
+    // Pieces that already snapped on stay attached until the whole outfit is complete,
+    // then the hero switches to the new outfit in one go.
+    if (this.pendingOutfit >= 0 && this.items.every((it) => it.dir !== 'in' || it.done)) {
+      this.outfitTier = this.pendingOutfit;
+      this.pendingOutfit = -1;
+    }
+    this.items = this.items.filter((it) => (it.dir === 'in' ? this.pendingOutfit >= 0 : it.t < it.dur));
+  }
+
   draw(sim: Sim, alpha: number, frameDt: number): void {
     this.trackQuality(frameDt);
     const ctx = this.ctx;
@@ -215,12 +367,14 @@ export class Renderer {
 
     const cam = sim.prevCamY + (sim.camY - sim.prevCamY) * alpha + this.camShift;
     const toY = (y: number): number => H - (y - cam);
-    const tier = this.heroTierOverride ?? sim.tier;
+    const tier = this.heroTierOverride ?? this.outfitTier;
+    this.impulse = Math.max(0, this.impulse - frameDt * 5);
 
     this.drawBackground(W, H, cam, frameDt);
     this.drawAmbient(tier, W, H, frameDt);
 
     for (const p of sim.platforms) this.drawPlatform(p, toY(p.y), sim.time);
+    this.drawSpots(toY, frameDt);
 
     this.drawWave(sim, toY, W, H);
     this.drawParticles(toY);
@@ -229,6 +383,8 @@ export class Renderer {
     const hx = hero.prevX + (hero.x - hero.prevX) * alpha;
     const hy = hero.prevY + (hero.y - hero.prevY) * alpha;
     this.drawHero(sim, hx, toY(hy), frameDt, tier);
+    this.drawItems(sim, hx, hy, toY, frameDt);
+    this.drawDanger(sim, W, H);
 
     this.drawFloaters(toY, frameDt);
     this.drawBills(frameDt);
@@ -284,6 +440,8 @@ export class Renderer {
     const off = (((cam * 0.35) % H) + H) % H;
     ctx.drawImage(tile, 0, off - H, W, H);
     ctx.drawImage(tile, 0, off, W, H);
+    this.clock += dt;
+    if (!this.reducedEffects) this.drawDecor(shown, W, H, off);
 
     // Elevator doors on the background layer when the tier changes; gameplay continues.
     if (this.doorT >= 0) {
@@ -299,6 +457,126 @@ export class Renderer {
       ctx.fillRect(half - 3, 0, 2, H);
       ctx.fillRect(W - half + 1, 0, 2, H);
       if (k >= 1) this.doorT = -1;
+    }
+  }
+
+  private clock = 0;
+
+  /**
+   * Small living details on top of the cached scene, positioned in tile space so they
+   * scroll with it: a cat, windows lighting up, falling petals, sea glints, tower beacons.
+   * Everything changes slowly (periods of a second or more): no flicker.
+   */
+  private drawDecor(tier: number, W: number, H: number, off: number): void {
+    const ctx = this.ctx;
+    const t = this.clock;
+    const at = (y: number): number[] => [y + off - H, y + off];
+    if (tier === 0) {
+      for (let y = 120; y < H; y += 220) {
+        for (const sy of at(y - 22)) {
+          // A cat on the bins, tail swishing.
+          ctx.fillStyle = 'rgba(15,15,20,0.9)';
+          ctx.beginPath();
+          ctx.ellipse(14, sy - 5, 7, 5, 0, 0, Math.PI * 2);
+          ctx.arc(20, sy - 11, 4, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.beginPath();
+          ctx.moveTo(18, sy - 14);
+          ctx.lineTo(19, sy - 18);
+          ctx.lineTo(21, sy - 14);
+          ctx.moveTo(21, sy - 14);
+          ctx.lineTo(23, sy - 18);
+          ctx.lineTo(24, sy - 13);
+          ctx.fill();
+          ctx.strokeStyle = 'rgba(15,15,20,0.9)';
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.moveTo(8, sy - 4);
+          ctx.quadraticCurveTo(2, sy - 10 + Math.sin(t * 2.2) * 4, 4 + Math.sin(t * 2.2) * 3, sy - 16);
+          ctx.stroke();
+          ctx.fillStyle = 'rgba(255,220,120,0.9)';
+          ctx.fillRect(21, sy - 12, 1.5, 1.5);
+        }
+      }
+      for (let y = 60; y < H; y += 260) {
+        for (const sy of at(y)) {
+          ctx.globalAlpha = 0.18 + 0.1 * Math.sin(t * 1.3 + y);
+          ctx.fillStyle = '#FFDC8C';
+          ctx.beginPath();
+          ctx.arc(66, sy, 18, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+      ctx.globalAlpha = 1;
+    } else if ((tier >= 1 && tier <= 3) || tier === 6 || tier === 7) {
+      // Windows switch on and off every few seconds.
+      for (let i = 0; i < 10; i++) {
+        const phase = Math.sin(t * (0.35 + (i % 4) * 0.08) + i * 1.7);
+        if (phase < 0.2) continue;
+        const left = i % 2 === 0;
+        const x = left ? 10 + ((i * 17) % 44) : W - 54 + ((i * 13) % 40);
+        const y = (i * 97) % H;
+        for (const sy of at(y)) {
+          ctx.globalAlpha = Math.min(1, (phase - 0.2) * 3) * 0.85;
+          ctx.fillStyle = tier >= 6 ? '#FFE9B0' : '#FFD27A';
+          ctx.fillRect(x, sy, 9, 11);
+        }
+      }
+      ctx.globalAlpha = 1;
+    } else if (tier === 4 || tier === 5) {
+      // Leaves and petals drifting down at the edges (screen space).
+      for (let i = 0; i < 9; i++) {
+        const left = i % 2 === 0;
+        const x = (left ? 18 : W - 18) + Math.sin(t * 1.2 + i) * 12;
+        const y = ((t * (22 + i * 3) + i * 83) % (H + 20)) - 10;
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.rotate(Math.sin(t * 2 + i) * 0.8);
+        ctx.fillStyle = tier === 5 ? ['#FF8FA3', '#FFD640', '#C9A0FF'][i % 3] : '#5BAE6E';
+        ctx.beginPath();
+        ctx.ellipse(0, 0, 3.5, 1.8, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      }
+    } else if (tier >= 8 && tier <= 9) {
+      // Slow twinkles on the gold columns.
+      for (let i = 0; i < 8; i++) {
+        const left = i % 2 === 0;
+        const x = left ? 71 : W - 71;
+        const y = (i * 131) % H;
+        const a = Math.max(0, Math.sin(t * 0.9 + i * 2.1));
+        for (const sy of at(y)) {
+          ctx.globalAlpha = a * 0.9;
+          ctx.fillStyle = '#FFF6C8';
+          ctx.fillRect(x - 0.75, sy - 5, 1.5, 10);
+          ctx.fillRect(x - 5, sy - 0.75, 10, 1.5);
+        }
+      }
+      ctx.globalAlpha = 1;
+    } else if (tier === 10 || tier === 11) {
+      // Glints on the sea (static layer, no scrolling).
+      for (let i = 0; i < 12; i++) {
+        const a = Math.max(0, Math.sin(t * 0.8 + i * 1.3));
+        ctx.globalAlpha = a * 0.7;
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect((i * 71) % W, H * 0.72 + ((i * 29) % (H * 0.26)), 10, 1.5);
+      }
+      ctx.globalAlpha = 1;
+    } else if (tier >= 12) {
+      // Red beacons on the launch towers, about one blink per second.
+      const on = Math.sin(t * 3) > 0.4;
+      if (on) {
+        ctx.fillStyle = '#FF4C5A';
+        for (let y = 24; y < H; y += 96) {
+          for (const sy of at(y)) {
+            for (const x of [11, 38, W - 39, W - 12]) {
+              ctx.beginPath();
+              ctx.arc(x, sy, 2.2, 0, Math.PI * 2);
+              ctx.fill();
+            }
+          }
+        }
+      }
     }
   }
 
@@ -359,6 +637,50 @@ export class Renderer {
       }
     }
   }
+
+  /** A short circle of light on a captured platform, as if the flashlight caught it. */
+  private drawSpots(toY: (y: number) => number, dt: number): void {
+    if (!this.spots.length) return;
+    const ctx = this.ctx;
+    this.spots = this.spots.filter((s) => (s.t += dt) < 0.35);
+    for (const s of this.spots) {
+      const k = s.t / 0.35;
+      const y = toY(s.y) + 7;
+      ctx.globalAlpha = 0.5 * (1 - k);
+      const g = ctx.createRadialGradient(s.x, y, 4, s.x, y, 46 + 20 * k);
+      g.addColorStop(0, s.color);
+      g.addColorStop(1, 'rgba(255,255,255,0)');
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.ellipse(s.x, y, 50 + 20 * k, 24 + 8 * k, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  /** Red vignette at the edges when the debt wave is close (smooth, never flashing). */
+  private drawDanger(sim: Sim, W: number, H: number): void {
+    if (!sim.waveActive || sim.dead) return;
+    const gap = sim.hero.y - sim.waveY;
+    const k = Math.max(0, Math.min(1, 1 - (gap - 60) / 220));
+    this.danger = k;
+    if (k <= 0) return;
+    const ctx = this.ctx;
+    const a = 0.32 * k;
+    const side = ctx.createLinearGradient(0, 0, 40, 0);
+    side.addColorStop(0, `rgba(200,20,40,${a})`);
+    side.addColorStop(1, 'rgba(200,20,40,0)');
+    ctx.fillStyle = side;
+    ctx.fillRect(0, 0, 40, H);
+    const side2 = ctx.createLinearGradient(W, 0, W - 40, 0);
+    side2.addColorStop(0, `rgba(200,20,40,${a})`);
+    side2.addColorStop(1, 'rgba(200,20,40,0)');
+    ctx.fillStyle = side2;
+    ctx.fillRect(W - 40, 0, 40, H);
+  }
+
+  /** 0..1, how close the wave is (read by the music). */
+  danger = 0;
 
   // ---------- Platforms ----------
 
@@ -502,6 +824,25 @@ export class Renderer {
     ctx.lineTo(W, H);
     ctx.closePath();
     ctx.fill();
+    if (this.reducedEffects) return;
+    // Bills and receipts drifting inside the wave.
+    for (let i = 0; i < 7; i++) {
+      const x = ((i * 53 + t * (12 + i * 3)) % (W + 40)) - 20;
+      const y = top + 26 + ((i * 37) % 60) + Math.sin(t * 1.5 + i) * 6;
+      if (y > H + 10) continue;
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate(Math.sin(t + i * 2) * 0.5);
+      ctx.globalAlpha = 0.28;
+      ctx.fillStyle = '#f3e3e3';
+      ctx.fillRect(-7, -9, 14, 18);
+      ctx.fillStyle = '#7a1a2a';
+      ctx.fillRect(-5, -6, 10, 1.4);
+      ctx.fillRect(-5, -2, 8, 1.4);
+      ctx.fillRect(-5, 2, 9, 1.4);
+      ctx.restore();
+    }
+    ctx.globalAlpha = 1;
   }
 
   private drawParticles(toY: (y: number) => number): void {
@@ -514,7 +855,7 @@ export class Renderer {
       const sy = toY(P.y[i]);
       ctx.globalAlpha = a;
       if (P.kind[i] === 1) {
-        drawBill(ctx, sx, sy, P.rot[i]);
+        drawMoney(ctx, sx, sy, P.rot[i], this.moneyTier);
       } else if (P.kind[i] === 2) {
         ctx.fillStyle = '#FFE58A';
         ctx.fillRect(sx - 1.5, sy - 1.5, 3, 3);
@@ -541,7 +882,7 @@ export class Renderer {
       const x = u * u * b.x0 + 2 * u * e * b.cx + e * e * WALLET.x;
       const y = u * u * b.y0 + 2 * u * e * b.cy + e * e * WALLET.y;
       ctx.globalAlpha = k > 0.85 ? (1 - k) / 0.15 : 1;
-      drawBill(ctx, x, y, b.rot + k * 4);
+      drawMoney(ctx, x, y, b.rot + k * 4, this.moneyTier);
       if (k >= 1) arrived = true;
       return k < 1;
     });
@@ -561,8 +902,9 @@ export class Renderer {
     const land = Math.exp(-hero.sinceLand * 18);
     const overshoot = Math.sin(Math.min(1, hero.sinceLand * 6) * Math.PI) * 0.04 * Math.exp(-hero.sinceLand * 4);
     const stretch = Math.min(0.12, Math.max(0, hero.vy) / 6000);
-    const sy = 1 - land * 0.2 + stretch + overshoot;
-    const sx = 1 + land * 0.16 - stretch * 0.6;
+    // A clothing piece snapping on gives the hero a little jolt.
+    const sy = 1 - land * 0.2 + stretch + overshoot - this.impulse * 0.12;
+    const sx = 1 + land * 0.16 - stretch * 0.6 + this.impulse * 0.1;
 
     ctx.save();
     ctx.translate(x, footY);
@@ -575,6 +917,9 @@ export class Renderer {
       sinceLand: hero.sinceLand,
       vy: hero.vy,
       time: sim.time,
+      face: this.faceFor(sim),
+      gesture: this.menuGesture ?? undefined,
+      beam: 1 + (sim.multiplier - 1) * 0.25,
     });
     ctx.restore();
 
@@ -589,6 +934,16 @@ export class Renderer {
       ctx.fill();
       ctx.stroke();
     }
+  }
+
+  private faceFor(sim: Sim): Face {
+    if (sim.dead) return 'scared';
+    if (sim.light === 'red') return 'squint';
+    const h = sim.hero;
+    const danger = sim.platforms.some((p) => p.phase === 'warn' && Math.abs(p.y - h.y) < 150 && Math.abs(p.x - h.x) < 120);
+    if (danger) return 'scared';
+    if (sim.multiplier >= 3) return 'grin';
+    return 'normal';
   }
 
   private drawFloaters(toY: (y: number) => number, dt: number): void {
@@ -631,14 +986,42 @@ function easeInOut(t: number): number {
   return k < 0.5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2;
 }
 
-function drawBill(ctx: CanvasRenderingContext2D, x: number, y: number, rot: number): void {
+/** Money grows richer with the tier: coins, bills, stacks, gold bars. */
+function drawMoney(ctx: CanvasRenderingContext2D, x: number, y: number, rot: number, tier: number): void {
   ctx.save();
   ctx.translate(x, y);
   ctx.rotate(rot);
-  ctx.fillStyle = palette.bill;
-  ctx.fillRect(-6, -3.5, 12, 7);
-  ctx.fillStyle = palette.billMark;
-  ctx.fillRect(-2, -2, 4, 4);
+  if (tier < 3) {
+    ctx.fillStyle = '#E3B341';
+    ctx.beginPath();
+    ctx.ellipse(0, 0, 4.5, 4.5 * Math.abs(Math.cos(rot * 2)) + 1, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.5)';
+    ctx.fillRect(-1.5, -1.5, 2, 2);
+  } else if (tier < 6) {
+    ctx.fillStyle = palette.bill;
+    ctx.fillRect(-6, -3.5, 12, 7);
+    ctx.fillStyle = palette.billMark;
+    ctx.fillRect(-2, -2, 4, 4);
+  } else if (tier < 9) {
+    ctx.fillStyle = '#4E9A5A';
+    ctx.fillRect(-7, -1, 14, 5);
+    ctx.fillStyle = palette.bill;
+    ctx.fillRect(-7, -4.5, 14, 4.5);
+    ctx.fillStyle = '#E8C060';
+    ctx.fillRect(-1.5, -4.5, 3, 9);
+  } else {
+    ctx.fillStyle = '#C99A2E';
+    ctx.beginPath();
+    ctx.moveTo(-7, 3);
+    ctx.lineTo(7, 3);
+    ctx.lineTo(5, -3);
+    ctx.lineTo(-5, -3);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = '#FFE58A';
+    ctx.fillRect(-4, -2.5, 8, 2);
+  }
   ctx.restore();
 }
 

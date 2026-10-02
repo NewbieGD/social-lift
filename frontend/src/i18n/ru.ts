@@ -53,6 +53,8 @@ export const ru = {
     combo: (m: number) => `×${m.toString().replace('.', ',')}`,
     newColor: 'Новый цвет!',
     unranked: 'Без рейтинга',
+    close: 'Впритык!',
+    floor: 'Этаж',
   },
   loading: {
     title: 'Социальный лифт',
