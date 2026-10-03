@@ -1,6 +1,7 @@
 // HTML for every screen. Buttons use data-action/data-arg; main.ts handles them.
 import { AGE_LABEL } from '../config';
 import { legal, ru, type DocSection } from '../i18n/ru';
+import type { ChatMsg, ChatUser } from '../net/duel';
 import type { FinishResult, Leaderboard, LeaderRow, Stats } from '../net/session';
 import { esc } from './dom';
 import { keyLabel } from '../input/input';
@@ -108,6 +109,7 @@ const ICON = {
   gear: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10.3 2h3.4l.5 2.6 2 .9 2.2-1.5 2.4 2.4-1.5 2.2.9 2 2.6.5v3.4l-2.6.5-.9 2 1.5 2.2-2.4 2.4-2.2-1.5-2 .9-.5 2.6h-3.4l-.5-2.6-2-.9-2.2 1.5-2.4-2.4 1.5-2.2-.9-2L2 13.7v-3.4l2.6-.5.9-2L4 5.6 6.4 3.2l2.2 1.5 2-.9z" fill="#B9C1CD"/><circle cx="12" cy="12" r="3.6" fill="#4A5262"/></svg>',
   swords:
     '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 3l7.5 7.5-2 2L2 5V3zM20 3l-7.5 7.5 2 2L22 5V3z" fill="#D3D8E2"/><path d="M6.5 14.5l3 3-2.5 2.5-1.5-1.5-1.5 1.5L3 19l1.5-1.5L3 16zM17.5 14.5l-3 3 2.5 2.5 1.5-1.5 1.5 1.5L21 19l-1.5-1.5L21 16z" fill="#E8B23A"/></svg>',
+  chat: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h16a2 2 0 012 2v9a2 2 0 01-2 2h-8l-5 4v-4H4a2 2 0 01-2-2V6a2 2 0 012-2z" fill="#5AA8FF"/><circle cx="8" cy="10.5" r="1.3" fill="#fff"/><circle cx="12" cy="10.5" r="1.3" fill="#fff"/><circle cx="16" cy="10.5" r="1.3" fill="#fff"/></svg>',
   mail: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="5" width="20" height="14" rx="3" fill="#38C673"/><path d="M3 7l9 6.5L21 7" fill="none" stroke="#fff" stroke-width="1.8" stroke-linejoin="round"/></svg>',
   bill: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="6" width="20" height="12" rx="2" fill="#7FCF8A"/><circle cx="12" cy="12" r="3" fill="#3E8C4C"/><rect x="2" y="6" width="20" height="12" rx="2" fill="none" stroke="#3E8C4C" stroke-width="1.5"/></svg>',
   floor: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="2" width="16" height="20" rx="2" fill="#8D96A6"/><rect x="6" y="4" width="5.5" height="16" fill="#C7CCD6"/><rect x="12.5" y="4" width="5.5" height="16" fill="#C7CCD6"/><path d="M12 6.5l-2.4 3h4.8z" fill="#FFB547"/></svg>',
@@ -149,7 +151,8 @@ export function menuView(d: MenuData): string {
     <div class="menu-actions">
       <button class="primary big play" data-action="play">${ICON.play}<span>${ru.common.play}</span></button>
       <div class="grid2 stagger">
-        <button class="tile wide-tile" data-action="open" data-arg="duels">${ICON.swords}<span>${ru.menu.duels}</span></button>
+        <button class="tile accent duel-tile" data-action="open" data-arg="duels">${ICON.swords}<span>${ru.menu.duels}</span></button>
+        <button class="tile accent chat-tile" data-action="open" data-arg="chat">${ICON.chat}<span>${ru.menu.chat}</span></button>
         <button class="tile" data-action="open" data-arg="leaders">${ICON.crown}<span>${ru.menu.leaders}</span></button>
         <button class="tile" data-action="open" data-arg="rules">${ICON.book}<span>${ru.menu.rules}</span></button>
         <button class="tile" data-action="open" data-arg="settings">${ICON.gear}<span>${ru.menu.settings}</span></button>
@@ -587,5 +590,59 @@ export function stubView(kind: StubKind, code: string | null): string {
     ${kind === 'unsupported' ? '' : `<button class="primary" data-action="retryBoot">${ru.common.retry}</button>`}
     ${kind === 'offline' || kind === 'server' ? `<button class="secondary" data-action="playOffline">${t.playOffline}</button>` : ''}
     ${code ? `<p class="note">${esc(t.errorCode(code))}</p>` : ''}
+  </div>`;
+}
+
+// ---------- Chat ----------
+
+
+function chatAva(u: ChatUser, size = ''): string {
+  const name = u.name || ru.leaders.player;
+  const inner = u.photo
+    ? `<img src="${esc(u.photo)}" alt="" loading="lazy" referrerpolicy="no-referrer" />`
+    : `<b>${esc(name.slice(0, 1))}</b>`;
+  return `<button type="button" class="chat-ava ${size}" data-action="player" data-arg="${u.id}" aria-label="${esc(name)}">${inner}</button>`;
+}
+
+export function chatView(): string {
+  return `${header(ru.chat.title)}
+    <div class="chat-top"><span class="chat-count" id="chatCount"></span><div class="chat-who" id="chatWho"></div></div>
+    <p class="chat-rules">${ru.chat.rules}</p>
+    <div class="scroll chat-list" id="chatList"></div>
+    <p class="chat-status" id="chatStatus"></p>
+    <form class="chat-form" id="chatForm" autocomplete="off">
+      <input id="chatInput" type="text" maxlength="200" placeholder="${ru.chat.placeholder}" enterkeyhint="send" />
+      <button type="submit" class="primary" id="chatSend">${ru.chat.send}</button>
+    </form>`;
+}
+
+export function chatWhoHtml(users: ChatUser[]): string {
+  return users.map((u) => chatAva(u, 'small')).join('');
+}
+
+export function chatMsgHtml(m: ChatMsg, myId: number | null): string {
+  if (m.sys) return `<p class="chat-sys">${esc(m.text)}</p>`;
+  const t = new Date(m.ts);
+  const time = `${String(t.getHours()).padStart(2, '0')}:${String(t.getMinutes()).padStart(2, '0')}`;
+  const name = m.user.name || ru.leaders.player;
+  return `<div class="chat-msg${m.user.id === myId ? ' mine' : ''}">
+    ${chatAva(m.user)}
+    <div class="chat-body">
+      <div class="chat-meta"><button type="button" class="chat-name" data-action="player" data-arg="${m.user.id}">${esc(name)}</button>${m.user.rank ? `<span class="chat-rank">#${m.user.rank}</span>` : ''}<time>${time}</time></div>
+      <p>${esc(m.text)}</p>
+    </div>
+  </div>`;
+}
+
+export function playerCardView(u: ChatUser, mine: boolean): string {
+  const name = u.name || ru.leaders.player;
+  const img = u.photo ? `<img src="${esc(u.photo)}" alt="" referrerpolicy="no-referrer" />` : `<b>${esc(name.slice(0, 1))}</b>`;
+  return `<div class="panel invite">
+    <button class="icon-btn close" data-action="back" aria-label="${ru.chat.close}">${CLOSE_ICON}</button>
+    <div class="invite-ava">${img}</div>
+    <h2>${esc(name)}</h2>
+    <p>${mine ? ru.chat.you : ru.chat.rank(u.rank)}</p>
+    ${mine ? '' : `<button class="primary" data-action="challenge" data-arg="${u.id}">${ru.chat.duelBtn}</button>`}
+    <button class="secondary" data-action="profile" data-arg="${u.id}">${ru.chat.profileBtn}</button>
   </div>`;
 }

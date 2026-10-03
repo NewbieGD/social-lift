@@ -15,7 +15,7 @@ import { ads, DEFAULT_ADS, type AdsConfig } from './platform/ads';
 import { canShare, initShare, shareStory, shareWall } from './platform/share';
 import { lockGestures } from './platform/gestures';
 import { askNotifications, initVk } from './platform/vk';
-import { DuelClient, type DuelMsg, type DuelPlayer } from './net/duel';
+import { DuelClient, type ChatMsg, type ChatUser, type DuelMsg, type DuelPlayer } from './net/duel';
 import { scenes } from './render/palette';
 import { drawItem, ITEM_BY_TIER, itemCount, outfitFromMask, type Item } from './render/hero';
 import { drawHeroFront } from './render/heroFront';
@@ -1000,6 +1000,18 @@ router.register('invite', {
   html: () => (invite ? V.inviteView(invite.from, invite.timeout) : ''),
   modal: true,
 });
+router.register('chat', {
+  html: () => V.chatView(),
+  cls: 'solid',
+  mount: () => mountChat(),
+});
+router.register('player', {
+  html: () => {
+    const u = chat.known.get(chat.cardId);
+    return u ? V.playerCardView(u, u.id === myId()) : '';
+  },
+  modal: true,
+});
 router.register('share', { html: () => V.shareView(canShare()), modal: true });
 router.register('tutorialDone', { html: () => V.tutorialDoneView(), modal: true });
 let stubKind: V.StubKind = 'offline';
@@ -1012,6 +1024,7 @@ function errorCode(): string | null {
 }
 
 router.onChange = (top) => {
+  syncChatRoom();
   if (top !== 'settings') {
     rebinding = null;
     keyError = null;
@@ -1187,6 +1200,17 @@ const actions: Record<string, (arg: string, el: HTMLElement) => void> = {
     goMenu();
   },
   tutOk: () => tutorial.ok(),
+  player: (arg) => {
+    const id = Number(arg);
+    if (!chat.known.has(id)) return;
+    chat.cardId = id;
+    router.open('player');
+  },
+  challenge: (arg) => {
+    askNotificationsOnce();
+    router.back();
+    duelClient.send({ t: 'challenge', to: Number(arg) });
+  },
   rebind: (arg) => {
     rebinding = rebinding === arg ? null : (arg as LightId);
     keyError = null;
@@ -1404,6 +1428,168 @@ function afterBoot(): void {
   else goMenu();
 }
 
+// ---------- Chat ----------
+
+const chat = {
+  msgs: [] as ChatMsg[],
+  online: [] as ChatUser[],
+  known: new Map<number, ChatUser>(),
+  cardId: 0,
+  cdUntil: 0,
+  wanted: false,
+  joined: false,
+  lastText: '',
+  statusTimer: 0,
+};
+
+function myId(): number | null {
+  return session.data?.profile.id ?? null;
+}
+
+function remember(u: ChatUser): void {
+  chat.known.set(u.id, u);
+}
+
+/** Joins the chat room while the chat screen is open (also over the player card), leaves otherwise. */
+function syncChatRoom(): void {
+  const want = router.has('chat');
+  if (want && !chat.wanted) {
+    chat.wanted = true;
+    tryJoinChat();
+  } else if (!want && chat.wanted) {
+    chat.wanted = false;
+    if (chat.joined) duelClient.send({ t: 'chat_leave' });
+    chat.joined = false;
+  }
+}
+
+function tryJoinChat(): void {
+  if (chat.wanted && !chat.joined && duelClient.connected) {
+    chat.joined = true;
+    duelClient.send({ t: 'chat_join' });
+  }
+}
+
+function chatStatus(text: string, ms = 4000): void {
+  const el = document.getElementById('chatStatus');
+  if (!el) return;
+  el.textContent = text;
+  clearTimeout(chat.statusTimer);
+  if (text && ms > 0) chat.statusTimer = window.setTimeout(() => (el.textContent = ''), ms);
+}
+
+function renderChatWho(): void {
+  const who = document.getElementById('chatWho');
+  const count = document.getElementById('chatCount');
+  if (who) who.innerHTML = V.chatWhoHtml(chat.online);
+  if (count) count.textContent = ru.chat.online(chat.online.length);
+  who?.querySelectorAll<HTMLImageElement>('img').forEach((img) => img.addEventListener('error', () => img.remove(), { once: true }));
+}
+
+function chatRowHtml(m: ChatMsg): string {
+  return V.chatMsgHtml(m, myId());
+}
+
+function renderChatList(): void {
+  const list = document.getElementById('chatList');
+  if (!list) return;
+  list.innerHTML = chat.msgs.length ? chat.msgs.map(chatRowHtml).join('') : `<div class="empty"><p>${ru.chat.empty}</p></div>`;
+  list.scrollTop = list.scrollHeight;
+}
+
+function appendChat(m: ChatMsg): void {
+  chat.msgs.push(m);
+  if (chat.msgs.length > 100) chat.msgs.shift();
+  const list = document.getElementById('chatList');
+  if (!list) return;
+  const stick = list.scrollHeight - list.scrollTop - list.clientHeight < 80;
+  if (chat.msgs.length === 1) list.innerHTML = '';
+  list.insertAdjacentHTML('beforeend', chatRowHtml(m));
+  while (list.children.length > 100) list.firstElementChild?.remove();
+  if (stick || m.user.id === myId()) list.scrollTop = list.scrollHeight;
+}
+
+function updateChatSend(): void {
+  const btn = document.getElementById('chatSend') as HTMLButtonElement | null;
+  if (!btn) return;
+  const left = Math.ceil((chat.cdUntil - Date.now()) / 1000);
+  btn.disabled = left > 0 || !chat.joined;
+  btn.textContent = left > 0 ? ru.chat.wait(left) : ru.chat.send;
+}
+
+function mountChat(): void {
+  const form = document.getElementById('chatForm') as HTMLFormElement | null;
+  const input = document.getElementById('chatInput') as HTMLInputElement | null;
+  if (!form || !input) return;
+  renderChatList();
+  renderChatWho();
+  if (session.mode !== 'online') chatStatus(ru.chat.offline, 0);
+  else if (!duelClient.connected) chatStatus(ru.chat.connecting, 0);
+  form.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const text = input.value.trim();
+    if (!text || !chat.joined) return;
+    const left = Math.ceil((chat.cdUntil - Date.now()) / 1000);
+    if (left > 0) return chatStatus(ru.chat.errWait(left));
+    chat.lastText = text;
+    duelClient.send({ t: 'chat', text });
+    input.value = '';
+  });
+  const tick = window.setInterval(() => {
+    if (!document.getElementById('chatSend')) return clearInterval(tick);
+    updateChatSend();
+  }, 400);
+  updateChatSend();
+}
+
+function onChatMessage(m: DuelMsg): void {
+  switch (m.t) {
+    case 'chat_hist':
+      chat.msgs = m.msgs;
+      chat.online = m.users;
+      for (const x of m.msgs) remember(x.user);
+      for (const u of m.users) remember(u);
+      chat.cdUntil = Date.now() + m.wait * 1000;
+      chatStatus('');
+      renderChatList();
+      renderChatWho();
+      updateChatSend();
+      break;
+    case 'chat':
+      remember(m.msg.user);
+      appendChat(m.msg);
+      break;
+    case 'chat_users':
+      chat.online = m.users;
+      for (const u of m.users) remember(u);
+      renderChatWho();
+      break;
+    case 'chat_user':
+      remember(m.user);
+      if (m.user.id !== myId()) {
+        appendChat({ id: -Date.now(), ts: Date.now(), user: m.user, text: ru.chat.joined(m.user.name || ru.leaders.player, m.user.rank), sys: true });
+      }
+      break;
+    case 'chat_cd':
+      chat.cdUntil = Date.now() + m.wait * 1000;
+      updateChatSend();
+      break;
+    case 'chat_err': {
+      const input = document.getElementById('chatInput') as HTMLInputElement | null;
+      if (input && !input.value) input.value = chat.lastText;
+      if (m.code === 'cooldown') {
+        chat.cdUntil = Date.now() + (m.wait ?? 30) * 1000;
+        chatStatus(ru.chat.errWait(m.wait ?? 30));
+      } else chatStatus(m.code === 'words' ? ru.chat.errWords : m.code === 'link' ? ru.chat.errLink : ru.chat.errEmpty, 5000);
+      updateChatSend();
+      break;
+    }
+    case 'busy':
+      chatStatus(m.who === 'me' ? ru.chat.busyMe : ru.chat.busyThem, 5000);
+      break;
+  }
+}
+
 // ---------- Duels ----------
 
 interface DuelRun {
@@ -1442,10 +1628,14 @@ const duelOppNameEl = $('duelOppName');
 const duelBarEl = $('duelBar');
 
 duelClient.onStatus = () => {
+  if (!duelClient.connected) chat.joined = false;
+  else tryJoinChat();
   if (router.top === 'duels') router.refresh();
+  if (router.has('chat') && !duelClient.connected && session.mode === 'online') chatStatus(ru.chat.connecting, 0);
 };
 
 duelClient.onMessage = (m: DuelMsg) => {
+  onChatMessage(m);
   switch (m.t) {
     case 'none':
       duelUi = 'none';
@@ -1453,9 +1643,11 @@ duelClient.onMessage = (m: DuelMsg) => {
     case 'waiting':
       duelUi = 'waiting';
       duelWaitingFor = m.to.name;
+      if (router.has('chat')) chatStatus(ru.chat.challengeSent(m.to.name || ru.duel.player), 0);
       break;
     case 'declined':
       duelUi = 'declined';
+      if (router.has('chat')) chatStatus(ru.chat.declined, 5000);
       break;
     case 'invite':
       // Only offered while not playing; the invite card opens over any menu screen.

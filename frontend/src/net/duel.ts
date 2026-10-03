@@ -8,7 +8,31 @@ export interface DuelPlayer {
   photo: string | null;
 }
 
+export interface ChatUser {
+  id: number;
+  name: string | null;
+  photo: string | null;
+  /** Place in the all-time leaderboard when the player entered the chat. */
+  rank: number | null;
+}
+
+export interface ChatMsg {
+  id: number;
+  ts: number;
+  user: ChatUser;
+  text: string;
+  /** Local system line ("X joined"), never sent by the server. */
+  sys?: boolean;
+}
+
 export type DuelMsg =
+  | { t: 'chat_hist'; msgs: ChatMsg[]; users: ChatUser[]; wait: number }
+  | { t: 'chat'; msg: ChatMsg }
+  | { t: 'chat_users'; users: ChatUser[] }
+  | { t: 'chat_user'; action: 'join'; user: ChatUser }
+  | { t: 'chat_err'; code: 'empty' | 'link' | 'words' | 'cooldown'; wait?: number }
+  | { t: 'chat_cd'; wait: number }
+  | { t: 'busy'; who: 'me' | 'them'; name?: string | null }
   | { t: 'online'; n: number }
   | { t: 'none'; n: number }
   | { t: 'waiting'; to: DuelPlayer; timeout: number }
