@@ -478,10 +478,12 @@ async function startRun(): Promise<void> {
   const ticketP = session.takeTicket();
   renderer.prewarm(0, sim.viewH);
   renderer.prewarm(1, sim.viewH);
+  if (!adAllowed()) console.info('[ads] не показываем:', adBlockReason());
   if (adAllowed()) {
     audio.suspend();
     const shown = await ads.showInterstitial(adsConfig().timeout_sec);
     audio.resume();
+    if (!shown) console.info('[ads] ВК не отдал рекламу (VKWebAppCheckNativeAds вернул false или ошибку)');
     if (shown) {
       adState.runsSince = 0;
       adState.lastAt = Date.now();
@@ -529,6 +531,17 @@ function saveAdState(): void {
 
 function adsConfig(): AdsConfig {
   return { ...DEFAULT_ADS, ...((session.data?.ads ?? {}) as Partial<AdsConfig>) };
+}
+
+/** Why no ad is shown right now (visible in the browser console, for debugging). */
+function adBlockReason(): string {
+  const c = adsConfig();
+  if (!c.enabled) return 'выключена на сервере (ADS_ENABLED не равно 1)';
+  if (session.mode !== 'online') return `режим ${session.mode}: реклама только внутри ВК`;
+  if (!tutorialDone()) return 'обучение не пройдено';
+  if (adState.completed < c.min_runs_before) return `сыграно ${adState.completed} из ${c.min_runs_before} забегов до первой рекламы`;
+  if (adState.runsSince < c.every_n_runs) return `с прошлой рекламы ${adState.runsSince} из ${c.every_n_runs} забегов`;
+  return 'пауза между показами';
 }
 
 function adAllowed(): boolean {

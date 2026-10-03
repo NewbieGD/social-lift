@@ -29,6 +29,8 @@ export class Sim {
 
   hero: Hero;
   light: LightId | null = null;
+  /** Color that was lit when the shield went on; the next shield press returns to it. */
+  private lightBeforeShield: LightId | null = null;
   platforms: Platform[] = [];
 
   score = 0;
@@ -173,8 +175,17 @@ export class Sim {
   }
 
   private applyPress(press: LightId | null): void {
-    if (!press || press === this.light) return;
+    if (!press) return;
+    if (press === 'red' && this.light === 'red') {
+      // A second press of the shield drops it and brings back the color used before.
+      this.light = this.lightBeforeShield;
+      this.lightBeforeShield = null;
+      this.events.push({ type: 'light', light: this.light });
+      return;
+    }
+    if (press === this.light) return;
     if (!this.lightAvailable(press)) return;
+    if (press === 'red') this.lightBeforeShield = this.light;
     this.light = press;
     if (press === 'red' && this.streak > 0) {
       this.streak = 0;

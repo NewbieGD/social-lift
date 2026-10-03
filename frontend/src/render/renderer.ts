@@ -302,7 +302,7 @@ export class Renderer {
       } else if (e.type === 'close') {
         this.floaters.push({ x: e.x, y: e.y + 46, life: 0.9, max: 0.9, text: ru.hud.close, color: '#FFE58A', big: true });
       } else if (e.type === 'light') {
-        if (!this.reducedEffects) this.rings.push({ t: 0, color: palette.light[e.light] });
+        if (e.light && !this.reducedEffects) this.rings.push({ t: 0, color: palette.light[e.light] });
       } else if (e.type === 'tier') {
         this.moneyTier = e.tier;
         this.prewarm(Math.min(e.tier + 1, 12), H);
