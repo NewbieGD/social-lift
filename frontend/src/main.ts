@@ -14,7 +14,7 @@ import { haptic, hapticsSupported, initHaptics } from './platform/haptics';
 import { ads, DEFAULT_ADS, type AdsConfig } from './platform/ads';
 import { initVk } from './platform/vk';
 import { scenes } from './render/palette';
-import { drawHeroBody, outfitChanges, PICKABLE } from './render/hero';
+import { drawHeroBody, drawItem, ITEM_BY_TIER, itemCount, outfitFromMask, type Item } from './render/hero';
 import { Renderer } from './render/renderer';
 import { applyControls } from './ui/controlsLayout';
 import { $ } from './ui/dom';
@@ -42,6 +42,7 @@ const comboBar = $('comboBar');
 const shatterEl = $('shatter');
 const edgeGlow = $('edgeGlow');
 const walletIcon = $('walletIcon');
+const bonusEl = $('bonus');
 
 const renderer = new Renderer(canvas);
 const input = new InputController([field]);
@@ -167,38 +168,16 @@ applySettings(settingsStore.get());
 let prevLight: LightId | null = null;
 
 let lastMult = 1;
-let nextPickupAt = 12;
-
-/**
- * Now and then a piece of the next tier's outfit lies on a platform ahead. Touching that
- * platform puts it on early. Purely cosmetic: it never changes the score.
- */
-function schedulePickup(): void {
-  if (renderer.pickups.size) {
-    // Drop a pickup that fell below the screen.
-    for (const id of renderer.pickups.keys()) if (!sim.platforms.some((p) => p.id === id)) renderer.pickups.delete(id);
-    return;
-  }
-  if (sim.runTime < nextPickupAt || sim.tier >= 12) return;
-  nextPickupAt = sim.runTime + 15 + Math.random() * 15;
-  const options = outfitChanges(sim.tier, sim.tier + 1)
-    .map((c) => c.item)
-    .filter((it) => PICKABLE[it] && !renderer.isWorn(it));
-  if (!options.length) return;
-  const top = sim.camY + sim.viewH;
-  const candidates = sim.platforms.filter(
-    (p) => (p.kind === 'color' || p.kind === 'white') && !p.phases && p.y > top - sim.viewH * 0.35 && p.y < top + 40,
-  );
-  if (!candidates.length) return;
-  const p = candidates[Math.floor(Math.random() * candidates.length)];
-  renderer.pickups.set(p.id, options[Math.floor(Math.random() * options.length)]);
-}
-
 let captionTimer = 0;
-renderer.onCaption = (items) => {
+renderer.onCaption = (kind, value) => {
   const el = document.getElementById('caption');
   if (!el) return;
-  el.innerHTML = `<span class="cap-label">${ru.look.caption}</span><span class="cap-items">${items.map((i) => ru.items[i]).join(', ')}</span>`;
+  if (kind === 'stage') {
+    el.innerHTML = `<span class="cap-label">${ru.look.stage}</span><span class="cap-items">${ru.tiers[value]}</span>`;
+  } else {
+    const n = itemCount(sim.owned);
+    el.innerHTML = `<span class="cap-label">${ru.look.item(n)}</span><span class="cap-items">${ru.items[ITEM_BY_TIER[value]]}</span>`;
+  }
   el.classList.remove('on');
   void el.offsetWidth;
   el.classList.add('on');
@@ -206,6 +185,7 @@ renderer.onCaption = (items) => {
   captionTimer = window.setTimeout(() => el.classList.remove('on'), 3800);
 };
 
+renderer.onFlightStart = () => audio.play('servo');
 renderer.onItemSnap = (item) => {
   audio.play('snap', { item });
   if (settingsStore.get().vibration) haptic('light');
@@ -301,14 +281,7 @@ function handleUiEvents(events: SimEvent[]): void {
       if (m > lastMult && m >= 2) comboStep(m);
       lastMult = m;
       if (settingsStore.get().vibration) haptic('light');
-    } else if (e.type === 'land' && mode === 'run') {
-      const item = renderer.pickups.get(e.id);
-      if (item) {
-        renderer.pickups.delete(e.id);
-        renderer.collectPickup(item, sim);
-        toast(`${ru.look.early}: ${ru.items[item]}`);
-      }
-      schedulePickup();
+    } else if (e.type === 'land') {
       audio.play('jump', { tier: sim.tier });
     } else if (e.type === 'warn') {
       audio.play('tick');
@@ -357,6 +330,9 @@ function updateHud(dt: number): void {
   const mult = sim.multiplier;
   comboEl.textContent = ru.hud.combo(mult);
   comboEl.classList.toggle('on', mult > 1);
+  const pct = Math.round((sim.itemBonus - 1) * 100);
+  const bonusText = pct > 0 ? `+${pct}%` : '';
+  if (bonusEl.textContent !== bonusText) bonusEl.textContent = bonusText;
   // Remaining time of the 2.5 s combo window, as a shrinking bar (transform only).
   const left = sim.streak > 0 ? Math.max(0, 1 - (sim.time - sim.lastCaptureTime) / gameConfig.combo.windowSec) : 0;
   comboBar.style.transform = `scaleX(${left.toFixed(3)})`;
@@ -448,8 +424,10 @@ function startTutorial(): void {
 
 // ---------- Runs ----------
 
-function newSim(seed: number, tutorial = false): void {
-  sim = new Sim(seed, sim.viewH, { tutorial });
+function newSim(seed: number, tutorial = false, items = false): void {
+  // Every run starts with nothing worn; items found along the way count for this run only.
+  sim = new Sim(seed, sim.viewH, { tutorial, items });
+  renderer.ownedMask = 0;
   input.heroXProvider = () => sim.hero.x;
   input.reset();
   layout();
@@ -463,7 +441,6 @@ function newSim(seed: number, tutorial = false): void {
   renderer.heroTierOverride = null;
   renderer.menuGesture = null;
   renderer.sceneOnly = false;
-  nextPickupAt = 12;
   lastMult = 1;
   audio.setIntense(false);
   audio.stopTension();
@@ -503,7 +480,8 @@ async function startRun(): Promise<void> {
   const left = 1200 - (performance.now() - t0);
   if (left > 0) await new Promise((r) => setTimeout(r, left));
   starting = false;
-  newSim(ticket ? ticket.seed : randomSeed());
+  // Items drop only in runs the server can verify, or locally when playing outside VK.
+  newSim(ticket ? ticket.seed : randomSeed(), false, !!ticket || session.mode === 'outside');
   mode = 'run';
   router.clear();
   session.event('run_start');
@@ -572,6 +550,10 @@ function finishRun(): void {
   saveAdState();
   session.event('run_end', sim.score);
   rememberLocalRun(sim.score, sim.tier);
+  if (session.mode === 'outside') {
+    const local = readLocalItems();
+    writeLocalItems(local.mask | sim.picked, local.misses);
+  }
   const runTicket = ticket;
   ticket = null;
   const best = session.data?.stats.best_all ?? readLocalBest();
@@ -612,6 +594,7 @@ function finishRun(): void {
       captures: sim.captures,
       max_combo: sim.maxCombo,
       input_log: sim.inputLog,
+      items: sim.picked,
     })
     .then((res) => {
       const el = document.getElementById('resultRank');
@@ -639,7 +622,7 @@ function drawCoverHero(c: HTMLCanvasElement, tier: number): void {
   g.scale(dpr, dpr);
   g.translate(36, 90);
   g.scale(1.45, 1.45);
-  drawHeroBody(g, { tier, light: '255,214,64', neutral: true, sinceLand: 1, vy: 0, time: 0, face: 'grin', gesture: 'pocket' });
+  drawHeroBody(g, { tier, light: '255,214,64', neutral: true, sinceLand: 1, vy: 0, time: 0, face: 'grin', gesture: 'pocket', outfit: outfitFromMask(renderer.ownedMask) });
 }
 
 let confettiTimer = 0;
@@ -713,7 +696,7 @@ function sizeCanvas(c: HTMLCanvasElement): CanvasRenderingContext2D | null {
 }
 
 /** Draws the hero standing on a small podium, alive: breathing, blinking, waving, hopping. */
-function drawStageHero(c: HTMLCanvasElement, tier: number, t: number, silhouette = false, still = false): void {
+function drawStageHero(c: HTMLCanvasElement, tier: number, t: number, silhouette = false, still = false, mask = ownedMask()): void {
   const g = sizeCanvas(c);
   if (!g) return;
   const w = c.clientWidth;
@@ -755,6 +738,7 @@ function drawStageHero(c: HTMLCanvasElement, tier: number, t: number, silhouette
     face: still ? 'normal' : cycle < 2.2 ? 'grin' : 'normal',
     gesture,
     noBeam: true,
+    outfit: outfitFromMask(mask),
   });
   g.restore();
   if (silhouette) {
@@ -773,12 +757,51 @@ function drawShowcase(t: number): void {
   if (ward) drawStageHero(ward, tier, t);
 }
 
+/** The 13 items of the collection: owned ones in color, the rest as silhouettes. */
 function drawCollection(root: HTMLElement): void {
-  const best = session.data?.stats.best_tier ?? localStats()?.best_tier ?? 0;
-  root.querySelectorAll<HTMLCanvasElement>('canvas[data-look]').forEach((c) => {
-    const tier = Number(c.dataset.look);
-    drawStageHero(c, tier, 3, tier > best, true);
+  const mask = ownedMask();
+  root.querySelectorAll<HTMLCanvasElement>('canvas[data-item]').forEach((c) => {
+    const i = Number(c.dataset.item);
+    const g = sizeCanvas(c);
+    if (!g) return;
+    const w = c.clientWidth;
+    const h = c.clientHeight;
+    g.clearRect(0, 0, w, h);
+    g.save();
+    g.translate(w / 2, h / 2 + 2);
+    const k = Math.min(w, h) / 30;
+    g.scale(k, k);
+    drawItem(g, ITEM_BY_TIER[i] as Item);
+    g.restore();
+    if (!(mask & (1 << i))) {
+      g.globalCompositeOperation = 'source-atop';
+      g.fillStyle = 'rgba(30,34,46,0.95)';
+      g.fillRect(0, 0, w, h);
+      g.globalCompositeOperation = 'source-over';
+    }
   });
+}
+
+/** Collected items: from the server, or kept locally when playing outside VK. */
+function ownedMask(): number {
+  return session.data?.stats.items_mask ?? readLocalItems().mask;
+}
+
+function readLocalItems(): { mask: number; misses: number[] } {
+  try {
+    const v = JSON.parse(localStorage.getItem('sl_items') || '{}');
+    return { mask: Number(v.mask) || 0, misses: Array.isArray(v.misses) ? v.misses : [] };
+  } catch {
+    return { mask: 0, misses: [] };
+  }
+}
+
+function writeLocalItems(mask: number, misses: number[]): void {
+  try {
+    localStorage.setItem('sl_items', JSON.stringify({ mask, misses }));
+  } catch {
+    /* ignore */
+  }
 }
 
 // ---------- Pause ----------
@@ -839,7 +862,7 @@ router.register('declined', { html: () => V.declinedView(), cls: 'solid' });
 router.register('doc', { html: () => V.docView(docKind), cls: 'solid' });
 router.register('rules', { html: () => V.docView('rules'), cls: 'solid' });
 router.register('wardrobe', {
-  html: () => V.wardrobeView(session.data?.stats ?? localStats()),
+  html: () => V.wardrobeView(session.data?.stats ?? localStats(), ownedMask()),
   cls: 'solid',
   mount: (root) => requestAnimationFrame(() => drawCollection(root)),
 });

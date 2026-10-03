@@ -2,11 +2,31 @@ import { gameConfig, type ColorId, type LightId } from '../core/gameConfig';
 import type { Sim } from '../core/sim';
 import type { Platform, SimEvent } from '../core/types';
 import { ru } from '../i18n/ru';
-import { drawHeroBody, drawItem, heroAttachment, outfitChanges, PICKABLE, TORCH_TIP, type Face, type Gesture, type Item, type Outfit } from './hero';
+import { drawHeroBody, drawItem, heroRig, ITEM_ANCHOR, ITEM_BY_TIER, outfitFromMask, type AttachPoint, type Face, type Gesture, type HeroPose, type Item, type Rig } from './hero';
 import { palette } from './palette';
 import { paintScene, paintSky } from './scenes';
 
 const MAX_PARTICLES = 220;
+
+/** Which body part each collectible attaches to (the target of its flight). */
+const ITEM_POINT: Partial<Record<Item, AttachPoint>> = {
+  cap: 'headTop',
+  helmet: 'head',
+  glasses: 'face',
+  tank: 'torso',
+  shirt: 'torso',
+  jacket: 'torso',
+  tie: 'neck',
+  shorts: 'waist',
+  sweats: 'waist',
+  trousers: 'waist',
+  slippers: 'frontFoot',
+  shoes: 'frontFoot',
+  watch: 'wrist',
+  torch: 'frontHand',
+  newTorch: 'frontHand',
+  phone: 'backHand',
+};
 const MAX_BILLS = 60;
 /** Wallet position in the HUD, in world units from the top-left (bills fly there). */
 const WALLET = { x: 30, y: 26 };
@@ -91,6 +111,7 @@ interface FlyItem {
   rot: number;
   done: boolean;
   pickup?: boolean;
+  tier?: number;
 }
 
 interface Cine {
@@ -98,7 +119,7 @@ interface Cine {
   dur: number;
   fromScene: number;
   toScene: number;
-  anchors: [number, number][];
+  kind: 'stage' | 'item';
 }
 
 /** Light motes floating over the scene, in screen space. */
@@ -164,10 +185,18 @@ export class Renderer {
 
   private items: FlyItem[] = [];
   private cine: Cine | null = null;
-  private highlights: { anchor: [number, number]; t: number }[] = [];
+  private highlights: { item: Item; t: number }[] = [];
+  /** Where the hero was drawn this frame: lets effects follow the animated body. */
+  private heroXf: { x: number; y: number; sx: number; sy: number; facing: number; rig: Rig } | null = null;
+
+  /** Screen position of a body attachment point on the animated hero. */
+  heroPoint(name: AttachPoint): { x: number; y: number } | null {
+    const xf = this.heroXf;
+    if (!xf) return null;
+    const p = xf.rig.points[name];
+    return { x: xf.x + p.x * xf.sx * xf.facing, y: xf.y + p.y * xf.sy };
+  }
   private sparkles: { x: number; y: number; t: number }[] = [];
-  private prewornItems = new Set<Item>();
-  private extra: Partial<Outfit> = {};
   private rings: { t: number; color: string }[] = [];
   private trail: { x: number; y: number }[] = [];
   private motes: Mote[] = [];
@@ -176,16 +205,14 @@ export class Renderer {
     v: Math.random() * 2 - 1,
     s: 0.3 + Math.random() * 0.7,
   }));
-  /** Platform id -> clothing item lying on it (cosmetic early pickup). */
-  pickups = new Map<number, Item>();
+  /** Collected items shown on the hero (bitmask, bit = tier). */
+  ownedMask = 0;
   /** Freeze-frame suit-up movie; when off, clothes change instantly with a glow. */
   cinematic = true;
   /** Menu background: draw the scene only, no platforms or hero. */
   sceneOnly = false;
   /** Called at the start of a suit-up with the new pieces (for the caption). */
-  onCaption: (items: Item[]) => void = () => undefined;
-  private outfitTier = 0;
-  private pendingOutfit = -1;
+  onCaption: (kind: 'stage' | 'item', value: number) => void = () => undefined;
   private impulse = 0;
   private spots: Spot[] = [];
   private moneyTier = 0;
@@ -214,9 +241,6 @@ export class Renderer {
     this.danger = 0;
     this.highlights.length = 0;
     this.sparkles.length = 0;
-    this.prewornItems.clear();
-    this.extra = {};
-    this.pickups.clear();
     this.trail.length = 0;
     this.rings.length = 0;
     this.bills.length = 0;
@@ -226,8 +250,6 @@ export class Renderer {
     this.deathK = 0;
     this.items.length = 0;
     this.spots.length = 0;
-    this.outfitTier = tier;
-    this.pendingOutfit = -1;
     this.moneyTier = tier;
   }
 
@@ -277,7 +299,9 @@ export class Renderer {
       } else if (e.type === 'tier') {
         this.moneyTier = e.tier;
         this.prewarm(Math.min(e.tier + 1, 12), H);
-        this.startSuitUp(e.tier, sim);
+        this.startStage(e.tier);
+      } else if (e.type === 'pickup') {
+        this.startItemFlight(e.item, e.x, e.y, sim);
       } else if (e.type === 'death' && !this.reducedEffects) {
         for (let i = 0; i < 16; i++) {
           const a = Math.random() * Math.PI * 2;
@@ -295,108 +319,53 @@ export class Renderer {
   }
 
   /**
-   * Iron-Man style: the camera moves in on the hero, the scene dims under a spotlight,
-   * new pieces fly in one by one and snap on, old ones get knocked off. Then every new
-   * piece keeps a soft glow for a few seconds so the player sees what changed.
+   * New tier: a short movie (when enabled) - the camera moves in, the scene fades
+   * to the new place under a spotlight and the hero poses. Clothes no longer change here.
    */
-  private startSuitUp(tier: number, sim: Sim): void {
-    const from = this.pendingOutfit >= 0 ? this.pendingOutfit : this.outfitTier;
-    const changes = outfitChanges(from, tier).filter((c) => !this.prewornItems.has(c.item));
-    this.pendingOutfit = tier;
-    if (this.reducedEffects || !this.cinematic || !changes.length) {
+  private startStage(tier: number): void {
+    if (this.reducedEffects || !this.cinematic) {
       this.sceneTier = tier;
-      this.finishOutfit();
-      if (!this.reducedEffects) {
-        for (const c of changes) this.highlights.push({ anchor: [c.anchor[0], c.anchor[1]], t: 0 });
-        this.impulse = 1;
-      }
+      this.onCaption('stage', tier);
       return;
     }
+    this.cine = { t: 0, dur: 2.6, fromScene: this.sceneTier, toScene: tier, kind: 'stage' };
+    this.onCaption('stage', tier);
+  }
+
+  /**
+   * Iron-Man style pickup: the piece tears off the platform, sweeps across the whole
+   * screen in a big arc, turns and snaps onto the hero with sparks and a flash.
+   */
+  private startItemFlight(tier: number, x: number, y: number, sim: Sim): void {
+    const item = ITEM_BY_TIER[tier] as Item;
+    const anchor = ITEM_ANCHOR[item] ?? [0, -30];
     const W = gameConfig.world.width;
-    const lead = 0.9;
-    const step = 0.85;
-    changes.forEach((c, i) => {
-      const left = i % 2 === 0;
-      this.items.push({
-        item: c.item,
-        dir: 'in',
-        x0: left ? -40 : W + 40,
-        y0: sim.hero.y + 120 + (i % 3) * 40,
-        vx: c.anchor[0],
-        vy: c.anchor[1],
-        ax: 0,
-        ay: 0,
-        t: -(lead + i * step),
-        dur: 0.9,
-        rot: (left ? -1 : 1) * (4 + Math.random() * 2),
-        done: false,
-      });
-      if (c.replaces) {
-        this.items.push({
-          item: c.replaces,
-          dir: 'out',
-          x0: 0,
-          y0: 0,
-          vx: (left ? 1 : -1) * (70 + Math.random() * 50),
-          vy: 280,
-          ax: c.anchor[0],
-          ay: c.anchor[1],
-          t: -(lead + i * step + 0.9),
-          dur: 1.4,
-          rot: 0,
-          done: false,
-        });
-      }
-    });
-    // Hold on the finished look before the camera returns.
-    const dur = lead + (changes.length - 1) * step + 0.9 + 1.8;
-    this.cine = { t: 0, dur, fromScene: this.sceneTier, toScene: tier, anchors: changes.map((c) => c.anchor) };
-    this.onCaption(changes.map((c) => c.item));
-  }
-
-  private finishOutfit(): void {
-    if (this.pendingOutfit >= 0) this.outfitTier = this.pendingOutfit;
-    this.pendingOutfit = -1;
-    this.prewornItems.clear();
-    this.extra = {};
-  }
-
-  /** True if this piece is already on the hero (worn or picked up early). */
-  isWorn(item: Item): boolean {
-    if (this.prewornItems.has(item)) return true;
-    return !outfitChanges(this.outfitTier, this.outfitTier + 1).some((c) => c.item === item);
-  }
-
-  /** Main calls this when the hero lands on a platform carrying a pickup. */
-  collectPickup(item: Item, sim: Sim): void {
-    const change = outfitChanges(this.outfitTier, this.outfitTier + 1).find((c) => c.item === item);
-    if (!change) return;
-    this.prewornItems.add(item);
-    const W = gameConfig.world.width;
+    const pause = this.cinematic && !this.reducedEffects;
     this.items.push({
       item,
       dir: 'in',
-      x0: sim.hero.x + (sim.hero.x < W / 2 ? 40 : -40),
-      y0: sim.hero.y + 60,
-      vx: change.anchor[0],
-      vy: change.anchor[1],
-      ax: 0,
-      ay: 0,
+      x0: x,
+      y0: y + 16,
+      vx: anchor[0],
+      vy: anchor[1],
+      ax: x < W / 2 ? W + 30 : -30,
+      ay: sim.hero.y + 260,
       t: 0,
-      dur: 0.45,
-      rot: 3,
+      dur: pause ? 1.15 : 0.75,
+      rot: 9,
       done: false,
       pickup: true,
+      tier,
     });
-    if (change.replaces) {
-      this.items.push({
-        item: change.replaces, dir: 'out', x0: 0, y0: 0, vx: 90, vy: 260,
-        ax: change.anchor[0], ay: change.anchor[1], t: -0.45, dur: 1.3, rot: 0, done: false,
-      });
-    }
+    if (pause) this.cine = { t: 0, dur: 1.45, fromScene: this.sceneTier, toScene: this.sceneTier, kind: 'item' };
+    this.onFlightStart(item);
+    this.onCaption('item', tier);
   }
 
-  private drawItems(sim: Sim, heroX: number, heroY: number, toY: (y: number) => number, dt: number, tier: number): void {
+  /** Called when an item starts flying (sound). */
+  onFlightStart: (item: Item) => void = () => undefined;
+
+  private drawItems(sim: Sim, heroX: number, heroY: number, toY: (y: number) => number, dt: number): void {
     if (!this.items.length) return;
     const ctx = this.ctx;
     const facing = sim.hero.facing;
@@ -404,83 +373,62 @@ export class Renderer {
       it.t += dt;
       if (it.t < 0) continue;
       const k = Math.min(1, it.t / it.dur);
-      ctx.save();
-      if (it.dir === 'in') {
-        const attachment = heroAttachment(it.item, {
-          tier,
-          vx: sim.hero.vx,
-          vy: sim.hero.vy,
-          time: sim.time + this.clock * (this.cine ? 1 : 0),
-          gesture: this.menuGesture ?? undefined,
-        });
-        const tx = heroX + attachment[0] * facing;
-        const ty = heroY - attachment[1];
-        const e = 1 - Math.pow(1 - k, 3);
-        const cx = (it.x0 + tx) / 2;
-        const cy = Math.max(it.y0, ty) + 90;
+      if (it.dir === 'in' && !it.done) {
+        // The target follows the animated body part the item belongs to.
+        const target = this.heroPoint(ITEM_POINT[it.item] ?? 'torso');
+        const tx = target ? target.x : heroX + it.vx * facing;
+        const ty = target ? target.y : toY(heroY - it.vy);
+        // Cubic arc: platform -> far screen edge high up -> back over the top -> onto the hero.
+        const e = k < 0.5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2;
         const u = 1 - e;
-        const x = u * u * it.x0 + 2 * u * e * cx + e * e * tx;
-        const y = u * u * it.y0 + 2 * u * e * cy + e * e * ty;
-        const attached = it.done && !it.pickup && this.pendingOutfit >= 0;
-        if (attached) {
-          // Snapped on: stays in place until the whole new outfit is complete.
-          ctx.translate(tx, toY(ty));
-          ctx.scale(facing, 1);
-          drawItem(ctx, it.item);
-        } else if (k < 1) {
-          // A bright streak behind the flying piece.
-          ctx.globalCompositeOperation = 'lighter';
-          ctx.globalAlpha = 0.5 * (1 - k);
-          const g = ctx.createRadialGradient(x, toY(y), 0, x, toY(y), 22);
-          g.addColorStop(0, 'rgba(255,230,150,0.9)');
-          g.addColorStop(1, 'rgba(255,230,150,0)');
-          ctx.fillStyle = g;
-          ctx.fillRect(x - 22, toY(y) - 22, 44, 44);
-          ctx.globalCompositeOperation = 'source-over';
-          ctx.globalAlpha = 1;
-          ctx.translate(x, toY(y));
-          ctx.rotate(it.rot * (1 - e));
-          const sc = 2.2 - 1.2 * e;
-          ctx.scale(sc * facing, sc);
-          drawItem(ctx, it.item);
-        }
-        if (k >= 1 && !it.done) {
+        const p1x = it.ax;
+        const p1y = it.ay;
+        // Screen space: start on the platform, sweep to the far edge, come back over the top.
+        const sy0 = toY(it.y0);
+        const sy1 = toY(p1y);
+        const p2x = tx + (tx < gameConfig.world.width / 2 ? -60 : 60);
+        const p2y = ty - 140;
+        const x = u * u * u * it.x0 + 3 * u * u * e * p1x + 3 * u * e * e * p2x + e * e * e * tx;
+        const y = u * u * u * sy0 + 3 * u * u * e * sy1 + 3 * u * e * e * p2y + e * e * e * ty;
+        // A glowing streak behind the flying piece.
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        const g = ctx.createRadialGradient(x, y, 0, x, y, 26);
+        g.addColorStop(0, `rgba(255,230,150,${0.7 * (1 - k * 0.5)})`);
+        g.addColorStop(1, 'rgba(255,230,150,0)');
+        ctx.fillStyle = g;
+        ctx.fillRect(x - 26, y - 26, 52, 52);
+        ctx.restore();
+        if (Math.random() < 0.6) this.sparkles.push({ x: x + (Math.random() - 0.5) * 10, y: y + (Math.random() - 0.5) * 10, t: 0 });
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.rotate(it.rot * (1 - e));
+        const sc = 2.6 - 1.6 * e;
+        ctx.scale(sc * facing, sc);
+        drawItem(ctx, it.item);
+        ctx.restore();
+        if (k >= 1) {
           it.done = true;
           this.impulse = 1;
+          this.flash = 1;
+          if (it.tier !== undefined) this.ownedMask |= 1 << it.tier;
           this.onItemSnap(it.item);
-          const o = PICKABLE[it.item];
-          if (it.pickup && o) Object.assign(this.extra, o);
-          this.highlights.push({ anchor: [attachment[0], attachment[1]], t: 0 });
-          for (let i = 0; i < 14; i++) {
+          this.highlights.push({ item: it.item, t: 0 });
+          for (let i = 0; i < 18; i++) {
             const a = Math.random() * Math.PI * 2;
-            this.particles.spawn(2, tx, ty, Math.cos(a) * 140, Math.sin(a) * 140, 0.5);
+            this.sparkles.push({ x: tx + Math.cos(a) * (4 + Math.random() * 14), y: ty + Math.sin(a) * (4 + Math.random() * 14), t: Math.random() * 0.2 });
           }
         }
-      } else {
-        if (!it.done) {
-          it.done = true;
-          it.x0 = heroX + it.ax * facing;
-          it.y0 = heroY - it.ay;
-        }
-        const tt = it.t;
-        const x = it.x0 + it.vx * tt;
-        const y = it.y0 + it.vy * tt - 900 * tt * tt;
-        ctx.globalAlpha = 1 - k;
-        ctx.translate(x, toY(y));
-        ctx.rotate(tt * 8 * Math.sign(it.vx));
-        ctx.scale(1.3 * facing, 1.3);
-        drawItem(ctx, it.item);
       }
-      ctx.restore();
     }
-    ctx.globalAlpha = 1;
-    this.items = this.items.filter((it) =>
-      it.dir === 'in' ? !it.done || (!it.pickup && this.pendingOutfit >= 0) : it.t < it.dur,
-    );
+    this.items = this.items.filter((it) => !it.done);
   }
 
+  /** A brief bright outline of the hero when a piece snaps on. */
+  private flash = 0;
+
   /** Soft pulsing glow on freshly worn pieces for a few seconds. */
-  private drawHighlights(x: number, footY: number, facing: number, dt: number): void {
+  private drawHighlights(dt: number): void {
     if (!this.highlights.length) return;
     const ctx = this.ctx;
     ctx.globalCompositeOperation = 'lighter';
@@ -488,8 +436,10 @@ export class Renderer {
     for (const h of this.highlights) {
       const fade = h.t < 5 ? 1 : 6 - h.t;
       const pulse = 0.55 + 0.45 * Math.sin(h.t * 4);
-      const hx = x + h.anchor[0] * facing;
-      const hy = footY + h.anchor[1];
+      const pt = this.heroPoint(ITEM_POINT[h.item] ?? 'torso');
+      if (!pt) continue;
+      const hx = pt.x;
+      const hy = pt.y;
       const g = ctx.createRadialGradient(hx, hy, 0, hx, hy, 16);
       g.addColorStop(0, `rgba(255,236,160,${0.55 * pulse * fade})`);
       g.addColorStop(1, 'rgba(255,236,160,0)');
@@ -513,7 +463,8 @@ export class Renderer {
 
     const cam = sim.prevCamY + (sim.camY - sim.prevCamY) * alpha + this.camShift;
     const toY = (y: number): number => H - (y - cam);
-    const tier = this.heroTierOverride ?? this.outfitTier;
+    const tier = this.heroTierOverride ?? sim.tier;
+    this.flash = Math.max(0, this.flash - frameDt * 3);
     this.impulse = Math.max(0, this.impulse - frameDt * 5);
 
     const hero = sim.hero;
@@ -525,14 +476,12 @@ export class Renderer {
     if (this.cine) {
       const c = this.cine;
       c.t += frameDt;
-      const kin = Math.min(1, c.t / 0.7);
-      const kout = Math.min(1, Math.max(0, (c.dur - c.t) / 0.7));
-      zoom = 1 + 0.9 * easeInOut(Math.min(kin, kout));
+      const ramp = c.kind === 'stage' ? 0.7 : 0.3;
+      const kin = Math.min(1, c.t / ramp);
+      const kout = Math.min(1, Math.max(0, (c.dur - c.t) / ramp));
+      zoom = 1 + (c.kind === 'stage' ? 0.9 : 0.35) * easeInOut(Math.min(kin, kout));
       if (c.t >= 0.35 && this.sceneTier !== c.toScene) this.sceneTier = c.toScene;
-      if (c.t >= c.dur) {
-        this.cine = null;
-        this.finishOutfit();
-      }
+      if (c.t >= c.dur) this.cine = null;
     }
     if (zoom !== 1) {
       const fx = hx;
@@ -552,8 +501,7 @@ export class Renderer {
 
     for (const p of sim.platforms) {
       this.drawPlatform(p, toY(p.y), sim.time);
-      const pick = this.pickups.get(p.id);
-      if (pick) this.drawPickup(pick, p.x, toY(p.y), sim.time);
+      if (p.item >= 0) this.drawPickup(ITEM_BY_TIER[p.item] as Item, p.x, toY(p.y), sim.time);
     }
     this.drawSpots(toY, frameDt);
 
@@ -588,8 +536,8 @@ export class Renderer {
     }
 
     this.drawHero(sim, hx, toY(hy), frameDt, tier);
-    this.drawItems(sim, hx, hy, toY, frameDt, tier);
-    this.drawHighlights(hx, toY(hy), hero.facing, frameDt);
+    this.drawItems(sim, hx, hy, toY, frameDt);
+    this.drawHighlights(frameDt);
     this.drawSparkles(frameDt);
     if (!this.cine) this.drawDanger(sim, W, H);
 
@@ -1105,34 +1053,41 @@ export class Renderer {
     const [r, g, b] = this.flashlightColor.map(Math.round);
     const rgb = `${r},${g},${b}`;
 
+    // The rig does the knees, squash and stretch; a light global squash keeps the impact.
     const land = Math.exp(-hero.sinceLand * 18);
-    const overshoot = Math.sin(Math.min(1, hero.sinceLand * 6) * Math.PI) * 0.04 * Math.exp(-hero.sinceLand * 4);
-    const stretch = Math.min(0.12, Math.max(0, hero.vy) / 6000);
-    // A clothing piece snapping on gives the hero a little jolt.
-    const sy = 1 - land * 0.2 + stretch + overshoot - this.impulse * 0.12;
-    const sx = 1 + land * 0.16 - stretch * 0.6 + this.impulse * 0.1;
-
-    const tipX = x + TORCH_TIP[0] * sx * hero.facing;
-    const tipY = footY + TORCH_TIP[1] * sy;
-    if (!sim.dead) this.drawBeam(sim, tipX, tipY, hero.facing, rgb, tier, dt);
-
-    ctx.save();
-    ctx.translate(x, footY);
-    if (sim.dead) ctx.rotate(hero.spin);
-    ctx.scale(sx * hero.facing, sy);
-    drawHeroBody(ctx, {
+    const stretch = Math.min(0.06, Math.max(0, hero.vy) / 12000);
+    const sy = 1 - land * 0.06 + stretch - this.impulse * 0.1;
+    const sx = 1 + land * 0.05 - stretch * 0.5 + this.impulse * 0.08;
+    const outfit = outfitFromMask(this.ownedMask);
+    const pose: HeroPose = {
       tier,
       light: rgb,
       neutral: sim.light === null,
       sinceLand: hero.sinceLand,
       vy: hero.vy,
       vx: hero.vx,
+      dead: sim.dead,
+      // During a freeze the body keeps breathing and blinking on the real clock.
       time: sim.time + this.clock * (this.cine ? 1 : 0),
       face: this.faceFor(sim),
       gesture: this.menuGesture ?? undefined,
-      extra: this.extra,
+      outfit,
       noBeam: true,
-    });
+    };
+    const rig = heroRig(pose);
+    this.heroXf = sim.dead ? null : { x, y: footY, sx, sy, facing: hero.facing, rig };
+
+    // The beam starts at the flashlight lens and follows its angle.
+    const tipX = x + rig.torchTip.x * sx * hero.facing;
+    const tipY = footY + rig.torchTip.y * sy;
+    const beamAngle = hero.facing > 0 ? rig.torchAngle : Math.PI - rig.torchAngle;
+    if (!sim.dead) this.drawBeam(sim, tipX, tipY, beamAngle, rgb, outfit.newTorch, dt);
+
+    ctx.save();
+    ctx.translate(x, footY);
+    if (sim.dead) ctx.rotate(hero.spin);
+    ctx.scale(sx * hero.facing, sy);
+    drawHeroBody(ctx, pose, rig);
     ctx.restore();
 
     // Lens flare and a color-change ring at the flashlight.
@@ -1170,14 +1125,24 @@ export class Renderer {
     }
 
     if (sim.light === 'red' && !sim.dead) this.drawAura(x, footY - 28, sim.time, dt);
+    if (this.flash > 0) {
+      // Snap flash: a bright burst around the whole figure.
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      const fg = ctx.createRadialGradient(x, footY - 28, 4, x, footY - 28, 50);
+      fg.addColorStop(0, `rgba(255,250,220,${0.75 * this.flash})`);
+      fg.addColorStop(1, 'rgba(255,250,220,0)');
+      ctx.fillStyle = fg;
+      ctx.fillRect(x - 50, footY - 78, 100, 100);
+      ctx.restore();
+    }
   }
 
   /** Volumetric flashlight beam: a soft wide cone, a bright core and dust glittering in it. */
-  private drawBeam(sim: Sim, x: number, y: number, facing: number, rgb: string, tier: number, dt: number): void {
+  private drawBeam(sim: Sim, x: number, y: number, dir: number, rgb: string, newTorch: boolean, dt: number): void {
     const ctx = this.ctx;
     const on = sim.light !== null;
-    const len = (tier >= 7 ? 125 : 100) * (1 + (sim.multiplier - 1) * 0.15);
-    const dir = Math.atan2(0.62, 0.78 * facing);
+    const len = (newTorch ? 125 : 100) * (1 + (sim.multiplier - 1) * 0.15);
     const intensity = on ? 1 : 0.35;
     ctx.save();
     ctx.translate(x, y);

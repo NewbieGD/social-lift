@@ -4,7 +4,7 @@ import type { ColorId } from '../core/gameConfig';
 
 type Sfx =
   | 'jump' | 'land' | 'capture' | 'tick' | 'auraOn' | 'auraOff' | 'death' | 'bell' | 'click' | 'unlock'
-  | 'snap' | 'fanfare' | 'combo' | 'break' | 'close';
+  | 'snap' | 'fanfare' | 'combo' | 'break' | 'close' | 'servo';
 
 interface MusicStyle {
   bpm: number;
@@ -185,7 +185,35 @@ export class AudioEngine {
           this.tone(t, 'square', 180, 90, 0.08, 0.18);
           this.noiseHit(t, 0.06, 2500, 0.12);
         }
+        // Metallic clank and a bright lock-in chime.
+        this.tone(t, 'square', 95, 60, 0.12, 0.2);
+        this.noiseHit(t, 0.09, 4500, 0.16, undefined, true);
         this.tone(t + 0.05, 'sine', 1568, 1568, 0.35, 0.12);
+        this.tone(t + 0.12, 'sine', 2093, 2093, 0.4, 0.08);
+        break;
+      }
+      case 'servo': {
+        // Iron-Man style: a rising servo whine and a soft whoosh while the piece flies.
+        const ctx2 = this.ctx!;
+        const o = ctx2.createOscillator();
+        const f = ctx2.createBiquadFilter();
+        const g = ctx2.createGain();
+        o.type = 'sawtooth';
+        o.frequency.setValueAtTime(180, t);
+        o.frequency.exponentialRampToValueAtTime(1100, t + 0.9);
+        f.type = 'bandpass';
+        f.frequency.setValueAtTime(600, t);
+        f.frequency.exponentialRampToValueAtTime(2400, t + 0.9);
+        f.Q.value = 6;
+        g.gain.setValueAtTime(0.0001, t);
+        g.gain.exponentialRampToValueAtTime(0.16, t + 0.08);
+        g.gain.exponentialRampToValueAtTime(0.0001, t + 1);
+        o.connect(f);
+        f.connect(g);
+        g.connect(this.sfx);
+        o.start(t);
+        o.stop(t + 1.05);
+        this.noiseHit(t, 0.7, 1800, 0.08, undefined, true);
         break;
       }
       case 'combo':

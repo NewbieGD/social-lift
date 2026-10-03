@@ -85,6 +85,15 @@ export const gameConfig = {
     heroAnchor: 0.38,
     follow: 10,
   },
+  items: {
+    /** Bonus to the score multiplier per item worn in the run (13 items -> x1.65). */
+    bonusPerItem: 0.05,
+    /** Chance that a tier's item appears when the tier is entered. */
+    chance: 0.5,
+    /** Chance that one earlier missed item gets a second try on a new tier. */
+    laterChance: 0.4,
+    count: 13,
+  },
   death: {
     hitStopMs: 120,
     slowMoSec: 0.6,

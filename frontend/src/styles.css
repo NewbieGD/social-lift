@@ -2324,3 +2324,47 @@ body.in-menu #controls {
 button.primary.play::after {
   background: linear-gradient(100deg, rgba(255, 255, 255, 0), rgba(255, 255, 255, 0.3), rgba(255, 255, 255, 0));
 }
+
+/* Collection bonus next to the wallet */
+.bonus-chip {
+  font-size: 12px;
+  font-weight: 800;
+  color: #ffe58a;
+  padding: 2px 6px;
+  border-radius: 8px;
+  background: rgba(255, 214, 64, 0.16);
+}
+.bonus-chip:empty {
+  display: none;
+}
+
+.bonus-bar {
+  height: 8px;
+  margin: 6px 0 6px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.1);
+  overflow: hidden;
+}
+.bonus-bar i {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, #f2b62d, #ffe58a);
+  transform-origin: left center;
+}
+
+.looks.items .look {
+  position: relative;
+}
+.looks.items canvas {
+  height: 58px;
+}
+.look.owned {
+  box-shadow: inset 0 0 0 1.5px rgba(255, 214, 64, 0.45);
+}
+.look .plus {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  font-size: 10px;
+  color: #ffe58a;
+}

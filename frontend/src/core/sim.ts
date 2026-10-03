@@ -53,13 +53,28 @@ export class Sim {
 
   private gen: Generator;
   private phaseRng: Rng;
+  private itemRng: Rng;
+
+  /** Items worn in this run (bit = tier of the item). Every run starts from zero. */
+  owned = 0;
+  /** Items picked up in this run (same as owned; kept for the report). */
+  picked = 0;
+  private itemsEnabled: boolean;
+  /** Items waiting for a platform ahead to be placed on. */
+  private pendingItems: number[] = [];
 
   /** Guided tutorial: no wave, no random hazards, red phases only when forced. */
   readonly tutorial: boolean;
 
-  constructor(seed: number, viewH: number, opts: { tutorial?: boolean } = {}) {
+  constructor(
+    seed: number,
+    viewH: number,
+    opts: { tutorial?: boolean; items?: boolean } = {},
+  ) {
     this.seed = seed >>> 0;
     this.tutorial = !!opts.tutorial;
+    this.itemsEnabled = !!opts.items && !this.tutorial;
+    this.itemRng = new Rng(this.seed ^ 0x5bd1e995);
     this.viewH = viewH;
     const W = gameConfig.world.width;
     const genRng = new Rng(this.seed);
@@ -86,6 +101,13 @@ export class Sim {
 
   get runTime(): number {
     return this.runStarted ? this.time - this.runStartTime : 0;
+  }
+
+  /** Collection bonus to the score multiplier, e.g. 1.2 with 4 items. */
+  get itemBonus(): number {
+    let n = 0;
+    for (let i = 0; i < gameConfig.items.count; i++) if (this.owned & (1 << i)) n++;
+    return 1 + n * gameConfig.items.bonusPerItem;
   }
 
   get multiplier(): number {
@@ -125,6 +147,7 @@ export class Sim {
     this.updateWave();
     this.checkDeath();
     this.fillPlatforms();
+    this.placeItem();
     this.cullPlatforms();
 
     this.time += DT;
@@ -223,6 +246,15 @@ export class Sim {
       this.runStarted = true;
       this.runStartTime = this.time;
       this.events.push({ type: 'runStart' });
+      this.rollItem(0);
+    }
+    if (best.item >= 0) {
+      // Touching the platform collects the item lying on it.
+      const item = best.item;
+      best.item = -1;
+      this.owned |= 1 << item;
+      this.picked |= 1 << item;
+      this.events.push({ type: 'pickup', item, x: best.x, y: best.y });
     }
     this.evaluateLanding(best);
   }
@@ -251,7 +283,7 @@ export class Sim {
     this.maxCombo = Math.max(this.maxCombo, this.streak);
     this.lastCaptureTime = this.time;
     const mult = comboMultiplier(this.streak);
-    const points = Math.round(gameConfig.colors[color].points * mult);
+    const points = Math.round(gameConfig.colors[color].points * mult * this.itemBonus);
     this.score += points;
     this.captures++;
 
@@ -269,7 +301,46 @@ export class Sim {
       }
       this.tier = newTier;
       this.events.push({ type: 'tier', tier: newTier });
+      this.rollItem(newTier);
     }
+  }
+
+  /**
+   * Entering a tier may put that tier's item somewhere ahead. A piece that was missed
+   * earlier in this run (not rolled or not caught in time) may come back on a later tier.
+   * Same rules for every player: the run starts with nothing worn.
+   */
+  private rollItem(tier: number): void {
+    if (!this.itemsEnabled) return;
+    const cfg = gameConfig.items;
+    const free = (i: number): boolean =>
+      !(this.owned & (1 << i)) && !this.pendingItems.includes(i) && !this.platforms.some((p) => p.item === i);
+    if (tier < cfg.count && free(tier) && this.itemRng.next() < cfg.chance) {
+      this.pendingItems.push(tier);
+      this.events.push({ type: 'itemSpawn', item: tier });
+    }
+    for (let i = 0; i < Math.min(tier, cfg.count); i++) {
+      if (!free(i)) continue;
+      if (this.itemRng.next() < cfg.laterChance) {
+        this.pendingItems.push(i);
+        this.events.push({ type: 'itemSpawn', item: i });
+      }
+      break; // at most one second chance per tier
+    }
+  }
+
+  /** Puts the next pending item on a calm colored platform just above the screen. */
+  private placeItem(): void {
+    if (!this.pendingItems.length || this.platforms.some((p) => p.item >= 0)) return;
+    const lo = this.camY + this.viewH * 0.8;
+    const hi = this.camY + this.viewH + 160;
+    let best: Platform | null = null;
+    for (const p of this.platforms) {
+      if (p.kind !== 'color' || p.phases || p.y < lo || p.y > hi) continue;
+      if (!best || p.y < best.y) best = p;
+    }
+    if (!best) return;
+    best.item = this.pendingItems.shift()!;
   }
 
   private updateCombo(): void {

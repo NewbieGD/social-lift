@@ -63,7 +63,7 @@ function landOn(platform: Partial<Platform>, light: LightId | null): Sim {
   const sim = new Sim(1, 700);
   const p: Platform = {
     id: 999, x: 180, y: 400, kind: 'color', color: 'yellow', phases: false, phase: 'normal',
-    phaseT: 99, phaseLen: 99, whiteT: 0, whiteAge: 0, ...platform,
+    phaseT: 99, phaseLen: 99, whiteT: 0, whiteAge: 0, item: -1, ...platform,
   };
   sim.platforms = [p];
   sim.runStarted = true;
@@ -129,6 +129,33 @@ test('red phase is always preceded by a full warning', () => {
       break;
     }
   }
+});
+
+test('items: each run starts from zero, pickups add the bonus, no item repeats within a run', () => {
+  let found: Sim | null = null;
+  for (let seed = 1; seed < 60 && !found; seed++) {
+    const sim = new Sim(seed, 700, { items: true });
+    for (let i = 0; i < 400; i++) {
+      sim.step({ axis: sim.platforms[1].x > sim.hero.x ? 1 : -1, press: null });
+      if (sim.platforms.some((p) => p.item === 0)) {
+        found = sim;
+        break;
+      }
+      if (sim.dead) break;
+    }
+  }
+  assert.ok(found, 'the cap appears in some runs');
+  const sim = found!;
+  assert.equal(sim.owned, 0);
+  const p = sim.platforms.find((q) => q.item === 0)!;
+  sim.hero.x = p.x;
+  sim.hero.y = p.y + 30;
+  sim.hero.vy = -10;
+  for (let i = 0; i < 30 && sim.hero.vy <= 0; i++) sim.step({ axis: 0, press: null });
+  assert.equal(sim.picked & 1, 1);
+  assert.ok(Math.abs(sim.itemBonus - 1 - gameConfig.items.bonusPerItem) < 1e-9);
+  for (let i = 0; i < 300; i++) sim.step({ axis: 0, press: null });
+  assert.ok(!sim.platforms.some((q) => q.item === 0), 'a worn item never appears again in the same run');
 });
 
 console.log(`\n${passed} tests passed`);

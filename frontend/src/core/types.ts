@@ -21,6 +21,8 @@ export interface Platform {
   whiteT: number;
   /** Seconds since the platform became white (for the capture wave effect). */
   whiteAge: number;
+  /** Collectible item (tier index) lying on this platform, or -1. */
+  item: number;
 }
 
 export interface Hero {
@@ -56,4 +58,6 @@ export type SimEvent =
   | { type: 'warn'; id: number }
   | { type: 'comboReset' }
   | { type: 'runStart' }
-  | { type: 'close'; x: number; y: number };
+  | { type: 'close'; x: number; y: number }
+  | { type: 'pickup'; item: number; x: number; y: number }
+  | { type: 'itemSpawn'; item: number };

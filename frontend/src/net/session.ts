@@ -15,6 +15,8 @@ export interface Stats {
   last_tier?: number;
   best_combo?: number;
   total_captures?: number;
+  items_mask?: number;
+  item_misses?: number[];
 }
 
 export interface Bootstrap {
@@ -33,6 +35,8 @@ export interface RunTicket {
   seed: number;
   started_at: number;
   token: string;
+  items_mask?: number;
+  item_misses?: number[];
 }
 
 export interface RunReport {
@@ -44,6 +48,7 @@ export interface RunReport {
   captures: number;
   max_combo: number;
   input_log: number[][];
+  items: number;
 }
 
 export interface FinishResult {
@@ -234,6 +239,9 @@ export class Session {
     s.last_tier = this.lastReport?.tier ?? s.last_tier;
     s.best_combo = Math.max(s.best_combo ?? 0, Math.min(this.lastReport?.max_combo ?? 0, this.lastReport?.captures ?? 0));
     s.total_captures = (s.total_captures ?? 0) + (this.lastReport?.captures ?? 0);
+    if (this.lastReport) {
+      s.items_mask = (s.items_mask ?? 0) | this.lastReport.items;
+    }
   }
 
   private enqueue(report: RunReport): void {
@@ -272,4 +280,12 @@ export class Session {
       /* ignore */
     }
   }
+}
+
+/** Same rule as the server: add picked items, count a miss for every reached tier still missing. */
+export function applyCollection(mask: number, misses: number[], picked: number, tier: number): { mask: number; misses: number[] } {
+  const next = mask | picked;
+  const m = Array.from({ length: 13 }, (_, i) => misses[i] ?? 0);
+  for (let i = 0; i <= Math.min(tier, 12); i++) m[i] = next & (1 << i) ? 0 : m[i] + 1;
+  return { mask: next, misses: m };
 }

@@ -243,6 +243,7 @@ export class Generator {
       phaseLen: wait,
       whiteT: 0,
       whiteAge: 0,
+      item: -1,
     };
   }
 }

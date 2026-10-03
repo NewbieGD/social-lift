@@ -15,6 +15,7 @@ export interface Outfit {
   phone: boolean;
   luxury: boolean;
   suit: boolean;
+  cap: boolean;
 }
 
 export interface HeroPose {
@@ -25,15 +26,19 @@ export interface HeroPose {
   /** Seconds since landing (squash) and vertical speed (tuck, arm swing). */
   sinceLand: number;
   vy: number;
-  /** Horizontal velocity, used for the walk cycle. */
-  vx?: number;
   time: number;
   face?: Face;
   gesture?: Gesture;
   /** Pieces picked up early on platforms, worn on top of the tier outfit. */
   extra?: Partial<Outfit>;
+  /** Full outfit override (the collection); otherwise derived from the tier. */
+  outfit?: Outfit;
   /** Skip the flashlight beam (drawn separately by the renderer). */
   noBeam?: boolean;
+  /** Horizontal speed: drives the running-in-air cycle and the body lean. */
+  vx?: number;
+  /** Dead: limbs flail, scared face. */
+  dead?: boolean;
 }
 
 export function outfitFor(tier: number): Outfit {
@@ -47,13 +52,357 @@ export function outfitFor(tier: number): Outfit {
     phone: tier >= 10,
     luxury: tier >= 11,
     suit: tier >= 12,
+    cap: false,
   };
 }
 
-const SKIN = '#EDB98F';
-const SKIN_SHADE = '#CF9670';
-const HAIR = '#3A2A22';
-const LINE = 'rgba(28,20,24,0.85)';
+/** The 13 collectible items, one per wealth tier (index = tier). */
+export const ITEM_BY_TIER = [
+  'cap', 'slippers', 'sweats', 'shirt', 'trousers', 'jacket', 'watch',
+  'newTorch', 'tie', 'shoes', 'phone', 'glasses', 'helmet',
+] as const;
+
+export function itemCount(mask: number): number {
+  let n = 0;
+  for (let i = 0; i < ITEM_BY_TIER.length; i++) if (mask & (1 << i)) n++;
+  return n;
+}
+
+/** The look built from the collected items: the best owned piece in each slot. */
+export function outfitFromMask(mask: number): Outfit {
+  const has = (item: (typeof ITEM_BY_TIER)[number]): boolean => (mask & (1 << ITEM_BY_TIER.indexOf(item))) !== 0;
+  return {
+    feet: has('shoes') ? 'shoes' : has('slippers') ? 'slippers' : 'bare',
+    legs: has('trousers') ? 'trousers' : has('sweats') ? 'sweats' : 'shorts',
+    top: has('jacket') ? 'jacket' : has('shirt') ? 'shirt' : 'tank',
+    watch: has('watch'),
+    newTorch: has('newTorch'),
+    tie: has('tie'),
+    phone: has('phone'),
+    luxury: has('glasses'),
+    suit: has('helmet'),
+    cap: has('cap'),
+  };
+}
+
+/** Where each item attaches on the hero (feet at 0,0, up is negative). */
+export const ITEM_ANCHOR: Record<string, [number, number]> = {
+  cap: [1, -62], slippers: [0, -2], shoes: [0, -2], sweats: [0, -15], trousers: [0, -15],
+  shirt: [0, -33], jacket: [0, -33], watch: [13, -27], newTorch: [20, -26], tie: [0, -36],
+  phone: [-6, -26], glasses: [6, -53], helmet: [1, -53],
+};
+
+// ======================================================================
+// Character construction
+// ----------------------------------------------------------------------
+// 1. heroRig(pose) turns the game state into a skeleton: joint positions,
+//    head/torso transforms, foot angles, the held item frame and named
+//    attachment points. All animation states only change rig parameters.
+// 2. drawHeroBody(ctx, pose) draws the rig in a fixed z-order with one
+//    illustration language: same outline, flat colors, a single soft shade.
+// Coordinates: origin at the feet, y grows downward, the hero faces +x.
+// ======================================================================
+
+const SKIN = '#F0BE94';
+const SKIN_SHADE = '#D79C72';
+const HAIR = '#3B2A22';
+const LINE = '#2A1E22';
+const LW = 1.25;
+const OUT = LW * 2;
+
+type P = { x: number; y: number };
+type Limb3 = [P, P, P];
+
+export type AttachPoint =
+  | 'head' | 'headTop' | 'face' | 'neck' | 'torso' | 'waist' | 'back'
+  | 'frontShoulder' | 'backShoulder' | 'frontHand' | 'backHand' | 'wrist'
+  | 'frontFoot' | 'backFoot';
+
+/** A held object's frame: position at the grip, rotation of the object's long axis. */
+export interface HeldFrame {
+  x: number;
+  y: number;
+  rot: number;
+  scale: number;
+}
+
+export interface Rig {
+  hip: P;
+  chest: P;
+  /** Torso lean (radians, positive = forward). */
+  lean: number;
+  torsoLen: number;
+  head: P;
+  headTilt: number;
+  look: P;
+  blink: number;
+  frontArm: Limb3;
+  backArm: Limb3;
+  frontLeg: Limb3;
+  backLeg: Limb3;
+  frontFootRot: number;
+  backFootRot: number;
+  /** Flashlight frame (in the front hand). */
+  held: HeldFrame;
+  torchTip: P;
+  torchAngle: number;
+  /** The phone in the back hand, when carried. */
+  backHeld: HeldFrame;
+  gesture: Gesture;
+  face: Face;
+  points: Record<AttachPoint, P>;
+}
+
+const clamp = (v: number, a: number, b: number): number => (v < a ? a : v > b ? b : v);
+const mix = (a: number, b: number, k: number): number => a + (b - a) * k;
+
+function hash(n: number): number {
+  const s = Math.sin(n * 127.1 + 311.7) * 43758.5453;
+  return s - Math.floor(s);
+}
+
+/** Natural, irregular blinking: one blink every 2-5 s, sometimes a double blink. */
+function blinkAmount(t: number): number {
+  const slot = Math.floor(t / 3.2);
+  const start = slot * 3.2 + hash(slot) * 2.4;
+  const d = t - start;
+  const one = (x: number): number => (x >= 0 && x < 0.16 ? Math.sin((x / 0.16) * Math.PI) : 0);
+  let b = one(d);
+  if (hash(slot + 77) > 0.78) b = Math.max(b, one(d - 0.24));
+  return b;
+}
+
+/** Points along a two-segment chain from angles (0 = straight down, positive = toward +x). */
+function chainPts(o: P, a1: number, l1: number, a2: number, l2: number): Limb3 {
+  const j = { x: o.x + Math.sin(a1) * l1, y: o.y + Math.cos(a1) * l1 };
+  const e = { x: j.x + Math.sin(a1 + a2) * l2, y: j.y + Math.cos(a1 + a2) * l2 };
+  return [o, j, e];
+}
+
+/**
+ * Stable two-bone IK. `bend` fixes the elbow side (+1 / -1) so it never flips,
+ * and the target is kept inside a safe reach to avoid the straight-arm singularity.
+ */
+function ik(s: P, t: P, l1: number, l2: number, bend: number): Limb3 {
+  const dx = t.x - s.x;
+  const dy = t.y - s.y;
+  const d = clamp(Math.hypot(dx, dy), Math.abs(l1 - l2) + 1.5, l1 + l2 - 0.6);
+  const base = Math.atan2(dy, dx);
+  const a = Math.acos(clamp((l1 * l1 + d * d - l2 * l2) / (2 * l1 * d), -1, 1));
+  const ea = base + a * bend;
+  const j = { x: s.x + Math.cos(ea) * l1, y: s.y + Math.sin(ea) * l1 };
+  return [s, j, { x: s.x + Math.cos(base) * d, y: s.y + Math.sin(base) * d }];
+}
+
+function rot(p: P, o: P, a: number): P {
+  const c = Math.cos(a);
+  const s = Math.sin(a);
+  return { x: o.x + (p.x - o.x) * c - (p.y - o.y) * s, y: o.y + (p.x - o.x) * s + (p.y - o.y) * c };
+}
+
+const UPPER_ARM = 8.4;
+const FOREARM = 7.6;
+const THIGH = 9.6;
+const SHIN = 9.2;
+
+/** Builds the skeleton for this frame from the animation state. */
+export function heroRig(pose: HeroPose): Rig {
+  const t = pose.time;
+  const vy = pose.vy;
+  const vx = pose.vx ?? 0;
+  const o: Outfit = { ...(pose.outfit ?? outfitFor(pose.tier)), ...(pose.extra ?? {}) };
+  const still = pose.gesture !== undefined || (vy === 0 && vx === 0);
+
+  // ---- Animation parameters from the state ----
+  // compress: just landed (knees bend, body squashes); rise / fall: vertical phases.
+  const compress = pose.dead ? 0 : Math.exp(-pose.sinceLand * 16) * (still ? 0 : 1);
+  const rise = clamp(vy / 760, 0, 1) * (1 - compress);
+  const fall = clamp(-vy / 760, 0, 1.6);
+  const apex = still ? 0 : clamp(1 - Math.abs(vy) / 260, 0, 1);
+  const flail = pose.dead ? 1 : clamp((-vy - 900) / 400, 0, 1);
+  const run = still ? 0 : clamp(Math.abs(vx) / 260, 0, 1);
+  const runPhase = t * 11;
+  const poise = Math.min(1, pose.tier / 8);
+  const breathe = Math.sin(t * 2.6) * 0.45;
+
+  // ---- Legs (chain from the hips; the hips drop so feet stay planted on landing) ----
+  const legSwing = Math.sin(runPhase) * 0.45 * run;
+  const fThigh = 0.12 + compress * 0.95 + apex * 0.55 + rise * -0.05 + fall * 0.12 + legSwing + flail * 0.5;
+  const fKnee = -(0.15 + compress * 1.7 + apex * 0.95 + rise * 0.2 - fall * 0.1 + Math.max(0, legSwing) * 0.8 + flail * 0.3);
+  const bThigh = -0.08 + compress * 0.75 + apex * 0.3 + rise * 0.28 - legSwing - flail * 0.5;
+  const bKnee = -(0.25 + compress * 1.5 + apex * 0.6 + rise * 0.9 + Math.max(0, -legSwing) * 0.8 + flail * 0.5);
+
+  const hipLocalF = chainPts({ x: 0, y: 0 }, fThigh, THIGH, fKnee, SHIN);
+  const hipLocalB = chainPts({ x: 0, y: 0 }, bThigh, THIGH, bKnee, SHIN);
+  const reachDown = Math.max(hipLocalF[2].y, hipLocalB[2].y);
+  const hipY = -mix(19.5, reachDown + 1.5, clamp(compress * 1.4, 0, 1));
+  const hip = { x: compress * 1.2, y: hipY };
+
+  const frontHip = { x: hip.x + 2, y: hip.y };
+  const backHip = { x: hip.x - 2.2, y: hip.y - 0.4 };
+  const frontLeg = chainPts(frontHip, fThigh, THIGH, fKnee, SHIN);
+  const backLeg = chainPts(backHip, bThigh, THIGH, bKnee, SHIN);
+  // Feet follow the shin: toes point a little down when tucked, flat when planted.
+  const shinAngle = (l: Limb3): number => Math.atan2(l[2].x - l[1].x, l[2].y - l[1].y);
+  const frontFootRot = mix(-shinAngle(frontLeg) * 0.55 + 0.18 * (apex + fall * 0.6), 0, compress);
+  const backFootRot = mix(-shinAngle(backLeg) * 0.55 + 0.3 * (apex + rise), 0, compress);
+
+  // ---- Torso ----
+  const lean = clamp(vx / 260, -1, 1) * 0.1 * (pose.dead ? 0 : 1) + compress * 0.14 - rise * 0.05 + fall * 0.03;
+  const torsoLen = 18.5 * (1 - compress * 0.07 + rise * 0.04) + breathe * 0.25;
+  const chest = { x: hip.x + Math.sin(lean) * torsoLen, y: hip.y - Math.cos(lean) * torsoLen };
+  const neck = { x: chest.x + Math.sin(lean) * 2.6, y: chest.y - Math.cos(lean) * 2.6 };
+
+  // ---- Head: follows the chest with a slight lag, looks where the body goes ----
+  const headLag = compress * 1.6 - rise * 0.6 + fall * 0.8;
+  const head = { x: neck.x + 1.6 + lean * 4, y: neck.y - 10.2 + headLag };
+  const headTilt = lean * 0.6 + (pose.dead ? 0 : fall * 0.08 - rise * 0.05) + Math.sin(t * 1.3) * 0.015;
+  const look = { x: 0.6 + clamp(vx / 260, -1, 1) * 0.4, y: -rise * 0.7 + fall * 0.9 };
+
+  // ---- Shoulders ----
+  const frontShoulder = rot({ x: chest.x + 3.4, y: chest.y + 2.2 }, chest, 0);
+  const backShoulder = rot({ x: chest.x - 3.6, y: chest.y + 1.6 }, chest, 0);
+
+  // ---- Back arm ----
+  const gesture = pose.gesture ?? (o.phone ? 'none' : poise >= 1 ? 'pocket' : 'none');
+  let backTarget: P;
+  let backBend = 1;
+  if (gesture === 'pocket') {
+    backTarget = { x: hip.x - 3.5, y: hip.y - 1 };
+    backBend = -1;
+  } else if (gesture === 'scratch') {
+    backTarget = { x: head.x - 5 + Math.sin(t * 10) * 0.8, y: head.y - 7 };
+    backBend = -1;
+  } else if (gesture === 'tie') {
+    backTarget = { x: chest.x + 2, y: chest.y + 4 + Math.sin(t * 4) * 0.5 };
+    backBend = 1;
+  } else {
+    // Counter-swing when moving, up and back on the rise, out for balance on the fall.
+    const swing = -0.15 - rise * 1.1 + fall * 1.4 * (1 - poise * 0.4) - Math.sin(runPhase) * 0.6 * run + flail * 1.4;
+    const len = 14.5 - compress * 2;
+    backTarget = { x: backShoulder.x + Math.sin(swing) * len, y: backShoulder.y + Math.cos(swing) * len };
+    backBend = swing > 1.2 ? -1 : 1;
+  }
+  const backArm = ik(backShoulder, backTarget, UPPER_ARM, FOREARM, backBend);
+
+  // ---- Front arm holds the flashlight (or waves it in the menu) ----
+  let frontTarget: P;
+  if (gesture === 'wave') {
+    frontTarget = { x: frontShoulder.x + 9 + Math.sin(t * 7) * 2.2, y: frontShoulder.y - 12 + Math.abs(Math.cos(t * 7)) * 0.8 };
+  } else {
+    frontTarget = {
+      x: frontShoulder.x + 12.5 + Math.sin(runPhase) * 0.8 * run - compress * 1.5,
+      y: frontShoulder.y + 6.5 + compress * 2.5 - rise * 2.5 + fall * 1.5 - flail * 10,
+    };
+  }
+  const frontArm = ik(frontShoulder, frontTarget, UPPER_ARM, FOREARM, gesture === 'wave' ? -1 : 1);
+
+  // Flashlight frame: mostly aims down-forward, follows the forearm a little.
+  const forearm = Math.atan2(frontArm[2].y - frontArm[1].y, frontArm[2].x - frontArm[1].x);
+  const aim = gesture === 'wave' ? forearm : mix(forearm, Math.atan2(0.62, 0.78), 0.65);
+  const held: HeldFrame = { x: frontArm[2].x, y: frontArm[2].y, rot: aim, scale: 1 };
+  const torchLen = o.newTorch ? 11.5 : 9.5;
+  const torchTip = { x: held.x + Math.cos(aim) * torchLen, y: held.y + Math.sin(aim) * torchLen };
+  const backForearm = Math.atan2(backArm[2].y - backArm[1].y, backArm[2].x - backArm[1].x);
+  const backHeld: HeldFrame = { x: backArm[2].x, y: backArm[2].y, rot: backForearm, scale: 1 };
+
+  const face: Face = pose.face ?? 'normal';
+  const blink = face === 'scared' || pose.dead ? 0 : blinkAmount(t + pose.tier * 0.37);
+
+  const headTop = rot({ x: head.x, y: head.y - 10 }, head, headTilt);
+  const facePt = rot({ x: head.x + 5, y: head.y - 0.5 }, head, headTilt);
+  return {
+    hip,
+    chest,
+    lean,
+    torsoLen,
+    head,
+    headTilt,
+    look,
+    blink,
+    frontArm,
+    backArm,
+    frontLeg,
+    backLeg,
+    frontFootRot,
+    backFootRot,
+    held,
+    torchTip,
+    torchAngle: aim,
+    backHeld,
+    gesture,
+    face,
+    points: {
+      head,
+      headTop,
+      face: facePt,
+      neck,
+      torso: { x: (hip.x + chest.x) / 2 + 0.5, y: (hip.y + chest.y) / 2 },
+      waist: { x: hip.x, y: hip.y + 1 },
+      back: { x: chest.x - 6, y: chest.y + 6 },
+      frontShoulder,
+      backShoulder,
+      frontHand: frontArm[2],
+      backHand: backArm[2],
+      wrist: { x: frontArm[2].x - Math.cos(forearm) * 2.2, y: frontArm[2].y - Math.sin(forearm) * 2.2 },
+      frontFoot: frontLeg[2],
+      backFoot: backLeg[2],
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Drawing helpers: one outline weight for everything.
+// ---------------------------------------------------------------------------
+
+function shade(hex: string, k: number): string {
+  const n = parseInt(hex.slice(1), 16);
+  const f = (c: number): number => Math.round(clamp(c * (1 - k), 0, 255));
+  return `rgb(${f((n >> 16) & 255)},${f((n >> 8) & 255)},${f(n & 255)})`;
+}
+
+/** A tapered capsule segment. */
+function capsule(ctx: CanvasRenderingContext2D, a: P, b: P, wa: number, wb: number): void {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const len = Math.hypot(dx, dy) || 1;
+  const nx = -dy / len;
+  const ny = dx / len;
+  const ang = Math.atan2(dy, dx);
+  ctx.beginPath();
+  ctx.moveTo(a.x + (nx * wa) / 2, a.y + (ny * wa) / 2);
+  ctx.lineTo(b.x + (nx * wb) / 2, b.y + (ny * wb) / 2);
+  ctx.arc(b.x, b.y, wb / 2, ang + Math.PI / 2, ang - Math.PI / 2, true);
+  ctx.lineTo(a.x - (nx * wa) / 2, a.y - (ny * wa) / 2);
+  ctx.arc(a.x, a.y, wa / 2, ang - Math.PI / 2, ang + Math.PI / 2, true);
+  ctx.closePath();
+}
+
+/**
+ * A limb as one continuous shape: the outline pass is drawn for both segments first,
+ * then the fills, so the elbow/knee has no seam and no gap.
+ */
+function drawLimb(ctx: CanvasRenderingContext2D, l: Limb3, w: [number, number, number], upper: string, lower: string): void {
+  ctx.fillStyle = LINE;
+  capsule(ctx, l[0], l[1], w[0] + OUT, w[1] + OUT);
+  ctx.fill();
+  capsule(ctx, l[1], l[2], w[1] + OUT, w[2] + OUT);
+  ctx.fill();
+  ctx.fillStyle = lower;
+  capsule(ctx, l[1], l[2], w[1], w[2]);
+  ctx.fill();
+  ctx.fillStyle = upper;
+  capsule(ctx, l[0], l[1], w[0], w[1]);
+  ctx.fill();
+}
+
+function stroke(ctx: CanvasRenderingContext2D, w = LW): void {
+  ctx.strokeStyle = LINE;
+  ctx.lineWidth = w;
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
+  ctx.stroke();
+}
 
 function rr(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number): void {
   const k = Math.min(r, w / 2, h / 2);
@@ -66,710 +415,687 @@ function rr(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: n
   ctx.closePath();
 }
 
-/** One smooth tapered segment with rounded ends. */
-function seg(ctx: CanvasRenderingContext2D, ax: number, ay: number, bx: number, by: number, wa: number, wb: number, color: string): void {
-  const dx = bx - ax;
-  const dy = by - ay;
-  const len = Math.hypot(dx, dy) || 1;
-  const nx = -dy / len;
-  const ny = dx / len;
-  const ra = wa / 2;
-  const rb = wb / 2;
-  const a0 = Math.atan2(ny, nx);
-  const a1 = a0 + Math.PI;
-
-  ctx.fillStyle = color;
+/** Torso silhouette in the torso frame (hip at 0,0, chest up along -y). */
+function torsoShape(ctx: CanvasRenderingContext2D, len: number): void {
   ctx.beginPath();
-  ctx.moveTo(ax + nx * ra, ay + ny * ra);
-  ctx.lineTo(bx + nx * rb, by + ny * rb);
-  ctx.arc(bx, by, rb, a0, a1);
-  ctx.lineTo(ax - nx * ra, ay - ny * ra);
-  ctx.arc(ax, ay, ra, a1, a0);
+  ctx.moveTo(-6.6, 0.5);
+  ctx.bezierCurveTo(-7.6, -len * 0.45, -8.6, -len + 3, -6.2, -len);
+  ctx.quadraticCurveTo(0, -len - 1.6, 6.4, -len + 0.2);
+  ctx.bezierCurveTo(8.8, -len + 3, 7.8, -len * 0.45, 6.8, 0.5);
+  ctx.quadraticCurveTo(0, 2.2, -6.6, 0.5);
   ctx.closePath();
-  ctx.fill();
-
-  // Very restrained highlight keeps the forms readable without making them glossy.
-  if (len > 3) {
-    ctx.globalAlpha = 0.12;
-    ctx.strokeStyle = '#ffffff';
-    ctx.lineWidth = Math.max(0.6, Math.min(1.1, wa * 0.12));
-    ctx.beginPath();
-    ctx.moveTo(ax + nx * ra * 0.55, ay + ny * ra * 0.55);
-    ctx.lineTo(bx + nx * rb * 0.55, by + ny * rb * 0.55);
-    ctx.stroke();
-    ctx.globalAlpha = 1;
-  }
 }
 
-/** A tapered two-segment limb with a clean outline: shoulder/hip -> elbow/knee -> wrist/ankle. */
-function limb(
-  ctx: CanvasRenderingContext2D,
-  p: [number, number, number, number, number, number],
-  w: [number, number, number],
-  upper: string,
-  lower: string,
-): void {
-  const o = 2.4;
-  seg(ctx, p[0], p[1], p[2], p[3], w[0] + o, w[1] + o, LINE);
-  seg(ctx, p[2], p[3], p[4], p[5], w[1] + o, w[2] + o, LINE);
-  seg(ctx, p[2], p[3], p[4], p[5], w[1], w[2], lower);
-  seg(ctx, p[0], p[1], p[2], p[3], w[0], w[1], upper);
-}
-
-/**
- * Two-bone IK: an arm from the shoulder to a target hand position.
- * `bend` picks the side the elbow points to (+1 / -1).
- */
-function reach(sx: number, sy: number, tx: number, ty: number, l1: number, l2: number, bend: number): [number, number, number, number, number, number] {
-  const dx = tx - sx;
-  const dy = ty - sy;
-  const d = Math.max(Math.abs(l1 - l2) + 0.01, Math.min(l1 + l2 - 0.01, Math.hypot(dx, dy)));
-  const base = Math.atan2(dy, dx);
-  const a = Math.acos(Math.max(-1, Math.min(1, (l1 * l1 + d * d - l2 * l2) / (2 * l1 * d))));
-  const ea = base + a * bend;
-  const ex = sx + Math.cos(ea) * l1;
-  const ey = sy + Math.sin(ea) * l1;
-  return [sx, sy, ex, ey, sx + Math.cos(base) * d, sy + Math.sin(base) * d];
-}
-
-/** Points of a two-segment limb from angles (radians, 0 = straight down, positive = forward). */
-function chain(x: number, y: number, a1: number, l1: number, a2: number, l2: number): [number, number, number, number, number, number] {
-  const x1 = x + Math.sin(a1) * l1;
-  const y1 = y + Math.cos(a1) * l1;
-  const x2 = x1 + Math.sin(a1 + a2) * l2;
-  const y2 = y1 + Math.cos(a1 + a2) * l2;
-  return [x, y, x1, y1, x2, y2];
-}
-
-function hand(ctx: CanvasRenderingContext2D, p: [number, number, number, number, number, number], skin: string): void {
-  const a = Math.atan2(p[5] - p[3], p[4] - p[2]);
-  const hx = p[4] + Math.cos(a) * 1.8;
-  const hy = p[5] + Math.sin(a) * 1.8;
+function drawFoot(ctx: CanvasRenderingContext2D, at: P, r: number, o: Outfit, back: boolean): void {
   ctx.save();
-  ctx.translate(hx, hy);
-  ctx.rotate(a);
-  ctx.fillStyle = skin;
-  ctx.strokeStyle = LINE;
-  ctx.lineWidth = 1.05;
-  ctx.beginPath();
-  ctx.ellipse(0, 0, 3.45, 2.75, 0, 0, Math.PI * 2);
+  ctx.translate(at.x, at.y + 1.2);
+  ctx.rotate(r);
+  const dark = back ? 0.12 : 0;
+  if (o.suit) {
+    ctx.fillStyle = shade('#C9D2DD', dark);
+    rr(ctx, -3.4, -3.2, 11.6, 5.4, 2.6);
+  } else if (o.feet === 'shoes') {
+    ctx.fillStyle = shade('#1B1B1F', dark);
+    ctx.beginPath();
+    ctx.moveTo(-3.4, -3);
+    ctx.lineTo(4, -3.2);
+    ctx.quadraticCurveTo(9.6, -2.6, 9.6, 0.6);
+    ctx.lineTo(9.6, 1.6);
+    ctx.lineTo(-3.4, 1.6);
+    ctx.closePath();
+  } else if (o.feet === 'slippers') {
+    ctx.fillStyle = shade(SKIN, dark);
+    rr(ctx, -3, -3.2, 10.6, 4.2, 2);
+    ctx.fill();
+    stroke(ctx);
+    ctx.fillStyle = shade('#3B82F6', dark);
+    rr(ctx, -3.6, 0, 12, 2.4, 1.2);
+  } else {
+    ctx.fillStyle = shade(SKIN, dark);
+    ctx.beginPath();
+    ctx.moveTo(-3, -3);
+    ctx.lineTo(4, -3);
+    ctx.quadraticCurveTo(8.8, -2.6, 8.8, 0.4);
+    ctx.lineTo(8.8, 1.2);
+    ctx.lineTo(-3, 1.2);
+    ctx.closePath();
+  }
   ctx.fill();
-  ctx.stroke();
-  ctx.strokeStyle = 'rgba(120,75,55,0.42)';
-  ctx.lineWidth = 0.65;
-  ctx.beginPath();
-  ctx.moveTo(0.2, -1.5);
-  ctx.lineTo(2.1, -0.9);
-  ctx.moveTo(0.6, 1.1);
-  ctx.lineTo(2.2, 0.7);
-  ctx.stroke();
+  stroke(ctx);
+  if (o.feet === 'shoes' && !o.suit) {
+    ctx.fillStyle = 'rgba(255,255,255,0.45)';
+    ctx.fillRect(3, -2.4, 3.6, 0.9);
+  }
   ctx.restore();
 }
 
-function torsoPath(ctx: CanvasRenderingContext2D, ty: number): void {
+/** Draws a hand gripping a held object along its axis (fingers wrap over it). */
+function drawGrip(ctx: CanvasRenderingContext2D, skin: string): void {
+  ctx.fillStyle = skin;
   ctx.beginPath();
-  ctx.moveTo(-8.8, ty + 3);
-  ctx.quadraticCurveTo(-9.2, ty, -6, ty - 0.8);
-  ctx.quadraticCurveTo(-3.2, ty - 2.4, 0, ty - 1.8);
-  ctx.quadraticCurveTo(3.2, ty - 2.4, 6, ty - 0.8);
-  ctx.quadraticCurveTo(9.2, ty, 8.8, ty + 3);
-  ctx.quadraticCurveTo(9.4, ty + 12, 7.2, ty + 21);
-  ctx.quadraticCurveTo(0, ty + 23.2, -7.2, ty + 21);
-  ctx.quadraticCurveTo(-9.4, ty + 12, -8.8, ty + 3);
-  ctx.closePath();
-}
-
-function fillShaded(ctx: CanvasRenderingContext2D, color: string): void {
-  ctx.fillStyle = color;
+  ctx.ellipse(0.4, 0, 3.6, 3.1, 0, 0, Math.PI * 2);
   ctx.fill();
-  const g = ctx.createLinearGradient(-9, 0, 9, 0);
-  g.addColorStop(0, 'rgba(0,0,0,0.18)');
-  g.addColorStop(0.55, 'rgba(255,255,255,0.0)');
-  g.addColorStop(1, 'rgba(255,255,255,0.18)');
-  ctx.fillStyle = g;
-  ctx.fill();
-  ctx.strokeStyle = LINE;
-  ctx.lineWidth = 1.3;
+  stroke(ctx);
+  // Finger creases across the grip.
+  ctx.strokeStyle = 'rgba(42,30,34,0.55)';
+  ctx.lineWidth = 0.7;
+  ctx.beginPath();
+  ctx.moveTo(-0.4, -2.2);
+  ctx.lineTo(-0.4, 2.2);
+  ctx.moveTo(1.4, -2.3);
+  ctx.lineTo(1.4, 2.3);
   ctx.stroke();
 }
 
-export function drawHeroBody(ctx: CanvasRenderingContext2D, pose: HeroPose): void {
-  const o: Outfit = { ...outfitFor(pose.tier), ...(pose.extra ?? {}) };
-  const t = pose.time;
-  const breathe = Math.sin(t * 3.2) * 0.5;
-  const speed = Math.min(1, Math.abs(pose.vx ?? 0) / 220);
-  const walking = speed > 0.08 && Math.abs(pose.vy) < 90;
-  const walk = walking ? Math.sin(t * (8 + speed * 4)) * speed : 0;
-  const rising = Math.max(-1, Math.min(1, pose.vy / 700));
-  const land = Math.exp(-pose.sinceLand * 14);
-  // Wealth makes the gait composed: flailing in the yard, poised in the palace.
-  const poise = Math.min(1, pose.tier / 8);
-  const flail = (1 - poise) * Math.sin(t * 11) * 0.18;
-  const tuck = Math.max(0, rising) * 0.65 + land * 0.4;
+function drawOpenHand(ctx: CanvasRenderingContext2D, l: Limb3, skin: string): void {
+  const a = Math.atan2(l[2].y - l[1].y, l[2].x - l[1].x);
+  ctx.save();
+  ctx.translate(l[2].x, l[2].y);
+  ctx.rotate(a);
+  ctx.fillStyle = skin;
+  ctx.beginPath();
+  ctx.ellipse(1.6, 0, 3.6, 3, 0, 0, Math.PI * 2);
+  ctx.fill();
+  stroke(ctx);
+  // Thumb
+  ctx.beginPath();
+  ctx.ellipse(1.2, -2.6, 1.5, 1.1, -0.5, 0, Math.PI * 2);
+  ctx.fill();
+  stroke(ctx, 1);
+  ctx.restore();
+}
 
-  const jacket = o.top === 'jacket';
-  const jacketC = o.luxury ? '#191B24' : '#22305A';
-  const skin = o.suit ? '#E9EEF5' : SKIN;
-  const sleeve = o.suit ? '#E9EEF5' : jacket ? jacketC : o.top === 'shirt' ? '#BCD5EE' : SKIN;
-  const pants = o.suit ? '#E9EEF5' : o.legs === 'trousers' ? (o.luxury ? '#16171E' : '#2C3140') : o.legs === 'sweats' ? '#6B7280' : '#46608A';
-  const shin = o.legs === 'shorts' && !o.suit ? SKIN : pants;
-  const shoulderY = -38 + breathe;
-
-  // ---- Flashlight beam (only when the renderer does not draw its own) ----
-  if (!pose.noBeam) {
-    ctx.globalAlpha = pose.neutral ? 0.16 : 0.4;
-    const beam = ctx.createLinearGradient(28, -22, 80, 30);
-    beam.addColorStop(0, `rgba(${pose.light},0.95)`);
-    beam.addColorStop(1, `rgba(${pose.light},0)`);
-    ctx.fillStyle = beam;
-    ctx.beginPath();
-    ctx.moveTo(28, -22);
-    ctx.lineTo(84, 10);
-    ctx.lineTo(44, 40);
-    ctx.closePath();
-    ctx.fill();
-    ctx.globalAlpha = 1;
+/** Flashlight in its held frame: grip at 0,0, lens along +x. */
+function drawTorch(ctx: CanvasRenderingContext2D, o: Outfit, light: string): number {
+  const len = o.newTorch ? 11.5 : 9.5;
+  ctx.fillStyle = o.newTorch ? '#D3D8E2' : '#3F4450';
+  rr(ctx, -3.5, -2.2, len + 1.5, 4.4, 1.6);
+  ctx.fill();
+  stroke(ctx);
+  // Head of the torch, slightly wider.
+  ctx.fillStyle = o.newTorch ? '#B9C0CC' : '#30343E';
+  rr(ctx, len - 3, -3, 4, 6, 1.4);
+  ctx.fill();
+  stroke(ctx);
+  ctx.fillStyle = `rgb(${light})`;
+  rr(ctx, len + 0.5, -2.6, 1.6, 5.2, 0.8);
+  ctx.fill();
+  if (o.newTorch) {
+    ctx.fillStyle = 'rgba(255,255,255,0.6)';
+    ctx.fillRect(-2, -1.4, len - 4, 0.9);
   }
+  return len;
+}
 
-  // ---- Arms are placed by target hand positions (IK), so every gesture stays natural ----
-  const gesture = pose.gesture ?? (o.phone ? 'none' : poise >= 1 ? 'pocket' : 'none');
-  const backShoulder: [number, number] = [-4.5, shoulderY + 1.5];
-  const frontShoulder: [number, number] = [5, shoulderY + 1.5];
-  let otherTarget: [number, number];
-  let otherBend = -1;
-  let otherLayer: 'behind' | 'chest' | 'head' = 'behind';
-  if (gesture === 'pocket') {
-    otherTarget = [-3, -25];
-    otherBend = 1;
-  } else if (gesture === 'scratch') {
-    otherTarget = [-5 + Math.sin(t * 10) * 0.8, -58 + breathe];
-    otherBend = 1;
-    otherLayer = 'head';
-  } else if (gesture === 'tie') {
-    otherTarget = [1.5, -37 + Math.sin(t * 4) * 0.6 + breathe];
-    otherBend = 1;
-    otherLayer = 'chest';
-  } else {
-    // Natural swing: forward-up on the jump, loose and flailing in poor tiers.
-    const swing = -0.2 - rising * 0.9 * (1 - poise * 0.6) + flail + walk * 0.55;
-    otherTarget = [backShoulder[0] + Math.sin(swing) * 15, backShoulder[1] + Math.cos(swing) * 15];
-  }
-  const other = reach(backShoulder[0], backShoulder[1], otherTarget[0], otherTarget[1], 8.5, 7.8, otherBend);
-  const drawOtherArm = (): void => {
-    limb(ctx, other, [6, 5, 4.4], sleeve, o.top === 'tank' && !o.suit ? SKIN : sleeve);
-    if (gesture === 'pocket') return;
-    hand(ctx, other, skin);
-    if (o.phone && gesture === 'none') {
-      ctx.save();
-      ctx.translate(other[4], other[5]);
-      ctx.rotate(0.2);
-      ctx.fillStyle = '#16181F';
-      rr(ctx, -2.5, -1, 6, 10, 1.6);
-      ctx.fill();
-      ctx.fillStyle = 'rgba(140,200,255,0.95)';
-      ctx.fillRect(-1.5, 0.4, 4, 7);
-      ctx.restore();
-    }
-  };
-  if (otherLayer === 'behind') drawOtherArm();
+/** Draws the head, hair, face and head-worn items in the head frame. */
+function drawHead(ctx: CanvasRenderingContext2D, rig: Rig, o: Outfit, tier: number): void {
+  ctx.save();
+  ctx.translate(rig.head.x, rig.head.y);
+  ctx.rotate(rig.headTilt);
+  const face = rig.face;
 
-  // ---- Legs: almost straight when standing, knees tuck up on the jump ----
-  for (const side of [-1, 1]) {
-    const phase = side === 1 ? walk : -walk;
-    const k = side === 1
-      ? 0.08 + tuck * 0.85 + phase * 0.42
-      : -0.06 + tuck * 0.6 + phase * 0.42;
-    const leg = chain(side * 3.6, -21, k, 10, -k * 1.5 + phase * 0.12, 9.5);
-    leg[5] = Math.min(leg[5], -2.2);
-    limb(ctx, leg, [8, 6.6, 5.6], pants, shin);
+  // Back hair mass behind the head.
+  ctx.fillStyle = HAIR;
+  ctx.beginPath();
+  ctx.ellipse(-2.4, -1.5, 9.6, 9.8, 0, 0, Math.PI * 2);
+  ctx.fill();
+  stroke(ctx);
+
+  // Head (3/4 view facing right)
+  ctx.beginPath();
+  ctx.moveTo(-8.6, -2);
+  ctx.bezierCurveTo(-9, -10.5, 8, -11.5, 10.2, -3.5);
+  ctx.bezierCurveTo(11.4, 1, 10.6, 6.2, 6.6, 8.6);
+  ctx.quadraticCurveTo(1, 11, -4.4, 8.6);
+  ctx.bezierCurveTo(-8, 6.8, -8.8, 2.4, -8.6, -2);
+  ctx.closePath();
+  ctx.fillStyle = SKIN;
+  ctx.fill();
+  ctx.save();
+  ctx.clip();
+  ctx.fillStyle = 'rgba(190,110,70,0.16)';
+  ctx.beginPath();
+  ctx.ellipse(-7, 3, 6, 10, 0, 0, Math.PI * 2);
+  ctx.fill();
+  // Cheek blush, under the near eye.
+  ctx.fillStyle = 'rgba(232,120,110,0.14)';
+  ctx.beginPath();
+  ctx.ellipse(9, 2.6, 1.8, 1.1, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+  stroke(ctx);
+
+  // Ear
+  ctx.fillStyle = SKIN;
+  ctx.beginPath();
+  ctx.ellipse(-5.6, 1.4, 2.1, 2.8, 0.1, 0, Math.PI * 2);
+  ctx.fill();
+  stroke(ctx);
+  ctx.strokeStyle = SKIN_SHADE;
+  ctx.lineWidth = 0.9;
+  ctx.beginPath();
+  ctx.arc(-5.4, 1.5, 1.1, -1.2, 1.3);
+  ctx.stroke();
+
+  // Fringe with a tuft that lags behind the motion.
+  ctx.fillStyle = HAIR;
+  ctx.beginPath();
+  ctx.moveTo(-8.8, -1);
+  ctx.bezierCurveTo(-10, -11, 3, -14, 9.6, -6.5);
+  ctx.quadraticCurveTo(10.6, -6.4, 10.2, -5.6);
+  ctx.quadraticCurveTo(6.4, -8.6, 2.6, -7.6);
+  ctx.quadraticCurveTo(3, -8.8, 1.2, -9);
+  ctx.quadraticCurveTo(-2, -6.6, -4.2, -5.6);
+  ctx.quadraticCurveTo(-5.6, -2.4, -6.2, 0.6);
+  ctx.closePath();
+  ctx.fill();
+  stroke(ctx);
+  const tuft = -rig.look.y * 1.4;
+  ctx.beginPath();
+  ctx.moveTo(-1.5, -10.6);
+  ctx.quadraticCurveTo(-2.4, -15.4 + tuft, 3.4, -14.6 + tuft);
+  ctx.quadraticCurveTo(0.6, -12.6, 1.6, -11);
+  ctx.closePath();
+  ctx.fill();
+  stroke(ctx, 1);
+
+  // Eyes: far eye smaller, near eye larger; eyelids close from the top for blinks.
+  const lids = face === 'squint' ? 0.55 : 0;
+  const eye = (cx: number, rx: number, ry: number): void => {
+    const lid = Math.max(lids, rig.blink);
     ctx.save();
-    ctx.translate(leg[4], leg[5] + 0.8);
-    if (o.feet === 'bare') {
-      ctx.fillStyle = SKIN_SHADE;
-      rr(ctx, -3, -2, 9, 4, 2);
-    } else if (o.feet === 'slippers') {
-      ctx.fillStyle = '#3B82F6';
-      rr(ctx, -3.5, -1.2, 11, 3.4, 1.6);
-    } else {
-      ctx.fillStyle = o.suit ? '#C9D2DD' : '#17181D';
-      rr(ctx, -3.5, -3.2, 11.5, 5.4, 2.4);
-      ctx.fill();
+    ctx.beginPath();
+    ctx.ellipse(cx, -1, rx, ry, 0, 0, Math.PI * 2);
+    ctx.fillStyle = '#ffffff';
+    ctx.fill();
+    ctx.clip();
+    const pr = face === 'scared' ? rx * 0.42 : rx * 0.62;
+    ctx.fillStyle = '#2B2023';
+    ctx.beginPath();
+    ctx.arc(cx + rig.look.x * rx * 0.45, -1 + rig.look.y * ry * 0.35, pr, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath();
+    ctx.arc(cx + rig.look.x * rx * 0.45 + pr * 0.35, -1 + rig.look.y * ry * 0.35 - pr * 0.4, pr * 0.32, 0, Math.PI * 2);
+    ctx.fill();
+    if (lid > 0) {
+      ctx.fillStyle = SKIN;
+      ctx.fillRect(cx - rx - 1, -1 - ry - 1, rx * 2 + 2, (ry * 2 + 1) * lid + 0.5);
       ctx.strokeStyle = LINE;
-      ctx.lineWidth = 1.1;
-      ctx.stroke();
-      ctx.fillStyle = o.suit ? '#AEB9C8' : '#F1F2F4';
-      rr(ctx, -2.8, -0.8, 9.2, 1.3, 0.55);
-      ctx.fill();
-      ctx.strokeStyle = 'rgba(255,255,255,0.5)';
-      ctx.lineWidth = 0.65;
+      ctx.lineWidth = 1;
       ctx.beginPath();
-      ctx.moveTo(0, -2.1);
-      ctx.lineTo(2.8, -2.1);
-      ctx.moveTo(0.8, -1.1);
-      ctx.lineTo(3.2, -1.1);
+      ctx.moveTo(cx - rx, -1 - ry + (ry * 2) * lid);
+      ctx.lineTo(cx + rx, -1 - ry + (ry * 2) * lid);
       ctx.stroke();
-    }
-    if (o.feet !== 'shoes') {
-      ctx.fill();
-      ctx.strokeStyle = LINE;
-      ctx.lineWidth = 1.1;
-      ctx.stroke();
-    }
-    if (o.feet === 'shoes' && !o.suit) {
-      ctx.fillStyle = 'rgba(255,255,255,0.55)';
-      ctx.fillRect(2, -2.4, 4, 1);
     }
     ctx.restore();
+    ctx.beginPath();
+    ctx.ellipse(cx, -1, rx, ry, 0, 0, Math.PI * 2);
+    stroke(ctx, 1);
+  };
+  const scared = face === 'scared';
+  eye(2.4, scared ? 1.9 : 1.6, scared ? 2.4 : 2.1);
+  eye(7.2, scared ? 2.5 : 2.2, scared ? 2.9 : 2.6);
+
+  // Eyebrows
+  ctx.strokeStyle = HAIR;
+  ctx.lineWidth = 1.3;
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+  if (face === 'grin') {
+    ctx.moveTo(0.8, -5);
+    ctx.lineTo(3.6, -5.4);
+    ctx.moveTo(5.4, -5.8);
+    ctx.lineTo(9.2, -6.6);
+  } else if (scared) {
+    ctx.moveTo(0.8, -6.2);
+    ctx.lineTo(3.6, -5.6);
+    ctx.moveTo(5.4, -5.4);
+    ctx.lineTo(9.2, -6.6);
+  } else if (face === 'squint') {
+    ctx.moveTo(0.8, -4.2);
+    ctx.lineTo(3.6, -3.6);
+    ctx.moveTo(5.4, -3.4);
+    ctx.lineTo(9.2, -4.4);
+  } else {
+    ctx.moveTo(0.8, -4.9);
+    ctx.lineTo(3.6, -5);
+    ctx.moveTo(5.4, -5.2);
+    ctx.lineTo(9.2, -5.4);
+  }
+  ctx.stroke();
+
+  // Nose: a small rounded bump on the profile edge.
+  ctx.fillStyle = SKIN;
+  ctx.beginPath();
+  ctx.ellipse(10.4, 1.9, 1.7, 1.4, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(10.4, 1.9, 1.6, -1.1, 1.6);
+  stroke(ctx, 1);
+
+  // Mouth
+  ctx.strokeStyle = '#5A2A24';
+  ctx.lineWidth = 1.2;
+  if (face === 'grin') {
+    ctx.fillStyle = '#5A2A24';
+    ctx.beginPath();
+    ctx.moveTo(3.4, 5);
+    ctx.quadraticCurveTo(6.6, 5.6, 9.4, 4.4);
+    ctx.quadraticCurveTo(7, 9.2, 3.4, 5);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = '#E86A6A';
+    ctx.beginPath();
+    ctx.ellipse(6, 6.9, 1.6, 0.9, 0, 0, Math.PI * 2);
+    ctx.fill();
+  } else if (scared) {
+    ctx.fillStyle = '#5A2A24';
+    ctx.beginPath();
+    ctx.ellipse(6.4, 6, 1.4, 1.9, 0, 0, Math.PI * 2);
+    ctx.fill();
+  } else if (face === 'squint') {
+    ctx.beginPath();
+    ctx.moveTo(4.4, 5.4);
+    ctx.lineTo(8.4, 5);
+    ctx.stroke();
+  } else {
+    const smile = 1.2 + Math.min(1.2, tier / 9);
+    ctx.beginPath();
+    ctx.moveTo(4.2, 5);
+    ctx.quadraticCurveTo(6.4, 5 + smile, 8.8, 4.2);
+    ctx.stroke();
   }
 
-  // ---- Torso ----
-  const ty = -42 + breathe;
-  const torsoC = o.suit ? '#E9EEF5' : jacket ? jacketC : o.top === 'shirt' ? '#CFE3F5' : '#EEE8DA';
-  torsoPath(ctx, ty);
-  fillShaded(ctx, torsoC);
-  if (o.top === 'tank' && !o.suit) {
-    // Skin shows at the neck scoop and outside the straps.
+  // Head-worn items follow the head transform.
+  if (o.luxury && !o.suit && !scared) {
+    ctx.fillStyle = '#121214';
+    rr(ctx, 0, -3.4, 4.8, 3.6, 1.6);
+    ctx.fill();
+    rr(ctx, 5.2, -3.6, 5.2, 4, 1.6);
+    ctx.fill();
+    ctx.fillRect(4.6, -2.6, 0.8, 0.9);
+    ctx.fillStyle = 'rgba(255,255,255,0.4)';
+    ctx.fillRect(6, -3, 2.2, 0.8);
+  }
+  if (o.cap && !o.suit) {
     ctx.save();
-    torsoPath(ctx, ty);
-    ctx.clip();
+    ctx.translate(0.6, -0.6);
+    drawCapShape(ctx);
+    ctx.restore();
+  }
+  if (o.suit) {
+    ctx.strokeStyle = 'rgba(220,235,255,0.95)';
+    ctx.lineWidth = 2;
+    ctx.fillStyle = 'rgba(160,210,255,0.16)';
+    ctx.beginPath();
+    ctx.arc(0.8, 0, 14, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    ctx.strokeStyle = 'rgba(255,255,255,0.75)';
+    ctx.lineWidth = 1.6;
+    ctx.beginPath();
+    ctx.arc(-2, -3, 9, Math.PI * 1.1, Math.PI * 1.45);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+/** Cap worn backwards, in the head frame (head center at 0,0). */
+function drawCapShape(ctx: CanvasRenderingContext2D): void {
+  ctx.fillStyle = '#C8263C';
+  ctx.beginPath();
+  ctx.moveTo(-9.2, -2.4);
+  ctx.bezierCurveTo(-9.6, -12.6, 8.4, -13.6, 10.2, -4.8);
+  ctx.quadraticCurveTo(0, -6.2, -9.2, -2.4);
+  ctx.closePath();
+  ctx.fill();
+  stroke(ctx);
+  ctx.fillStyle = '#9E1B2E';
+  ctx.beginPath();
+  ctx.moveTo(-8.4, -3.2);
+  ctx.quadraticCurveTo(-14.4, -3.6, -15, -0.8);
+  ctx.lineTo(-8.6, -0.6);
+  ctx.closePath();
+  ctx.fill();
+  stroke(ctx);
+  ctx.fillStyle = '#ffffff';
+  ctx.beginPath();
+  ctx.arc(0.6, -11.8, 1.1, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+/** Draws the torso with its clothing in the torso frame. */
+function drawTorso(ctx: CanvasRenderingContext2D, rig: Rig, o: Outfit, t: number): void {
+  const len = rig.torsoLen;
+  const jacket = o.top === 'jacket' && !o.suit;
+  const jacketC = o.luxury ? '#1B1D27' : '#24315C';
+  ctx.save();
+  ctx.translate(rig.hip.x, rig.hip.y);
+  ctx.rotate(rig.lean);
+  const color = o.suit ? '#E9EEF5' : jacket ? jacketC : o.top === 'shirt' ? '#CFE3F5' : '#F1ECDF';
+  torsoShape(ctx, len);
+  ctx.fillStyle = color;
+  ctx.fill();
+  ctx.save();
+  ctx.clip();
+  // One soft shade on the back side.
+  ctx.fillStyle = 'rgba(0,0,0,0.12)';
+  ctx.beginPath();
+  ctx.ellipse(-8.5, -len / 2, 4.5, len, 0, 0, Math.PI * 2);
+  ctx.fill();
+  if (o.top === 'tank' && !o.suit) {
+    // Skin at the neck scoop and outside the straps.
     ctx.fillStyle = SKIN;
     ctx.beginPath();
-    ctx.moveTo(-4, ty - 1);
-    ctx.quadraticCurveTo(0, ty + 8, 4, ty - 1);
-    ctx.closePath();
+    ctx.moveTo(-3.6, -len - 2);
+    ctx.quadraticCurveTo(0.4, -len + 6.5, 4.2, -len - 2);
     ctx.fill();
-    ctx.fillRect(-10, ty - 1, 3.5, 7);
-    ctx.fillRect(6.5, ty - 1, 3.5, 7);
-    ctx.restore();
-    ctx.strokeStyle = 'rgba(28,20,24,0.5)';
+    ctx.fillRect(-10, -len - 2, 4, 6);
+    ctx.fillRect(6.6, -len - 2, 4, 6);
+    ctx.strokeStyle = 'rgba(42,30,34,0.55)';
     ctx.lineWidth = 1;
     ctx.beginPath();
-    ctx.moveTo(-4, ty);
-    ctx.quadraticCurveTo(0, ty + 7.5, 4, ty);
+    ctx.moveTo(-3.4, -len - 0.5);
+    ctx.quadraticCurveTo(0.4, -len + 6, 4, -len - 0.5);
     ctx.stroke();
   }
   if (o.top === 'shirt' && !o.suit) {
-    ctx.fillStyle = '#ffffff';
-    ctx.strokeStyle = 'rgba(28,20,24,0.5)';
-    ctx.lineWidth = 0.9;
-    for (const sx of [-1, 1]) {
-      ctx.beginPath();
-      ctx.moveTo(0, ty + 4.5);
-      ctx.lineTo(sx * 5, ty - 0.5);
-      ctx.lineTo(sx * 2, ty - 0.5);
-      ctx.closePath();
-      ctx.fill();
-      ctx.stroke();
-    }
     ctx.fillStyle = 'rgba(40,60,90,0.5)';
-    for (let i = 0; i < 3; i++) ctx.fillRect(-0.6, ty + 8 + i * 4.3, 1.2, 1.2);
+    for (let i = 0; i < 3; i++) ctx.fillRect(0.2, -len + 6 + i * 4.2, 1.1, 1.1);
+    ctx.strokeStyle = 'rgba(40,60,90,0.35)';
+    ctx.lineWidth = 0.8;
+    ctx.beginPath();
+    ctx.moveTo(0.8, -len + 3);
+    ctx.lineTo(0.8, 0);
+    ctx.stroke();
   }
-  if (jacket && !o.suit) {
+  if (jacket) {
     ctx.fillStyle = '#F7F7F7';
     ctx.beginPath();
-    ctx.moveTo(-4, ty);
-    ctx.lineTo(0, ty + 12);
-    ctx.lineTo(4, ty);
+    ctx.moveTo(-3.4, -len - 1);
+    ctx.lineTo(0.8, -len + 10.5);
+    ctx.lineTo(4.8, -len - 1);
     ctx.closePath();
     ctx.fill();
     ctx.strokeStyle = o.luxury ? '#E8C060' : 'rgba(255,255,255,0.35)';
     ctx.lineWidth = 1.1;
     ctx.beginPath();
-    ctx.moveTo(-5, ty + 0.5);
-    ctx.lineTo(-0.6, ty + 12.5);
-    ctx.lineTo(-3, ty + 20);
-    ctx.moveTo(5, ty + 0.5);
-    ctx.lineTo(0.6, ty + 12.5);
+    ctx.moveTo(-4.2, -len - 0.5);
+    ctx.lineTo(0.4, -len + 11);
+    ctx.lineTo(-1.8, -1);
+    ctx.moveTo(5.6, -len - 0.5);
+    ctx.lineTo(1.2, -len + 11);
     ctx.stroke();
     ctx.fillStyle = o.luxury ? '#E8C060' : '#C9CED8';
     ctx.beginPath();
-    ctx.arc(1.5, ty + 15, 0.9, 0, Math.PI * 2);
+    ctx.arc(2.4, -len + 13.5, 0.9, 0, Math.PI * 2);
     ctx.fill();
-  }
-  if (o.tie && !o.suit) {
-    const sway = Math.sin(t * 6) * 0.05 + rising * 0.1;
-    ctx.save();
-    ctx.translate(0, ty + 1.5);
-    ctx.rotate(sway);
-    ctx.fillStyle = o.luxury ? '#E8C060' : '#C8263C';
-    ctx.strokeStyle = LINE;
-    ctx.lineWidth = 0.9;
-    ctx.beginPath();
-    ctx.moveTo(-1.6, 0);
-    ctx.lineTo(1.6, 0);
-    ctx.lineTo(2.4, 10.5);
-    ctx.lineTo(0, 13.5);
-    ctx.lineTo(-2.4, 10.5);
-    ctx.closePath();
-    ctx.fill();
-    ctx.stroke();
-    ctx.restore();
   }
   if (o.suit) {
     ctx.fillStyle = '#F08A24';
-    rr(ctx, -7, ty + 8, 5, 3, 1);
+    rr(ctx, -6, -len + 8, 4.6, 2.8, 1);
     ctx.fill();
     ctx.fillStyle = '#5AA8FF';
-    rr(ctx, 3.5, ty + 6, 4, 4, 1);
+    rr(ctx, 2.6, -len + 6, 3.8, 3.8, 1);
     ctx.fill();
-    ctx.strokeStyle = 'rgba(120,130,150,0.7)';
+  }
+  ctx.restore();
+  torsoShape(ctx, len);
+  stroke(ctx);
+
+  // Collar (shirt and jacket) sits on top of the outline.
+  if ((o.top === 'shirt' || jacket) && !o.suit) {
+    ctx.fillStyle = '#ffffff';
+    for (const side of [-1, 1]) {
+      ctx.beginPath();
+      ctx.moveTo(0.8, -len + 4);
+      ctx.lineTo(0.8 + side * 4.4, -len - 0.8);
+      ctx.lineTo(0.8 + side * 1.4, -len - 1.2);
+      ctx.closePath();
+      ctx.fill();
+      stroke(ctx, 0.9);
+    }
+  }
+  if (o.tie && !o.suit) {
+    const sway = Math.sin(t * 6) * 0.05 + rig.look.y * -0.06;
+    ctx.save();
+    ctx.translate(0.8, -len + 2.6);
+    ctx.rotate(sway);
+    ctx.fillStyle = o.luxury ? '#E8C060' : '#C8263C';
+    ctx.beginPath();
+    ctx.moveTo(-1.5, 0);
+    ctx.lineTo(1.5, 0);
+    ctx.lineTo(2.3, 10);
+    ctx.lineTo(0, 12.8);
+    ctx.lineTo(-2.3, 10);
+    ctx.closePath();
+    ctx.fill();
+    stroke(ctx, 0.9);
+    ctx.restore();
+  }
+  // Coat tails flare a little on the way down.
+  if (jacket) {
+    const flare = 1 + rig.look.y * 1.6;
+    ctx.fillStyle = jacketC;
+    ctx.beginPath();
+    ctx.moveTo(-6.4, -1);
+    ctx.lineTo(-7.6 - flare, 3.6);
+    ctx.lineTo(-1.6, 1.4);
+    ctx.closePath();
+    ctx.fill();
+    stroke(ctx);
+  }
+  ctx.restore();
+}
+
+/** Pants on both legs and the waistband that hides the hip joints. */
+function legColors(o: Outfit): { thigh: string; shin: string } {
+  const pants = o.suit ? '#E9EEF5' : o.legs === 'trousers' ? (o.luxury ? '#17181F' : '#2D3242') : o.legs === 'sweats' ? '#6E7685' : '#4A6694';
+  return { thigh: pants, shin: o.legs === 'shorts' && !o.suit ? SKIN : pants };
+}
+
+function drawLeg(ctx: CanvasRenderingContext2D, l: Limb3, o: Outfit, back: boolean): void {
+  const { thigh, shin } = legColors(o);
+  const k = back ? 0.12 : 0;
+  drawLimb(ctx, l, [7.6, 6.2, 5.2], shade(thigh, k), shade(shin, k));
+  if (o.legs === 'shorts' && !o.suit) {
+    // Shorts end just above the knee with a hem.
+    const hx = l[0].x + (l[1].x - l[0].x) * 0.82;
+    const hy = l[0].y + (l[1].y - l[0].y) * 0.82;
+    ctx.fillStyle = shade(thigh, k);
+    capsule(ctx, l[0], { x: hx, y: hy }, 8.4, 8);
+    ctx.fill();
+    stroke(ctx, 1);
+  } else if (o.legs === 'sweats' && !o.suit) {
+    ctx.strokeStyle = 'rgba(255,255,255,0.6)';
     ctx.lineWidth = 1;
     ctx.beginPath();
-    ctx.moveTo(-8, ty + 15);
-    ctx.lineTo(8, ty + 15);
+    ctx.moveTo(l[0].x - 2.4, l[0].y + 1);
+    ctx.lineTo(l[1].x - 2, l[1].y);
+    ctx.lineTo(l[2].x - 1.6, l[2].y - 1.5);
+    ctx.stroke();
+  } else if (o.legs === 'trousers' && !o.suit) {
+    ctx.strokeStyle = 'rgba(255,255,255,0.18)';
+    ctx.lineWidth = 0.8;
+    ctx.beginPath();
+    ctx.moveTo(l[0].x + 1, l[0].y + 2);
+    ctx.lineTo(l[1].x + 1, l[1].y);
+    ctx.lineTo(l[2].x + 1, l[2].y - 1.5);
     ctx.stroke();
   }
-
-  if (otherLayer === 'chest') drawOtherArm();
-
-  // ---- Head ----
-  const hy = -54 + breathe * 1.15;
-  const headTilt = Math.max(-0.035, Math.min(0.035, -rising * 0.02));
-  ctx.save();
-  ctx.rotate(headTilt);
-
-  // Neck first, so the head grows naturally out of the torso.
-  ctx.fillStyle = SKIN;
-  ctx.strokeStyle = LINE;
-  ctx.lineWidth = 1.15;
-  rr(ctx, -3.1, hy + 7.5, 6.2, 6.2, 1.9);
-  ctx.fill();
-  ctx.stroke();
-
-  // Main head shape: slightly wider and less perfectly oval than the old version.
-  ctx.beginPath();
-  ctx.moveTo(-8.7, hy + 2.8);
-  ctx.quadraticCurveTo(-9.3, hy - 5.5, -3.8, hy - 9.4);
-  ctx.quadraticCurveTo(1.8, hy - 13.2, 7.2, hy - 8.8);
-  ctx.quadraticCurveTo(11, hy - 5.2, 10.2, hy + 2.5);
-  ctx.quadraticCurveTo(9.5, hy + 8.8, 3.6, hy + 10.1);
-  ctx.quadraticCurveTo(-3.4, hy + 10.7, -7.3, hy + 6.5);
-  ctx.quadraticCurveTo(-9, hy + 4.8, -8.7, hy + 2.8);
-  ctx.closePath();
-  ctx.fillStyle = SKIN;
-  ctx.fill();
-  const hs = ctx.createLinearGradient(-9, hy, 11, hy);
-  hs.addColorStop(0, 'rgba(160,90,60,0.22)');
-  hs.addColorStop(0.48, 'rgba(255,255,255,0)');
-  hs.addColorStop(1, 'rgba(255,255,255,0.08)');
-  ctx.fillStyle = hs;
-  ctx.fill();
-  ctx.strokeStyle = LINE;
-  ctx.lineWidth = 1.25;
-  ctx.stroke();
-
-  // Ear.
-  ctx.beginPath();
-  ctx.ellipse(-7.9, hy + 2.2, 1.8, 2.7, -0.12, 0, Math.PI * 2);
-  ctx.fillStyle = SKIN;
-  ctx.fill();
-  ctx.strokeStyle = LINE;
-  ctx.lineWidth = 0.85;
-  ctx.stroke();
-  ctx.strokeStyle = SKIN_SHADE;
-  ctx.beginPath();
-  ctx.arc(-7.8, hy + 2.1, 0.95, -1.25, 1.15);
-  ctx.stroke();
-
-  // Hair mass with a deliberately simple silhouette.
-  const tuft = -rising * 2 + Math.sin(t * 4.5) * 0.35;
-  ctx.fillStyle = HAIR;
-  ctx.beginPath();
-  ctx.moveTo(-8.9, hy + 2.4);
-  ctx.quadraticCurveTo(-10.2, hy - 7.8, -3.8, hy - 11.1);
-  ctx.quadraticCurveTo(1.4, hy - 14.3, 6.5, hy - 10.3);
-  ctx.quadraticCurveTo(10.1, hy - 7.4, 10.1, hy - 2.2);
-  ctx.quadraticCurveTo(7.2, hy - 5.2, 3.8, hy - 4.4);
-  ctx.quadraticCurveTo(-1.1, hy - 5.8, -4.8, hy + 0.9);
-  ctx.quadraticCurveTo(-6.7, hy + 3.8, -8.9, hy + 2.4);
-  ctx.closePath();
-  ctx.fill();
-  ctx.beginPath();
-  ctx.moveTo(-0.8, hy - 10.5);
-  ctx.quadraticCurveTo(-2.1, hy - 14.4 + tuft, 2.8 + tuft, hy - 14.7 + tuft);
-  ctx.quadraticCurveTo(2.2, hy - 11.3, 3.8, hy - 10.2);
-  ctx.fill();
-
-  // Face: readable three-quarter view instead of a single-eye profile.
-  const face = pose.face ?? 'normal';
-  const blink = face === 'normal' && t % 3.7 < 0.12;
-  const eyeY = hy - 0.8;
-  const eyeXs = [1.9, 6.9];
-  const eyeScale = face === 'scared' ? 1.18 : 1;
-  if (o.luxury && !o.suit && face !== 'scared') {
-    ctx.fillStyle = '#111';
-    rr(ctx, 0.2, eyeY - 2.7, 9.1, 4.3, 1.7);
-    ctx.fill();
-    ctx.fillStyle = 'rgba(255,255,255,0.4)';
-    ctx.fillRect(1.5, eyeY - 1.9, 2.4, 0.8);
-  } else if (face === 'squint' || blink) {
-    ctx.strokeStyle = '#1D1A24';
-    ctx.lineWidth = 1.25;
-    for (const ex of eyeXs) {
-      ctx.beginPath();
-      ctx.moveTo(ex - 1.5, eyeY + 0.3);
-      ctx.quadraticCurveTo(ex, eyeY + 1.1, ex + 1.5, eyeY + 0.3);
-      ctx.stroke();
-    }
-  } else {
-    for (const ex of eyeXs) {
-      const r = (face === 'scared' ? 2.55 : 2.05) * eyeScale;
-      ctx.fillStyle = '#fff';
-      ctx.beginPath();
-      ctx.ellipse(ex, eyeY, r, r * 1.12, 0, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.strokeStyle = 'rgba(28,20,24,0.5)';
-      ctx.lineWidth = 0.75;
-      ctx.stroke();
-      ctx.fillStyle = '#1D1A24';
-      ctx.beginPath();
-      ctx.arc(ex + 0.45, eyeY - rising * 0.35, face === 'scared' ? 1.05 : 1.05, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = '#fff';
-      ctx.fillRect(ex + 0.75, eyeY - 1.05 - rising * 0.35, 0.65, 0.65);
-    }
-  }
-
-  // Brows make the face readable even when scaled down.
-  ctx.strokeStyle = HAIR;
-  ctx.lineWidth = 1.25;
-  ctx.lineCap = 'round';
-  ctx.beginPath();
-  if (face === 'scared') {
-    ctx.moveTo(0.5, eyeY - 3.7); ctx.lineTo(3.1, eyeY - 4.5);
-    ctx.moveTo(5.8, eyeY - 4.4); ctx.lineTo(8.3, eyeY - 3.7);
-  } else if (face === 'grin') {
-    ctx.moveTo(0.6, eyeY - 3.5); ctx.lineTo(3.1, eyeY - 3.1);
-    ctx.moveTo(5.8, eyeY - 3.1); ctx.lineTo(8.4, eyeY - 3.5);
-  } else {
-    ctx.moveTo(0.7, eyeY - 3.8); ctx.lineTo(3.1, eyeY - 3.8);
-    ctx.moveTo(5.8, eyeY - 3.8); ctx.lineTo(8.2, eyeY - 3.8);
-  }
-  ctx.stroke();
-
-  // Tiny nose and mouth.
-  ctx.strokeStyle = SKIN_SHADE;
-  ctx.lineWidth = 0.9;
-  ctx.beginPath();
-  ctx.moveTo(4.5, hy + 1.2);
-  ctx.quadraticCurveTo(5.1, hy + 2.5, 4.3, hy + 3);
-  ctx.stroke();
-  ctx.strokeStyle = '#6E2E24';
-  ctx.lineWidth = 1.05;
-  ctx.beginPath();
-  if (face === 'scared') {
-    ctx.ellipse(4.6, hy + 6.1, 1.25, 1.65, 0, 0, Math.PI * 2);
-  } else if (face === 'grin') {
-    ctx.arc(4.9, hy + 5.2, 2.5, 0.15, Math.PI * 0.9);
-  } else {
-    ctx.arc(4.8, hy + 5.3, 1.45, 0.15, Math.PI * 0.78);
-  }
-  ctx.stroke();
-
-  // Wearable face/head equipment follows the animated head rather than floating at a fixed world point.
-  if (o.luxury && !o.suit) {
-    ctx.strokeStyle = '#17181D';
-    ctx.lineWidth = 1.05;
-    ctx.fillStyle = 'rgba(170,215,255,0.16)';
-    for (const ex of [1.9, 6.9]) {
-      ctx.beginPath();
-      rr(ctx, ex - 2.55, eyeY - 1.75, 5.1, 3.5, 1.15);
-      ctx.fill();
-      ctx.stroke();
-    }
-    ctx.beginPath();
-    ctx.moveTo(4.45, eyeY);
-    ctx.lineTo(4.55, eyeY);
-    ctx.stroke();
-  }
-  if (o.suit) {
-    // A real helmet silhouette, with a clear visor and a small rear rim.
-    ctx.save();
-    ctx.fillStyle = 'rgba(215,231,245,0.92)';
-    ctx.strokeStyle = '#8D9AA8';
-    ctx.lineWidth = 1.1;
-    ctx.beginPath();
-    ctx.moveTo(-9.5, hy + 0.5);
-    ctx.quadraticCurveTo(-8.8, hy - 12.8, 1, hy - 15.1);
-    ctx.quadraticCurveTo(9.2, hy - 12.5, 10.2, hy - 1.5);
-    ctx.lineTo(7.7, hy + 0.3);
-    ctx.quadraticCurveTo(0, hy - 3.2, -7.8, hy + 0.3);
-    ctx.closePath();
-    ctx.fill();
-    ctx.stroke();
-    ctx.fillStyle = 'rgba(95,132,168,0.28)';
-    ctx.beginPath();
-    ctx.moveTo(-6.8, hy - 2.1);
-    ctx.quadraticCurveTo(0, hy - 7.1, 7.1, hy - 2.1);
-    ctx.lineTo(6.2, hy + 0.1);
-    ctx.quadraticCurveTo(0, hy - 3.3, -6.2, hy + 0.1);
-    ctx.closePath();
-    ctx.fill();
-    ctx.restore();
-  }
-
-  ctx.restore();
-
-  if (o.suit) {
-    ctx.strokeStyle = 'rgba(220,235,255,0.55)';
-    ctx.lineWidth = 1.1;
-    ctx.beginPath();
-    ctx.moveTo(-7, -40);
-    ctx.lineTo(-9, -35);
-    ctx.moveTo(7, -40);
-    ctx.lineTo(9, -35);
-    ctx.stroke();
-  }
-
-  if (otherLayer === 'head') drawOtherArm();
-
-  // ---- Front arm holding the flashlight (waves it in the menu) ----
-  const waving = gesture === 'wave';
-  const handTarget: [number, number] = waving
-    ? [15 + Math.sin(t * 7) * 2.5, -49 + Math.abs(Math.cos(t * 7)) * 0.8 + breathe]
-    : [19, -29 + rising * 2.5 + breathe];
-  const front = reach(frontShoulder[0], frontShoulder[1], handTarget[0], handTarget[1], 8.5, 8.2, 1);
-  limb(ctx, front, [6, 5, 4.4], sleeve, o.top === 'tank' && !o.suit ? SKIN : sleeve);
-  if (o.watch) {
-    const wa = Math.atan2(front[5] - front[3], front[4] - front[2]);
-    ctx.save();
-    ctx.translate(front[4], front[5]);
-    ctx.rotate(wa);
-    ctx.fillStyle = '#C59A3A';
-    rr(ctx, -2.9, -2.2, 5.8, 2.1, 0.9);
-    ctx.fill();
-    ctx.fillStyle = '#E8C060';
-    rr(ctx, -2.1, -1.35, 4.2, 3.1, 0.9);
-    ctx.fill();
-    ctx.fillStyle = '#FFF5C7';
-    ctx.beginPath();
-    ctx.arc(0, 0.2, 1.05, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
-  }
-  if (jacket && !o.suit) {
-    // White shirt cuff.
-    const a = Math.atan2(front[5] - front[3], front[4] - front[2]);
-    seg(ctx, front[4] - Math.cos(a) * 1.5, front[5] - Math.sin(a) * 1.5, front[4], front[5], 4.6, 4.4, '#F4F4F4');
-  }
-  ctx.save();
-  ctx.translate(front[4], front[5]);
-  // The torch points down-forward, or up while waving.
-  ctx.rotate(waving ? Math.PI * 1.1 + Math.sin(t * 7) * 0.2 : -Math.atan2(0.78, 0.62));
-  ctx.fillStyle = o.newTorch ? '#D3D8E2' : '#3B3F4A';
-  rr(ctx, -3, -1.5, 6, o.newTorch ? 12 : 10, 2);
-  ctx.fill();
-  ctx.strokeStyle = LINE;
-  ctx.lineWidth = 1.1;
-  ctx.stroke();
-  if (o.newTorch) {
-    ctx.fillStyle = 'rgba(255,255,255,0.6)';
-    ctx.fillRect(-2, -0.5, 1.1, 9);
-  }
-  ctx.fillStyle = `rgb(${pose.light})`;
-  rr(ctx, -3.8, o.newTorch ? 9.8 : 7.8, 7.6, 3, 1);
-  ctx.fill();
-  // Hand wrapped around the torch.
-  ctx.fillStyle = skin;
-  ctx.beginPath();
-  ctx.ellipse(0, 1, 3.4, 3, 0, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.strokeStyle = LINE;
-  ctx.lineWidth = 1.1;
-  ctx.stroke();
-  ctx.restore();
 }
 
-export interface HeroAttachmentPose {
-  tier: number;
-  vx?: number;
-  vy: number;
-  time: number;
-  gesture?: Gesture;
+function drawArm(ctx: CanvasRenderingContext2D, l: Limb3, o: Outfit, back: boolean): void {
+  const jacket = o.top === 'jacket' && !o.suit;
+  const sleeve = o.suit ? '#E9EEF5' : jacket ? (o.luxury ? '#1B1D27' : '#24315C') : o.top === 'shirt' ? '#BCD5EE' : SKIN;
+  const k = back ? 0.14 : 0;
+  drawLimb(ctx, l, [5.8, 4.8, 4.1], shade(sleeve, k), shade(sleeve, k));
+  if (jacket || o.top === 'shirt') {
+    // Cuff at the wrist.
+    const a = Math.atan2(l[2].y - l[1].y, l[2].x - l[1].x);
+    ctx.fillStyle = jacket ? '#F4F4F4' : shade('#A9C6E6', k);
+    capsule(ctx, { x: l[2].x - Math.cos(a) * 1.8, y: l[2].y - Math.sin(a) * 1.8 }, l[2], 4.4, 4.2);
+    ctx.fill();
+  }
 }
 
-/**
- * Returns a live local-space attachment point for wearable/held objects.
- * The renderer uses these points while an item is flying onto the hero, so the
- * destination follows the animated body instead of being a fixed world offset.
- */
-export function heroAttachment(item: Item, pose: HeroAttachmentPose): [number, number] {
-  const o = outfitFor(pose.tier);
+// ---------------------------------------------------------------------------
+// Main draw: fixed z-order.
+//  1 back arm (when it hangs/swings)  2 back leg  3 torso + clothes  4 front leg
+//  5 waistband  6 chest-level gesture arm  7 head + face + head items
+//  8 head-level gesture arm  9 front arm  10 held flashlight + gripping hand
+// ---------------------------------------------------------------------------
+
+export function drawHeroBody(ctx: CanvasRenderingContext2D, pose: HeroPose, given?: Rig): Rig {
+  const o: Outfit = { ...(pose.outfit ?? outfitFor(pose.tier)), ...(pose.extra ?? {}) };
+  const rig = given ?? heroRig(pose);
+  const skin = o.suit ? '#E9EEF5' : SKIN;
   const t = pose.time;
-  const breathe = Math.sin(t * 3.2) * 0.5;
-  const speed = Math.min(1, Math.abs(pose.vx ?? 0) / 220);
-  const walking = speed > 0.08 && Math.abs(pose.vy) < 90;
-  const walk = walking ? Math.sin(t * (8 + speed * 4)) * speed : 0;
-  const rising = Math.max(-1, Math.min(1, pose.vy / 700));
-  const poise = Math.min(1, pose.tier / 8);
-  const flail = (1 - poise) * Math.sin(t * 11) * 0.18;
-  const tuck = Math.max(0, rising) * 0.65;
-  const shoulderY = -38 + breathe;
-  const backShoulder: [number, number] = [-4.5, shoulderY + 1.5];
-  const frontShoulder: [number, number] = [5, shoulderY + 1.5];
-  const gesture = pose.gesture ?? (o.phone ? 'none' : poise >= 1 ? 'pocket' : 'none');
 
-  let otherTarget: [number, number];
-  let otherBend = -1;
-  if (gesture === 'pocket') {
-    otherTarget = [-3, -25]; otherBend = 1;
-  } else if (gesture === 'scratch') {
-    otherTarget = [-5 + Math.sin(t * 10) * 0.8, -58 + breathe]; otherBend = 1;
-  } else if (gesture === 'tie') {
-    otherTarget = [1.5, -37 + Math.sin(t * 4) * 0.6 + breathe]; otherBend = 1;
-  } else {
-    const swing = -0.2 - rising * 0.9 * (1 - poise * 0.6) + flail + walk * 0.55;
-    otherTarget = [backShoulder[0] + Math.sin(swing) * 15, backShoulder[1] + Math.cos(swing) * 15];
+  if (!pose.noBeam) {
+    ctx.save();
+    ctx.translate(rig.torchTip.x, rig.torchTip.y);
+    ctx.rotate(rig.torchAngle);
+    ctx.globalAlpha = pose.neutral ? 0.16 : 0.4;
+    const beam = ctx.createLinearGradient(0, 0, 60, 0);
+    beam.addColorStop(0, `rgba(${pose.light},0.95)`);
+    beam.addColorStop(1, `rgba(${pose.light},0)`);
+    ctx.fillStyle = beam;
+    ctx.beginPath();
+    ctx.moveTo(0, -2);
+    ctx.lineTo(62, -24);
+    ctx.lineTo(62, 24);
+    ctx.lineTo(0, 2);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
   }
-  const other = reach(backShoulder[0], backShoulder[1], otherTarget[0], otherTarget[1], 8.5, 7.8, otherBend);
-  const waving = gesture === 'wave';
-  const handTarget: [number, number] = waving
-    ? [15 + Math.sin(t * 7) * 2.5, -49 + Math.abs(Math.cos(t * 7)) * 0.8 + breathe]
-    : [19, -29 + rising * 2.5 + breathe];
-  const front = reach(frontShoulder[0], frontShoulder[1], handTarget[0], handTarget[1], 8.5, 8.2, 1);
 
-  switch (item) {
-    case 'watch':
-    case 'newTorch':
-    case 'torch':
-      return [front[4], front[5]];
-    case 'phone':
-      return [other[4], other[5]];
-    case 'glasses':
-      return [4.5, -53 + breathe * 1.15];
-    case 'helmet':
-      return [1, -67 + breathe * 1.15];
-    case 'tie':
-      return [0, -36 + breathe];
-    case 'shirt':
-    case 'tank':
-    case 'jacket':
-      return [0, -33 + breathe];
-    case 'shorts':
-    case 'sweats':
-    case 'trousers':
-      return [0, -15];
-    case 'slippers':
-    case 'shoes': {
-      const legs: [number, number, number, number, number, number][] = [];
-      for (const side of [-1, 1]) {
-        const phase = side === 1 ? walk : -walk;
-        const k = side === 1 ? 0.08 + tuck * 0.85 + phase * 0.42 : -0.06 + tuck * 0.6 + phase * 0.42;
-        legs.push(chain(side * 3.6, -21, k, 10, -k * 1.5 + phase * 0.12, 9.5));
-      }
-      return [(legs[0][4] + legs[1][4]) / 2, (legs[0][5] + legs[1][5]) / 2 + 0.8];
+  const otherLayer = rig.gesture === 'scratch' ? 'head' : rig.gesture === 'tie' ? 'chest' : 'behind';
+  const drawBackArm = (): void => {
+    drawArm(ctx, rig.backArm, o, otherLayer === 'behind');
+    if (rig.gesture === 'pocket') return;
+    if (o.phone && rig.gesture === 'none') {
+      ctx.save();
+      ctx.translate(rig.backHeld.x, rig.backHeld.y);
+      ctx.rotate(rig.backHeld.rot + Math.PI / 2);
+      ctx.fillStyle = '#17191F';
+      rr(ctx, -3, -2, 6, 10.5, 1.6);
+      ctx.fill();
+      stroke(ctx);
+      ctx.fillStyle = 'rgba(140,200,255,0.95)';
+      ctx.fillRect(-2, -0.6, 4, 7.4);
+      ctx.restore();
+      ctx.save();
+      ctx.translate(rig.backHeld.x, rig.backHeld.y);
+      ctx.rotate(rig.backHeld.rot);
+      drawGrip(ctx, shade(skin, 0.1));
+      ctx.restore();
+    } else {
+      drawOpenHand(ctx, rig.backArm, otherLayer === 'behind' ? shade(skin, 0.1) : skin);
     }
-    default:
-      return [0, -30];
+  };
+
+  if (otherLayer === 'behind') drawBackArm();
+  drawLeg(ctx, rig.backLeg, o, true);
+  drawFoot(ctx, rig.backLeg[2], rig.backFootRot, o, true);
+  drawTorso(ctx, rig, o, t);
+  drawLeg(ctx, rig.frontLeg, o, false);
+  drawFoot(ctx, rig.frontLeg[2], rig.frontFootRot, o, false);
+
+  // Waistband over both hip joints.
+  {
+    const { thigh } = legColors(o);
+    ctx.save();
+    ctx.translate(rig.hip.x, rig.hip.y);
+    ctx.rotate(rig.lean);
+    ctx.fillStyle = o.suit ? '#E9EEF5' : o.top === 'jacket' ? (o.luxury ? '#1B1D27' : '#24315C') : thigh;
+    ctx.beginPath();
+    ctx.moveTo(-6.8, -3.2);
+    ctx.quadraticCurveTo(0, -4.4, 7, -3.2);
+    ctx.lineTo(7.2, 2.4);
+    ctx.quadraticCurveTo(0, 4.2, -6.9, 2.4);
+    ctx.closePath();
+    ctx.fill();
+    stroke(ctx);
+    if (o.legs === 'trousers' && o.top !== 'jacket' && !o.suit) {
+      ctx.fillStyle = '#5A3E2A';
+      ctx.fillRect(-6.6, -3, 13.6, 1.6);
+    }
+    ctx.restore();
   }
+
+  if (otherLayer === 'chest') drawBackArm();
+
+  // Neck
+  ctx.fillStyle = skin;
+  const nk = rig.points.neck;
+  capsule(ctx, { x: nk.x - 0.4, y: nk.y + 3 }, { x: rig.head.x - 1.4, y: rig.head.y + 7 }, 5.2, 4.8);
+  ctx.fill();
+  stroke(ctx, 1);
+
+  drawHead(ctx, rig, o, pose.tier);
+  if (otherLayer === 'head') drawBackArm();
+
+  // Front arm, then the flashlight in the hand, then the fingers over it.
+  drawArm(ctx, rig.frontArm, o, false);
+  if (o.watch) {
+    const w = rig.points.wrist;
+    const a = Math.atan2(rig.frontArm[2].y - rig.frontArm[1].y, rig.frontArm[2].x - rig.frontArm[1].x);
+    ctx.save();
+    ctx.translate(w.x, w.y);
+    ctx.rotate(a);
+    ctx.fillStyle = '#E8C060';
+    rr(ctx, -1.3, -2.8, 2.6, 5.6, 1);
+    ctx.fill();
+    stroke(ctx, 0.9);
+    ctx.restore();
+  }
+  ctx.save();
+  ctx.translate(rig.held.x, rig.held.y);
+  ctx.rotate(rig.held.rot);
+  drawTorch(ctx, o, pose.light);
+  drawGrip(ctx, skin);
+  ctx.restore();
+  void t;
+  return rig;
 }
 
-/** Torch lens position in hero coordinates (used for light effects). */
+/** Fallback torch lens position for the idle pose (the renderer uses rig.torchTip). */
 export const TORCH_TIP: [number, number] = [28, -22];
 
 // ---------- Suit-up items (fly in and snap onto the hero) ----------
 
+/** A cheap cap worn backwards (the yard item). */
+function drawCap(ctx: CanvasRenderingContext2D, hy: number): void {
+  ctx.fillStyle = '#C8263C';
+  ctx.strokeStyle = LINE;
+  ctx.lineWidth = 1.2;
+  ctx.beginPath();
+  ctx.moveTo(-9.4, hy - 3);
+  ctx.quadraticCurveTo(-9, hy - 12.5, 1.5, hy - 12.2);
+  ctx.quadraticCurveTo(10.5, hy - 11.5, 10.2, hy - 4);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+  // Visor pointing backwards.
+  ctx.beginPath();
+  ctx.moveTo(-8.5, hy - 4);
+  ctx.quadraticCurveTo(-14, hy - 4.5, -14.5, hy - 2);
+  ctx.lineTo(-8.5, hy - 1.8);
+  ctx.closePath();
+  ctx.fillStyle = '#9E1B2E';
+  ctx.fill();
+  ctx.stroke();
+  ctx.fillStyle = '#ffffff';
+  ctx.beginPath();
+  ctx.arc(1.5, hy - 12.3, 1.2, 0, Math.PI * 2);
+  ctx.fill();
+}
+
 export type Item =
+  | 'cap'
   | 'slippers' | 'shoes' | 'shorts' | 'sweats' | 'trousers' | 'tank' | 'shirt' | 'jacket'
   | 'watch' | 'torch' | 'newTorch' | 'tie' | 'phone' | 'glasses' | 'helmet';
 
@@ -793,8 +1119,8 @@ export function outfitChanges(from: number, to: number): ItemChange[] {
   if (!a.newTorch && b.newTorch) out.push({ item: 'newTorch', replaces: 'torch', anchor: [16, -22] });
   if (!a.tie && b.tie) out.push({ item: 'tie', replaces: null, anchor: [0, -36] });
   if (!a.phone && b.phone) out.push({ item: 'phone', replaces: null, anchor: [-14, -26] });
-  if (!a.luxury && b.luxury) out.push({ item: 'glasses', replaces: null, anchor: [4.5, -53] });
-  if (!a.suit && b.suit) out.push({ item: 'helmet', replaces: null, anchor: [1, -64] });
+  if (!a.luxury && b.luxury) out.push({ item: 'glasses', replaces: null, anchor: [5, -52] });
+  if (!a.suit && b.suit) out.push({ item: 'helmet', replaces: null, anchor: [0, -51] });
   return out;
 }
 
@@ -876,19 +1202,15 @@ export function drawItem(ctx: CanvasRenderingContext2D, item: Item): void {
       ctx.fillRect(-2.3, -4, 4.6, 7);
       break;
     case 'glasses':
-      ctx.strokeStyle = '#17181D';
-      ctx.lineWidth = 1.1;
-      ctx.fillStyle = 'rgba(170,215,255,0.16)';
-      for (const x of [-3, 3]) {
-        ctx.beginPath();
-        rr(ctx, x - 2.6, -1.8, 5.2, 3.6, 1.2);
-        ctx.fill();
-        ctx.stroke();
-      }
-      ctx.beginPath();
-      ctx.moveTo(-0.4, 0);
-      ctx.lineTo(0.4, 0);
-      ctx.stroke();
+      ctx.fillStyle = '#111';
+      rr(ctx, -4, -1.6, 8, 3.2, 1.4);
+      ctx.fill();
+      break;
+    case 'cap':
+      ctx.save();
+      ctx.translate(-1, 7);
+      drawCap(ctx, 0);
+      ctx.restore();
       break;
     case 'helmet':
       ctx.strokeStyle = 'rgba(220,235,255,0.95)';

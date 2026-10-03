@@ -153,10 +153,10 @@ export function menuView(d: MenuData): string {
   </div>`;
 }
 
-export function wardrobeView(s: Stats | null): string {
-  const tier = s?.last_tier ?? 0;
-  const best = s?.best_tier ?? 0;
+export function wardrobeView(s: Stats | null, mask: number): string {
   const v = (n: number | null | undefined): string => (n === null || n === undefined || n === 0 ? ru.wardrobe.none : String(n));
+  let owned = 0;
+  for (let i = 0; i < 13; i++) if (mask & (1 << i)) owned++;
   const stats: [string, string][] = [
     [ru.wardrobe.best, v(s?.best_all)],
     [ru.wardrobe.rankWeek, v(s?.rank_week)],
@@ -165,25 +165,31 @@ export function wardrobeView(s: Stats | null): string {
     [ru.wardrobe.combo, v(s?.best_combo)],
     [ru.wardrobe.captures, v(s?.total_captures)],
   ];
+  const itemNames = [
+    'cap', 'slippers', 'sweats', 'shirt', 'trousers', 'jacket', 'watch', 'newTorch', 'tie', 'shoes', 'phone', 'glasses', 'helmet',
+  ];
   return `${header(ru.wardrobe.title)}<div class="scroll wardrobe">
     <div class="ward-top">
       <div class="ward-stage"><span class="stage-glow"></span><canvas id="wardHero" aria-hidden="true"></canvas></div>
       <div class="ward-info">
-        <p class="ward-look">${esc(ru.wardrobe.look(ru.tiers[tier]))}</p>
-        <p class="muted">${ru.wardrobe.bestTier}: ${esc(ru.tiers[best])}</p>
+        <p class="ward-look">${esc(ru.wardrobe.collected(owned))}</p>
+        <div class="bonus-bar" aria-hidden="true"><i style="transform:scaleX(${(owned / 13).toFixed(3)})"></i></div>
+        <p class="muted">${esc(ru.wardrobe.bonus())}</p>
         <dl class="ward-stats stagger">${stats.map(([k, val]) => `<div><dt>${k}</dt><dd>${val}</dd></div>`).join('')}</dl>
       </div>
     </div>
     <h3>${ru.wardrobe.collection}</h3>
-    <div class="looks stagger">
-      ${ru.tiers
-        .map(
-          (name, i) =>
-            `<div class="look ${i <= best ? '' : 'locked'}" title="${esc(i <= best ? name : ru.wardrobe.locked)}">
-              <canvas data-look="${i}" aria-hidden="true"></canvas>
-              <span>${esc(i <= best ? name : ru.wardrobe.locked)}</span>
-            </div>`,
-        )
+    <p class="muted">${ru.wardrobe.how}</p>
+    <div class="looks items stagger">
+      ${itemNames
+        .map((name, i) => {
+          const has = (mask & (1 << i)) !== 0;
+          return `<div class="look ${has ? 'owned' : 'locked'}">
+              <canvas data-item="${i}" aria-hidden="true"></canvas>
+              <span>${esc(has ? ru.items[name] : ru.wardrobe.lockedAt(ru.tiers[i]))}</span>
+              
+            </div>`;
+        })
         .join('')}
     </div>
   </div>`;
