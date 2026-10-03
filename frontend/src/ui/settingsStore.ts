@@ -20,6 +20,11 @@ export interface Settings {
   rulesCard: boolean;
   /** Freeze-frame movie when the outfit changes. */
   cinematic: boolean;
+  /** Keyboard bindings for the four light buttons (KeyboardEvent.code), browser only. */
+  keyYellow: string;
+  keyBlue: string;
+  keyGreen: string;
+  keyRed: string;
 }
 
 export const DEFAULTS: Settings = {
@@ -35,7 +40,14 @@ export const DEFAULTS: Settings = {
   reducedFx: false,
   rulesCard: true,
   cinematic: true,
+  keyYellow: 'Digit1',
+  keyBlue: 'Digit2',
+  keyGreen: 'Digit3',
+  keyRed: 'Space',
 };
+
+export const KEY_SETTINGS = ['keyYellow', 'keyBlue', 'keyGreen', 'keyRed'] as const;
+export type KeySetting = (typeof KEY_SETTINGS)[number];
 
 const KEY = 'sl_settings';
 const LEGACY_KEY = 'sl_controls';
@@ -64,6 +76,9 @@ function sanitize(raw: Record<string, unknown>): Settings {
       if (typeof v === 'number' && Number.isFinite(v)) out[key] = Math.min(b, Math.max(a, v));
     } else if (typeof def === 'boolean') {
       if (typeof v === 'boolean') out[key] = v;
+    } else if (typeof def === 'string') {
+      // Key codes such as "KeyQ" or "ShiftLeft": short and plain, or the default stays.
+      if (typeof v === 'string' && /^[A-Za-z0-9]{2,20}$/.test(v)) out[key] = v;
     }
   }
   return out as unknown as Settings;

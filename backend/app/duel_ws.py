@@ -22,7 +22,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from .config import settings
 from .db import SessionLocal
 from .models import User
-from .services import game
+from .services import game, notify
 from .vk_sign import verify_launch_params
 
 log = logging.getLogger("duel")
@@ -227,6 +227,10 @@ async def find(me: Conn) -> None:
     await send(target, {"t": "invite", "from": public(me), "timeout": INVITE_TIMEOUT_SEC})
     await send(me, {"t": "waiting", "to": public(target), "timeout": INVITE_TIMEOUT_SEC})
     asyncio.get_event_loop().create_task(_expire_invite(target.user_id, me.user_id))
+    # Also tell the challenged player in VK, in case the game is in the background.
+    asyncio.get_event_loop().create_task(
+        notify.send_notification(target.user_id, notify.duel_challenge_text(me.name))
+    )
 
 
 async def _expire_invite(target_id: int, from_id: int) -> None:

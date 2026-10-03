@@ -3,6 +3,8 @@ import { AGE_LABEL } from '../config';
 import { legal, ru, type DocSection } from '../i18n/ru';
 import type { FinishResult, Leaderboard, LeaderRow, Stats } from '../net/session';
 import { esc } from './dom';
+import { keyLabel } from '../input/input';
+import type { LightId } from '../core/gameConfig';
 import type { Settings } from './settingsStore';
 
 const BACK_ICON =
@@ -246,7 +248,35 @@ function seg<T extends string>(key: keyof Settings, label: string, options: Reco
   </div>`;
 }
 
-export function settingsView(s: Settings, opts: { vibration: boolean; playerId: number | null; canDelete: boolean }): string {
+export interface KeysView {
+  /** Only the browser version has a keyboard to configure. */
+  show: boolean;
+  rebinding: LightId | null;
+  error: string | null;
+}
+
+function keyRows(s: Settings, k: KeysView): string {
+  const codes: Record<LightId, string> = { yellow: s.keyYellow, blue: s.keyBlue, green: s.keyGreen, red: s.keyRed };
+  const rows = (['yellow', 'blue', 'green', 'red'] as LightId[])
+    .map((l) => {
+      const listening = k.rebinding === l;
+      return `<div class="row key-row">
+        <span class="key-name"><i class="key-dot ${l}" aria-hidden="true"></i>${ru.settings.keyNames[l]}</span>
+        <button type="button" class="key-btn${listening ? ' listening' : ''}" data-action="rebind" data-arg="${l}">${listening ? ru.settings.keyPress : esc(keyLabel(codes[l]))}</button>
+      </div>`;
+    })
+    .join('');
+  return `<h3>${ru.settings.keys}</h3>
+    <p class="muted">${ru.settings.keysHint}</p>
+    ${rows}
+    ${k.error ? `<p class="status warn">${esc(k.error)}</p>` : ''}
+    <button type="button" class="secondary key-reset" data-action="keysReset">${ru.settings.keysReset}</button>`;
+}
+
+export function settingsView(
+  s: Settings,
+  opts: { vibration: boolean; playerId: number | null; canDelete: boolean; keys: KeysView },
+): string {
   return `${header(ru.settings.title)}<div class="scroll settings">
     <h3>${ru.settings.sound}</h3>
     ${toggle('music', ru.settings.music, s.music)}
@@ -259,6 +289,7 @@ export function settingsView(s: Settings, opts: { vibration: boolean; playerId: 
     ${s.steer === 'drag' ? slider('sens', ru.settings.sens, s.sens, 0.6, 1.8, 0.05) : ''}
     ${seg('layout', ru.settings.layout, ru.settings.layouts, s.layout)}
     ${seg('side', ru.settings.side, ru.settings.sides, s.side)}
+    ${opts.keys.show ? keyRows(s, opts.keys) : ''}
 
     <h3>${ru.settings.comfort}</h3>
     ${toggle('colorblind', ru.settings.colorblind, s.colorblind)}
@@ -295,12 +326,12 @@ export function confirmDeleteView(error: string | null): string {
 
 // ---------- Leaders ----------
 
-export function leadersShell(scope: 'week' | 'all' | 'duels'): string {
-  const tab = (id: 'week' | 'all' | 'duels', label: string): string =>
+export function leadersShell(scope: 'week' | 'all'): string {
+  const tab = (id: 'week' | 'all', label: string): string =>
     `<button role="tab" class="${scope === id ? 'on' : ''}" aria-selected="${scope === id}" data-action="lbScope" data-arg="${id}">${label}</button>`;
   return `${header(ru.leaders.title)}
-    <div class="tabs tabs-3" role="tablist">
-      ${tab('week', ru.leaders.week)}${tab('all', ru.leaders.all)}${tab('duels', ru.leaders.duels)}
+    <div class="tabs" role="tablist">
+      ${tab('week', ru.leaders.week)}${tab('all', ru.leaders.all)}
     </div>
     <p class="reset-line" id="lbReset"></p>
     <div class="scroll leaders" id="lbList">${skeleton()}</div>
@@ -369,6 +400,8 @@ export interface DuelView {
   status: 'offline' | 'connecting' | 'idle' | 'waiting' | 'none' | 'declined';
   online: number;
   waitingFor: string | null;
+  /** Last loaded duel rating (shown at once while a fresh copy loads). */
+  leadersHtml: { rows: string; me: string } | null;
 }
 
 export function duelsView(d: DuelView): string {
@@ -379,7 +412,7 @@ export function duelsView(d: DuelView): string {
   else if (d.status === 'none') status = ru.duel.none;
   else if (d.status === 'declined') status = ru.duel.declined;
   const canFind = d.status === 'idle' || d.status === 'none' || d.status === 'declined';
-  return `${header(ru.duel.title)}<div class="panel flat duel-panel">
+  return `${header(ru.duel.title)}<div class="scroll duel-scroll"><div class="panel flat duel-panel">
     <div class="duel-hero" aria-hidden="true">${ICON.swords}</div>
     <p>${ru.duel.lead}</p>
     <p class="muted">${ru.duel.rulesNote}</p>
@@ -390,7 +423,10 @@ export function duelsView(d: DuelView): string {
         ? `<button class="secondary" data-action="duelCancel">${ru.duel.cancel}</button>`
         : `<button class="primary" data-action="duelFind" ${canFind ? '' : 'disabled'}>${ru.duel.find}</button>`
     }
-  </div>`;
+    <h3 class="duel-lb-title">${ru.duel.leaders}</h3>
+    <div class="duel-lb" id="duelLbList">${d.leadersHtml?.rows ?? '<div class="lb-row skeleton"><span></span><span></span><span></span></div>'}</div>
+    <div class="me-card" id="duelLbMe">${d.leadersHtml?.me ?? ''}</div>
+  </div></div>`;
 }
 
 export function inviteView(from: { name: string | null; photo: string | null }, seconds: number): string {
@@ -447,6 +483,7 @@ export interface ResultData {
   seconds: number;
   record: boolean;
   canShare: boolean;
+  duel: { oppName: string; me: number; opp: number; oppOut: boolean } | null;
 }
 
 export function resultView(d: ResultData): string {
@@ -476,6 +513,15 @@ export function resultView(d: ResultData): string {
     <div class="big-score" id="resultScore" data-target="${d.score}">0</div>
     <div class="record ${d.record && d.score > 0 ? '' : 'hidden'}" id="resultRecord">${ru.result.record}</div>
     <p class="rank" id="resultRank"></p>
+    ${
+      d.duel
+        ? `<div class="duel-score" id="duelScore">
+        <div class="ds-side me"><small>${ru.duel.you}</small><b>${d.duel.me}</b></div>
+        <div class="ds-vs">:</div>
+        <div class="ds-side opp"><small>${esc(d.duel.oppName)}</small><b id="duelOppFinal">${d.duel.opp}</b><em id="duelOppState">${d.duel.oppOut ? '' : ru.duel.playing}</em></div>
+      </div>`
+        : ''
+    }
     <p class="duel-line" id="duelLine"></p>
     <dl class="stats" id="resultStats">
       <dt>${ru.result.best}</dt><dd id="resultBest">${d.best}</dd>
@@ -514,11 +560,11 @@ export function rankHtml(res: FinishResult): string {
 }
 
 export function tutorialDoneView(): string {
-  return `<div class="panel">
+  return `<div class="panel tut-done">
     <h2>${ru.tutorial.doneTitle}</h2>
     <p>${ru.tutorial.doneText}</p>
-    <button class="primary" data-action="afterTutorial">${ru.common.play}</button>
-    <button class="secondary" data-action="toMenu">${ru.common.menu}</button>
+    <button class="primary" data-action="toMenu">${ru.tutorial.doneMenu}</button>
+    <button class="secondary" data-action="afterTutorial">${ru.common.play}</button>
   </div>`;
 }
 

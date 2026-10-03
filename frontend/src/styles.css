@@ -21,6 +21,8 @@ body {
   height: 100%;
   overflow: hidden;
   overscroll-behavior: none;
+  /* The game owns every touch; only menu screens scroll (see .screen). */
+  touch-action: none;
   background: var(--page);
   color: var(--ink);
   font-family: var(--font);
@@ -36,7 +38,7 @@ body {
 }
 
 #stage {
-  height: 100dvh;
+  height: var(--app-h, 100dvh);
   display: flex;
   flex-direction: column;
   padding-top: var(--safe-top);
@@ -636,6 +638,7 @@ button.primary:disabled {
 .screen {
   position: absolute;
   inset: 0;
+  touch-action: pan-y;
   display: flex;
   flex-direction: column;
   padding: calc(12px + var(--safe-top)) 16px calc(16px + var(--safe-bottom));
@@ -2538,7 +2541,7 @@ body.wide.in-menu #controls {
 }
 .opp {
   position: absolute;
-  top: 54px;
+  top: 112px;
   right: 8px;
   display: none;
   border-radius: 10px;
@@ -2706,4 +2709,354 @@ body.wide .opp-label {
 
 .tap-hint {
   top: 15%;
+}
+
+/* ===== Tutorial: big cards that freeze the game, glowing target button ===== */
+.tut {
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  top: 100px;
+  z-index: 6;
+  display: none;
+  pointer-events: none;
+}
+.tut.on {
+  display: block;
+}
+.tut-card {
+  pointer-events: auto;
+  padding: 14px 16px 16px;
+  border-radius: 20px;
+  background: rgba(12, 16, 24, 0.97);
+  border: 2px solid var(--accent);
+  box-shadow:
+    0 14px 40px rgba(0, 0, 0, 0.6),
+    0 0 0 6px rgba(255, 214, 64, 0.18);
+  text-align: center;
+  animation: tut-in 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+@keyframes tut-in {
+  from {
+    opacity: 0;
+    transform: translateY(-16px) scale(0.94);
+  }
+}
+.tut-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+  font-size: 12px;
+  font-weight: 700;
+}
+.tut-badge {
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #2a2208;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.tut-step {
+  color: var(--ink-dim);
+}
+.tut-card h3 {
+  margin: 4px 0 8px;
+  font-size: 22px;
+  line-height: 1.15;
+}
+.tut-card p {
+  margin: 0 0 10px;
+  font-size: 15px;
+  line-height: 1.4;
+  color: var(--ink);
+}
+.tut-card p.tut-next {
+  color: var(--accent);
+  font-weight: 700;
+}
+.tut-visual {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin: 4px 0 10px;
+}
+.tut-visual kbd {
+  min-width: 42px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: #e9e5d8;
+  color: #1a1d24;
+  font: 800 20px/1 var(--font);
+  box-shadow: 0 4px 0 #8f8b7c;
+}
+.tut-or {
+  color: var(--ink-dim);
+  font-size: 13px;
+}
+.tut-swipe {
+  font-size: 34px;
+  letter-spacing: 0.15em;
+  animation: tut-swipe 1.6s ease-in-out infinite;
+}
+@keyframes tut-swipe {
+  0%,
+  100% {
+    transform: translateX(-14px);
+  }
+  50% {
+    transform: translateX(14px);
+  }
+}
+.tut-ok {
+  width: 100%;
+  margin-top: 4px;
+}
+.tut-press {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: rgba(255, 214, 64, 0.16);
+  color: var(--accent);
+  font-weight: 800;
+  font-size: 15px;
+}
+.tut-arrow {
+  animation: tut-bob 0.8s ease-in-out infinite;
+}
+@keyframes tut-bob {
+  50% {
+    transform: translateY(5px);
+  }
+}
+body.tut-focus .light-btn:not(.tut-target) {
+  opacity: 0.4;
+}
+.light-btn.tut-target {
+  z-index: 5;
+  outline: 4px solid #fff;
+  outline-offset: 4px;
+  box-shadow:
+    0 0 0 12px rgba(255, 214, 64, 0.32),
+    0 0 30px 10px rgba(255, 214, 64, 0.8),
+    0 5px 0 var(--edge);
+  animation: tut-pulse 0.9s ease-in-out infinite;
+}
+@keyframes tut-pulse {
+  50% {
+    transform: scale(1.08);
+  }
+}
+body.reduced .light-btn.tut-target,
+body.reduced .tut-swipe,
+body.reduced .tut-arrow {
+  animation: none;
+}
+/* Tutorial progress line: bigger and bolder than the usual hint. */
+body.tutorial .hint {
+  top: 104px;
+  padding: 10px 16px;
+  font-size: 16px;
+  font-weight: 700;
+  background: rgba(255, 214, 64, 0.95);
+  color: #2a2208;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+}
+
+/* ===== Key bindings (browser settings) ===== */
+.key-row {
+  gap: 10px;
+}
+.key-name {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.key-dot {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #f2b62d;
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.25);
+}
+.key-dot.blue {
+  background: #3e8bff;
+}
+.key-dot.green {
+  background: #34bf6c;
+}
+.key-dot.red {
+  background: #e8394a;
+}
+.key-btn {
+  flex: none;
+  min-width: 96px;
+  height: 38px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 10px;
+  background: #e9e5d8;
+  color: #1a1d24;
+  font: 800 15px/1 var(--font);
+  box-shadow: 0 3px 0 #8f8b7c;
+  cursor: pointer;
+}
+.key-btn.listening {
+  background: var(--accent);
+  color: #2a2208;
+  animation: key-wait 1s ease-in-out infinite;
+}
+@keyframes key-wait {
+  50% {
+    box-shadow: 0 0 0 5px rgba(255, 214, 64, 0.35);
+  }
+}
+.key-reset {
+  margin: 4px 0 12px;
+  width: 100%;
+}
+
+/* ===== Duel scoreboard on the field ===== */
+.duel-bar {
+  position: absolute;
+  top: 54px;
+  left: 8px;
+  right: 8px;
+  z-index: 4;
+  display: none;
+  align-items: stretch;
+  justify-content: center;
+  gap: 6px;
+  pointer-events: none;
+}
+body.duel .duel-bar {
+  display: flex;
+}
+.duel-side {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 12px;
+  border-radius: 12px;
+  background: rgba(10, 14, 20, 0.78);
+  border: 2px solid transparent;
+  transition: border-color 0.2s, background 0.2s;
+}
+.duel-side.me {
+  justify-content: flex-start;
+}
+.duel-side.opp {
+  justify-content: flex-end;
+  flex-direction: row;
+}
+.duel-side b {
+  font-size: 26px;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.duel-side.me b {
+  color: #7fc0ff;
+}
+.duel-side.opp b {
+  color: #ff8f9a;
+}
+.duel-side small {
+  min-width: 0;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ink-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.duel-vs {
+  align-self: center;
+  font-weight: 800;
+  font-size: 22px;
+}
+.duel-bar.lead-me .duel-side.me {
+  border-color: #ffd640;
+  background: rgba(60, 50, 10, 0.85);
+}
+.duel-bar.lead-opp .duel-side.opp {
+  border-color: #ffd640;
+  background: rgba(60, 50, 10, 0.85);
+}
+.duel-bar.opp-out .duel-side.opp small::after {
+  content: ' · выбыл';
+  color: #ff8f9a;
+}
+
+/* Result card: both scores side by side */
+.duel-score {
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
+  gap: 10px;
+  margin: 6px 0 8px;
+  padding: 10px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.07);
+}
+.ds-side {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+.ds-side small {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ink-dim);
+}
+.ds-side b {
+  font-size: 40px;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+}
+.ds-side.me b {
+  color: #7fc0ff;
+}
+.ds-side.opp b {
+  color: #ff8f9a;
+}
+.ds-side em {
+  min-height: 15px;
+  font-size: 12px;
+  font-style: normal;
+  color: var(--ink-dim);
+}
+.ds-vs {
+  align-self: center;
+  font-size: 30px;
+  font-weight: 800;
+}
+.duel-score.win {
+  background: rgba(60, 160, 90, 0.28);
+}
+.duel-score.loss {
+  background: rgba(200, 60, 70, 0.26);
+}
+
+/* Duel rating inside the Duels screen */
+.duel-scroll .duel-panel {
+  max-width: 100%;
+}
+.duel-lb-title {
+  margin: 20px 0 8px;
 }

@@ -61,4 +61,6 @@ export type SimEvent =
   | { type: 'close'; x: number; y: number }
   | { type: 'pickup'; item: number; x: number; y: number }
   | { type: 'itemSpawn'; item: number }
-  | { type: 'wall'; x: number; y: number; side: number };
+  | { type: 'wall'; x: number; y: number; side: number }
+  /** Tutorial only: a mistake was forgiven (the hero was put back, or the shield switched on). */
+  | { type: 'rescue'; reason: 'fall' | 'red' };
