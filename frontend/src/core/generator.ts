@@ -1,5 +1,8 @@
 import { gameConfig, isColorUnlocked, type ColorId } from './gameConfig';
 import { Rng } from './prng';
+
+/** Soft walls: platforms stay between the side buildings. */
+const M = gameConfig.world.margin;
 import type { Platform } from './types';
 
 const ALL_COLORS: ColorId[] = ['yellow', 'blue', 'green'];
@@ -78,8 +81,8 @@ export class Generator {
   private commonX(y: number): [number, number] | null {
     const half = gameConfig.platform.width / 2;
     const W = gameConfig.world.width;
-    let lo = half + 4;
-    let hi = W - half - 4;
+    let lo = M + half + 4;
+    let hi = W - M - half - 4;
     const from = this.prevSafe.length ? this.prevSafe : [{ x: this.anchorX, y: this.anchorY }];
     for (const p of from) {
       const dy = y - p.y;
@@ -108,10 +111,10 @@ export class Generator {
         const goRight = safeX >= this.anchorX;
         const offset = this.rng.range(96, 140);
         let redX = goRight ? Math.min(this.anchorX, safeX) - offset : Math.max(this.anchorX, safeX) + offset;
-        if (redX < half + 4 || redX > W - half - 4) {
+        if (redX < M + half + 4 || redX > W - M - half - 4) {
           redX = goRight ? Math.max(this.anchorX, safeX) + offset : Math.min(this.anchorX, safeX) - offset;
         }
-        if (redX >= half + 4 && redX <= W - half - 4) {
+        if (redX >= M + half + 4 && redX <= W - M - half - 4) {
           out.push(this.make(redX, this.anchorY + d1, 'red', null, false, tier));
           const safe = this.makeColored(safeX, safeY, tier);
           out.push(safe);
@@ -147,7 +150,7 @@ export class Generator {
       const alt = x + (x < this.anchorX ? -40 : 40);
       if (alt >= range[0] && alt <= range[1]) x = alt;
     }
-    x = clamp(x, half + 4, W - half - 4);
+    x = clamp(x, M + half + 4, W - M - half - 4);
     const p = this.makeColored(x, y, tier);
     out.push(p);
     this.setAnchor(p);
@@ -184,7 +187,7 @@ export class Generator {
     const W = gameConfig.world.width;
     const t = gameConfig.tiers[tier];
     for (let attempt = 0; attempt < 6; attempt++) {
-      const x = this.rng.range(half + 4, W - half - 4);
+      const x = this.rng.range(M + half + 4, W - M - half - 4);
       const y = main.y + this.rng.range(-22, 30);
       // Only where one platform above can still be reached from every safe platform of the batch.
       if (!this.successorExists({ x, y })) continue;

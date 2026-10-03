@@ -12,9 +12,12 @@ import { ApiError } from './net/api';
 import { Session, type RunTicket, type Stats } from './net/session';
 import { haptic, hapticsSupported, initHaptics } from './platform/haptics';
 import { ads, DEFAULT_ADS, type AdsConfig } from './platform/ads';
+import { canShare, initShare, shareStory, shareWall } from './platform/share';
 import { initVk } from './platform/vk';
+import { DuelClient, type DuelMsg, type DuelPlayer } from './net/duel';
 import { scenes } from './render/palette';
-import { drawHeroBody, drawItem, ITEM_BY_TIER, itemCount, outfitFromMask, type Item } from './render/hero';
+import { drawItem, ITEM_BY_TIER, itemCount, outfitFromMask, type Item } from './render/hero';
+import { drawHeroFront } from './render/heroFront';
 import { Renderer } from './render/renderer';
 import { applyControls } from './ui/controlsLayout';
 import { $ } from './ui/dom';
@@ -45,6 +48,7 @@ const walletIcon = $('walletIcon');
 const bonusEl = $('bonus');
 
 const renderer = new Renderer(canvas);
+const backdrop = $<HTMLCanvasElement>('backdrop');
 const input = new InputController([field]);
 const session = new Session();
 const router = new Router($('screens'));
@@ -53,6 +57,9 @@ const isTouch = window.matchMedia('(pointer: coarse)').matches;
 // ---------- Game state ----------
 
 type Mode = 'menu' | 'run' | 'tutorial' | 'result';
+// The live duel in progress (declared early: layout() reads it).
+// eslint-disable-next-line prefer-const
+let duel: DuelRun | null = null;
 let mode: Mode = 'menu';
 let sim = new Sim(randomSeed(), 700);
 let paused = false;
@@ -67,13 +74,26 @@ let resumeToken = 0;
 
 // ---------- Layout ----------
 
+/** Desktop browser with a wide window: bigger field, full-screen scene, buttons beside the field. */
+function isWide(): boolean {
+  return window.innerWidth >= 900 && window.innerWidth > window.innerHeight * 1.2;
+}
+
 function layout(): void {
+  const wide = isWide();
+  if (document.body.classList.contains('wide') !== wide) {
+    document.body.classList.toggle('wide', wide);
+    applySettings(settingsStore.get());
+    return; // applySettings calls layout again with the new arrangement
+  }
   const rect = field.getBoundingClientRect();
   const W = gameConfig.world.width;
   const { minHeight, maxHeight } = gameConfig.world;
-  const viewH = Math.max(minHeight, Math.min(maxHeight, (W * rect.height) / Math.max(1, rect.width)));
-  // On wide desktop screens the field stays a vertical column (~480 CSS px max).
-  const scale = Math.min(rect.width / W, rect.height / viewH, 480 / W);
+  // The world is the same width everywhere (same game for every player, rule 2.3.7);
+  // a wide screen gets a taller, bigger field and the scene around it.
+  // Duels use one fixed view height so both players' simulations stay identical.
+  const viewH = wide || duel ? 700 : Math.max(minHeight, Math.min(maxHeight, (W * rect.height) / Math.max(1, rect.width)));
+  const scale = wide ? Math.min(rect.height / viewH, rect.width / W) : Math.min(rect.width / W, rect.height / viewH, 480 / W);
   const cssW = Math.floor(W * scale);
   const cssH = Math.floor(viewH * scale);
   board.style.width = `${cssW}px`;
@@ -105,6 +125,7 @@ for (const light of LIGHTS) {
   const b = document.createElement('button');
   b.className = 'light-btn';
   b.dataset.light = light;
+  b.dataset.key = light === 'red' ? 'Пробел' : light === 'yellow' ? '1' : light === 'blue' ? '2' : '3';
   b.setAttribute('aria-label', ru.colors[light]);
   buttonsEl.appendChild(b);
   buttons.set(light, b);
@@ -140,7 +161,9 @@ function renderButtons(): void {
 // ---------- Settings ----------
 
 function applySettings(s: Settings, changed?: (keyof Settings)[]): void {
-  applyControls(s, { controls: controlsEl, buttons: buttonsEl, board, shield: buttons.get('red')! });
+  // Beside the wide field the buttons stand in one column.
+  const placement = document.body.classList.contains('wide') ? { layout: 'row' as const, side: 'left' as const } : s;
+  applyControls(placement, { controls: controlsEl, buttons: buttonsEl, board, shield: buttons.get('red')! });
   input.mode = s.steer;
   input.sensitivity = s.sens;
   board.classList.toggle('zones', s.steer === 'zones');
@@ -168,6 +191,7 @@ applySettings(settingsStore.get());
 let prevLight: LightId | null = null;
 
 let lastMult = 1;
+let lastWallSound = 0;
 let captionTimer = 0;
 renderer.onCaption = (kind, value) => {
   const el = document.getElementById('caption');
@@ -266,11 +290,11 @@ function showPress(outlet: string, title: string, kind: 'news' | 'cover'): void 
 }
 
 let toastTimer = 0;
-function toast(text: string): void {
+function toast(text: string, ms = 1600): void {
   toastEl.textContent = text;
   toastEl.classList.add('on');
   clearTimeout(toastTimer);
-  toastTimer = window.setTimeout(() => toastEl.classList.remove('on'), 1600);
+  toastTimer = window.setTimeout(() => toastEl.classList.remove('on'), ms);
 }
 
 function handleUiEvents(events: SimEvent[]): void {
@@ -310,12 +334,22 @@ function handleUiEvents(events: SimEvent[]): void {
       lastMult = 1;
     } else if (e.type === 'close') {
       audio.play('close');
+    } else if (e.type === 'wall') {
+      const now = performance.now();
+      if (now - lastWallSound > 250) {
+        lastWallSound = now;
+        audio.play('wall');
+      }
     } else if (e.type === 'death') {
       audio.stopTension();
       audio.play('death');
       if (settingsStore.get().vibration) haptic('heavy');
       if (mode === 'tutorial') tutorialDeath();
       else deathTimer = 0;
+      if (duel) {
+        flushDuelInputs(true);
+        duelClient.send({ t: 'dead', score: sim.score });
+      }
     } else if (e.type === 'aura' && mode === 'tutorial' && tutStep === 3) {
       advanceTutorial();
     }
@@ -425,6 +459,7 @@ function startTutorial(): void {
 // ---------- Runs ----------
 
 function newSim(seed: number, tutorial = false, items = false): void {
+  renderer.cinematic = duel ? false : settingsStore.get().cinematic;
   // Every run starts with nothing worn; items found along the way count for this run only.
   sim = new Sim(seed, sim.viewH, { tutorial, items });
   renderer.ownedMask = 0;
@@ -485,7 +520,10 @@ async function startRun(): Promise<void> {
   mode = 'run';
   router.clear();
   session.event('run_start');
-  if (!ticket && session.mode !== 'outside') toast(ru.result.unranked);
+  if (!ticket && session.mode !== 'outside') {
+    const why = session.ticketError ? ru.result.reasons2[session.ticketError] : '';
+    toast(why ? `${ru.result.unranked}: ${why}` : ru.result.unranked, 3200);
+  }
 }
 
 // ---------- Ads policy (numbers come from the server) ----------
@@ -545,6 +583,9 @@ let resultData: V.ResultData | null = null;
 
 function finishRun(): void {
   mode = 'result';
+  finishedDuel = duel;
+  duelOutcome = null;
+  if (duel) endDuelView();
   adState.completed++;
   adState.runsSince++;
   saveAdState();
@@ -574,13 +615,17 @@ function finishRun(): void {
     maxCombo: sim.maxCombo,
     seconds: Math.floor(sim.runTime),
     record,
+    canShare: sim.score > 0 && (canShare().wall || canShare().story),
   };
+  shareData = { score: sim.score, tier: sim.tier, mask: renderer.ownedMask };
   router.reset('result');
+  if (finishedDuel) setDuelLine(finishedDuel.oppLeft ? ru.duel.oppLeft : ru.duel.pending);
 
   const rankEl = document.getElementById('resultRank');
   if (!rankEl) return;
   if (!runTicket) {
-    rankEl.textContent = session.mode === 'outside' ? '' : ru.result.unranked;
+    const why = session.ticketError ? ru.result.reasons2[session.ticketError] : '';
+    rankEl.textContent = session.mode === 'outside' ? '' : why ? `${ru.result.unranked}: ${why}` : ru.result.unranked;
     return;
   }
   rankEl.textContent = ru.result.saving;
@@ -608,8 +653,73 @@ function finishRun(): void {
           if (bestEl) bestEl.textContent = String(res.best_all);
         }
       }
+      if (res?.duel && finishedDuel) {
+        const myId = String(session.data?.profile.id ?? '');
+        if (res.duel.status === 'done' && res.duel.outcome) showDuelOutcome(res.duel.outcome[myId] ?? 'draw');
+        else if (!duelOutcome) setDuelLine(ru.duel.pending);
+      }
       session.prefetch();
     });
+}
+
+let shareData: { score: number; tier: number; mask: number } | null = null;
+
+/**
+ * A 1080x1920 story card: the scene's colors, the hero facing the viewer in the run's
+ * outfit, the score and the reached place, and a call to beat it.
+ */
+function buildStoryImage(score: number, tier: number, mask: number): string {
+  const c = document.createElement('canvas');
+  c.width = 1080;
+  c.height = 1920;
+  const g = c.getContext('2d')!;
+  const sc = scenes[Math.min(tier, scenes.length - 1)];
+  const bg = g.createLinearGradient(0, 0, 0, 1920);
+  bg.addColorStop(0, sc.skyTop);
+  bg.addColorStop(1, sc.skyBottom);
+  g.fillStyle = bg;
+  g.fillRect(0, 0, 1080, 1920);
+  // Soft light behind the hero.
+  const glow = g.createRadialGradient(540, 980, 40, 540, 980, 520);
+  glow.addColorStop(0, 'rgba(255,230,160,0.45)');
+  glow.addColorStop(1, 'rgba(255,230,160,0)');
+  g.fillStyle = glow;
+  g.fillRect(0, 400, 1080, 1200);
+  const font = "'Rubik Variable', Rubik, system-ui, sans-serif";
+  g.textAlign = 'center';
+  g.fillStyle = '#ffffff';
+  g.font = `800 64px ${font}`;
+  g.fillText(ru.appTitle, 540, 200);
+  g.font = `600 46px ${font}`;
+  g.fillStyle = 'rgba(255,255,255,0.85)';
+  g.fillText(ru.share.storyLead, 540, 300);
+  g.fillStyle = '#FFD640';
+  g.font = `900 190px ${font}`;
+  g.fillText(String(score), 540, 470);
+  g.font = `700 50px ${font}`;
+  g.fillStyle = '#ffffff';
+  g.fillText(ru.share.points(score), 540, 545);
+  // Hero
+  g.save();
+  g.translate(540, 1450);
+  g.scale(11, 11);
+  drawHeroFront(g, outfitFromMask(mask), 1, 'wave', 'grin');
+  g.restore();
+  // Place
+  g.fillStyle = 'rgba(10,12,18,0.7)';
+  g.beginPath();
+  g.roundRect(140, 1530, 800, 170, 40);
+  g.fill();
+  g.fillStyle = 'rgba(255,255,255,0.75)';
+  g.font = `600 40px ${font}`;
+  g.fillText(ru.result.reachedTitle, 540, 1595);
+  g.fillStyle = '#ffffff';
+  g.font = `800 56px ${font}`;
+  g.fillText(ru.tiers[tier], 540, 1665);
+  g.fillStyle = '#FFD640';
+  g.font = `800 60px ${font}`;
+  g.fillText(ru.share.storyCta, 540, 1810);
+  return c.toDataURL('image/jpeg', 0.9);
 }
 
 /** The hero portrait for the glossy magazine cover on high tiers. */
@@ -620,9 +730,10 @@ function drawCoverHero(c: HTMLCanvasElement, tier: number): void {
   const g = c.getContext('2d');
   if (!g) return;
   g.scale(dpr, dpr);
-  g.translate(36, 90);
-  g.scale(1.45, 1.45);
-  drawHeroBody(g, { tier, light: '255,214,64', neutral: true, sinceLand: 1, vy: 0, time: 0, face: 'grin', gesture: 'pocket', outfit: outfitFromMask(renderer.ownedMask) });
+  g.translate(36, 92);
+  g.scale(1.3, 1.3);
+  drawHeroFront(g, outfitFromMask(renderer.ownedMask), 1, 'hips', 'grin');
+  void tier;
 }
 
 let confettiTimer = 0;
@@ -664,6 +775,11 @@ function lastTier(): number {
 }
 
 function goMenu(): void {
+  if (duel) {
+    // Leaving a duel counts as a loss.
+    duelClient.send({ t: 'leave' });
+    endDuelView();
+  }
   mode = 'menu';
   ticket = null;
   newSim(randomSeed());
@@ -695,58 +811,32 @@ function sizeCanvas(c: HTMLCanvasElement): CanvasRenderingContext2D | null {
   return g;
 }
 
-/** Draws the hero standing on a small podium, alive: breathing, blinking, waving, hopping. */
-function drawStageHero(c: HTMLCanvasElement, tier: number, t: number, silhouette = false, still = false, mask = ownedMask()): void {
+/** The hero facing the player on a small podium: breathing, blinking, waving now and then. */
+function drawStageHero(c: HTMLCanvasElement, _tier: number, t: number, _silhouette = false, still = false, mask = ownedMask()): void {
   const g = sizeCanvas(c);
   if (!g) return;
   const w = c.clientWidth;
   const h = c.clientHeight;
   g.clearRect(0, 0, w, h);
-  const scale = Math.min(w / 66, h / 76);
-  const cx = w / 2 - 9 * scale;
-  const base = h - 10 * scale * 0.35 - 8;
-  // Podium
-  g.fillStyle = 'rgba(0,0,0,0.25)';
+  const scale = Math.min(w / 44, h / 74);
+  const base = h - 6 * scale;
+  // Podium: the soles stand exactly on its top surface.
+  g.fillStyle = '#565C6B';
   g.beginPath();
-  g.ellipse(w / 2, base + 4, 18 * scale, 3.2 * scale, 0, 0, Math.PI * 2);
+  g.roundRect(w / 2 - 16 * scale, base, 32 * scale, 4.6 * scale, 2.3 * scale);
   g.fill();
-  if (!silhouette) {
-    g.fillStyle = '#565C6B';
-    g.beginPath();
-    g.roundRect(w / 2 - 17 * scale, base - 1, 34 * scale, 5 * scale, 2.5 * scale);
-    g.fill();
-    g.fillStyle = '#8C93A3';
-    g.beginPath();
-    g.roundRect(w / 2 - 17 * scale, base - 1, 34 * scale, 3.4 * scale, 2.5 * scale);
-    g.fill();
-  }
-  // A little hop every few seconds, with squash on landing.
+  g.fillStyle = '#8C93A3';
+  g.beginPath();
+  g.roundRect(w / 2 - 16 * scale, base, 32 * scale, 3 * scale, 2.3 * scale);
+  g.fill();
+  // A little hop every few seconds.
   const cycle = still ? 3 : t % 6;
-  const hop = cycle > 5.3 ? Math.sin(((cycle - 5.3) / 0.7) * Math.PI) * 9 * scale : 0;
-  const sinceLand = cycle > 5.3 ? 1 : cycle;
-  const gesture = still ? undefined : cycle < 2.2 ? 'wave' : tier >= 8 && cycle < 4 ? 'tie' : undefined;
+  const hop = cycle > 5.3 ? Math.sin(((cycle - 5.3) / 0.7) * Math.PI) * 6 * scale : 0;
   g.save();
-  g.translate(cx, base - hop);
+  g.translate(w / 2, base - hop);
   g.scale(scale, scale);
-  drawHeroBody(g, {
-    tier,
-    light: '255,214,64',
-    neutral: true,
-    sinceLand,
-    vy: hop > 0 ? 300 : 0,
-    time: t,
-    face: still ? 'normal' : cycle < 2.2 ? 'grin' : 'normal',
-    gesture,
-    noBeam: true,
-    outfit: outfitFromMask(mask),
-  });
+  drawHeroFront(g, outfitFromMask(mask), t, still ? 'hips' : 'idle', !still && cycle < 2.2 ? 'grin' : 'normal');
   g.restore();
-  if (silhouette) {
-    g.globalCompositeOperation = 'source-atop';
-    g.fillStyle = 'rgba(20,24,34,0.92)';
-    g.fillRect(0, 0, w, h);
-    g.globalCompositeOperation = 'source-over';
-  }
 }
 
 function drawShowcase(t: number): void {
@@ -844,7 +934,7 @@ function resume(): void {
 
 let consentError: string | null = null;
 let deleteError: string | null = null;
-let lbScope: 'week' | 'all' = 'week';
+let lbScope: 'week' | 'all' | 'duels' = 'week';
 let bootState = { progress: 0, label: ru.loading.fonts, error: null as string | null };
 let docKind: 'terms' | 'privacy' | 'rules' = 'rules';
 
@@ -895,6 +985,23 @@ router.register('result', {
     if (resultData?.record && resultData.score > 0) celebrate();
   },
 });
+router.register('duels', {
+  html: () =>
+    V.duelsView({
+      status: session.mode !== 'online' ? 'offline' : !duelClient.connected ? 'connecting' : duelUi,
+      online: duelClient.online,
+      waitingFor: duelWaitingFor,
+    }),
+  cls: 'solid',
+  mount: () => {
+    if (session.mode === 'online') duelClient.connect();
+  },
+});
+router.register('invite', {
+  html: () => (invite ? V.inviteView(invite.from, invite.timeout) : ''),
+  modal: true,
+});
+router.register('share', { html: () => V.shareView(canShare()), modal: true });
 router.register('tutorialDone', { html: () => V.tutorialDoneView(), modal: true });
 let stubKind: V.StubKind = 'offline';
 router.register('stub', { html: () => V.stubView(stubKind, errorCode()), cls: 'solid' });
@@ -906,6 +1013,8 @@ function errorCode(): string | null {
 }
 
 router.onChange = (top) => {
+  // Players who are in a run are not offered as duel opponents.
+  duelClient.send({ t: 'state', v: mode === 'run' || mode === 'tutorial' ? 'run' : 'idle' });
   document.body.classList.toggle('playing', top === null && (mode === 'run' || mode === 'tutorial'));
   document.body.classList.toggle('tutorial', mode === 'tutorial');
   document.body.classList.toggle('in-menu', top !== null && !['pause', 'result', 'rulesCard', 'tutorialDone'].includes(top));
@@ -1003,7 +1112,7 @@ const actions: Record<string, (arg: string, el: HTMLElement) => void> = {
   resume: () => resume(),
   setSeg: (arg, el) => settingsStore.set({ [el.dataset.key as keyof Settings]: arg } as Partial<Settings>),
   lbScope: (arg) => {
-    lbScope = arg as 'week' | 'all';
+    lbScope = arg as 'week' | 'all' | 'duels';
     router.refresh();
   },
   lbRetry: () => {
@@ -1017,6 +1126,35 @@ const actions: Record<string, (arg: string, el: HTMLElement) => void> = {
     if (SUPPORT_URL) window.open(SUPPORT_URL, '_blank', 'noopener');
   },
   acceptConsent: () => void acceptConsent(),
+  duelFind: () => {
+    duelUi = 'waiting';
+    duelWaitingFor = null;
+    duelClient.send({ t: 'find' });
+    router.refresh();
+  },
+  duelCancel: () => {
+    duelUi = 'idle';
+    duelClient.send({ t: 'cancel' });
+    router.refresh();
+  },
+  duelAccept: () => {
+    duelClient.send({ t: 'accept' });
+    router.back();
+  },
+  duelDecline: () => {
+    invite = null;
+    duelClient.send({ t: 'decline' });
+    router.back();
+  },
+  shareWall: () => {
+    if (!shareData) return;
+    void shareWall(ru.share.wallText(shareData.score, ru.tiers[shareData.tier])).then(() => router.back());
+  },
+  shareStory: () => {
+    if (!shareData) return;
+    const img = buildStoryImage(shareData.score, shareData.tier, shareData.mask);
+    void shareStory(img).then(() => router.back());
+  },
   declineConsent: () => router.open('declined'),
   deleteData: () => void deleteData(),
   reconnect: () => void reconnect().then(() => router.refresh()),
@@ -1147,6 +1285,7 @@ async function boot(): Promise<void> {
   ]).catch(() => undefined);
   setBoot(0.35, ru.loading.graphics);
   await initHaptics();
+  await initShare();
   await new Promise((r) => requestAnimationFrame(r));
   setBoot(0.6, ru.loading.profile);
   await session.bootstrap();
@@ -1163,8 +1302,195 @@ async function boot(): Promise<void> {
 }
 
 function afterBoot(): void {
+  if (session.mode === 'online') duelClient.connect();
   if (!hasConsent()) router.reset('consent');
   else goMenu();
+}
+
+// ---------- Duels ----------
+
+interface DuelRun {
+  id: string;
+  seed: number;
+  startAt: number;
+  opponent: DuelPlayer;
+  opp: Sim;
+  oppRenderer: Renderer;
+  queue: number[][];
+  upto: number;
+  oppAxis: number;
+  sent: number;
+  lastSend: number;
+  oppDeadShown: boolean;
+  oppLeft: boolean;
+}
+
+const duelClient = new DuelClient();
+let finishedDuel: DuelRun | null = null;
+let duelOutcome: 'win' | 'loss' | 'draw' | null = null;
+let duelUi: V.DuelView['status'] = 'idle';
+let duelWaitingFor: string | null = null;
+let invite: { from: DuelPlayer; timeout: number } | null = null;
+const oppCanvas = $<HTMLCanvasElement>('opp');
+const oppName = $('oppName');
+const oppScore = $('oppScore');
+
+duelClient.onStatus = () => {
+  if (router.top === 'duels') router.refresh();
+};
+
+duelClient.onMessage = (m: DuelMsg) => {
+  switch (m.t) {
+    case 'none':
+      duelUi = 'none';
+      break;
+    case 'waiting':
+      duelUi = 'waiting';
+      duelWaitingFor = m.to.name;
+      break;
+    case 'declined':
+      duelUi = 'declined';
+      break;
+    case 'invite':
+      // Only offered while not playing; the invite card opens over any menu screen.
+      if (mode === 'run' || mode === 'tutorial') {
+        duelClient.send({ t: 'decline' });
+        return;
+      }
+      invite = { from: m.from, timeout: m.timeout };
+      audio.play('unlock');
+      router.open('invite');
+      break;
+    case 'invite_cancel':
+      invite = null;
+      if (router.top === 'invite') router.back();
+      break;
+    case 'start':
+      void startDuel(m);
+      break;
+    case 'inputs':
+      if (duel) {
+        for (const e of m.log) duel.queue.push(e);
+        duel.upto = Math.max(duel.upto, m.upto);
+      }
+      break;
+    case 'opp_dead':
+      break;
+    case 'opp_left': {
+      const d = duel ?? finishedDuel;
+      if (d) {
+        d.oppLeft = true;
+        toast(ru.duel.oppLeft, 2500);
+        if (!duel) setDuelLine(ru.duel.oppLeft);
+      }
+      break;
+    }
+    case 'result':
+      showDuelOutcome(m.outcome);
+      break;
+  }
+};
+
+async function startDuel(m: Extract<DuelMsg, { t: 'start' }>): Promise<void> {
+  invite = null;
+  duelUi = 'idle';
+  router.reset('preparing');
+  ticket = { run_id: m.ticket.run_id, seed: m.seed, started_at: m.ticket.started_at, token: m.ticket.token };
+  const oppRenderer = new Renderer(oppCanvas);
+  oppRenderer.reducedEffects = true;
+  oppRenderer.cinematic = false;
+  duel = {
+    id: m.duel,
+    seed: m.seed,
+    startAt: m.start_at,
+    opponent: m.opponent,
+    opp: new Sim(m.seed, 700, { items: true }),
+    oppRenderer,
+    queue: [],
+    upto: 0,
+    oppAxis: 0,
+    sent: 0,
+    lastSend: 0,
+    oppDeadShown: false,
+    oppLeft: false,
+  };
+  finishedDuel = null;
+  duelOutcome = null;
+  oppName.textContent = m.opponent.name || ru.duel.player;
+  document.body.classList.add('duel');
+  newSim(m.seed, false, true);
+  sizeOpp();
+  // Both start at the same moment (server time + countdown).
+  const wait = Math.max(1200, m.start_at - Date.now());
+  await new Promise((r) => setTimeout(r, wait));
+  mode = 'run';
+  router.clear();
+  session.event('run_start');
+}
+
+function sizeOpp(): void {
+  if (!duel) return;
+  const wide = document.body.classList.contains('wide');
+  const boardW = board.clientWidth;
+  const w = wide ? Math.min(260, Math.max(160, (window.innerWidth - boardW) / 2 - 60)) : Math.round(boardW * 0.3);
+  const s = w / gameConfig.world.width;
+  duel.oppRenderer.resize(w, Math.round(700 * s), s);
+}
+
+/** Re-simulates the opponent from the relayed inputs, and sends ours ~10 times a second. */
+function duelFrame(dt: number): void {
+  const d = duel!;
+  void dt;
+  let steps = 0;
+  while (d.opp.tick < d.upto && steps < 40) {
+    let press: LightId | null = null;
+    while (d.queue.length && d.queue[0][0] <= d.opp.tick) {
+      const e = d.queue.shift()!;
+      if (e[0] === d.opp.tick) {
+        d.oppAxis = e[1] / 8;
+        if (e[2] > 0) press = (['yellow', 'blue', 'green', 'red'] as LightId[])[e[2] - 1];
+      }
+    }
+    d.opp.step({ axis: d.oppAxis, press });
+    d.oppRenderer.handleEvents(d.opp.events, d.opp);
+    steps++;
+  }
+  d.oppRenderer.ownedMask = d.opp.owned;
+  d.oppRenderer.draw(d.opp, 1, 1 / 60);
+  oppScore.textContent = String(d.opp.score);
+  if (d.opp.dead && !d.oppDeadShown) {
+    d.oppDeadShown = true;
+    toast(ru.duel.oppDead(d.opp.score), 2200);
+  }
+  flushDuelInputs(false);
+}
+
+function flushDuelInputs(force: boolean): void {
+  const d = duel;
+  if (!d) return;
+  const now = performance.now();
+  if (!force && now - d.lastSend < 100) return;
+  d.lastSend = now;
+  const log = sim.inputLog.slice(d.sent);
+  d.sent = sim.inputLog.length;
+  duelClient.send({ t: 'inputs', upto: sim.tick, log });
+}
+
+function endDuelView(): void {
+  duel = null;
+  document.body.classList.remove('duel');
+}
+
+function setDuelLine(text: string): void {
+  const el = document.getElementById('duelLine');
+  if (el) el.textContent = text;
+}
+
+function showDuelOutcome(outcome: 'win' | 'loss' | 'draw'): void {
+  duelOutcome = outcome;
+  setDuelLine(outcome === 'win' ? ru.duel.win : outcome === 'loss' ? ru.duel.loss : ru.duel.draw);
+  if (outcome === 'win') audio.play('fanfare');
+  if (session.data && outcome === 'win') session.data.stats.duel_wins = (session.data.stats.duel_wins ?? 0) + 1;
 }
 
 // ---------- Main loop ----------
@@ -1199,9 +1525,11 @@ function frame(now: number): void {
       acc -= DT;
     }
   }
+  if (duel) duelFrame(realDt);
 
   const renderDt = paused ? 0 : renderer.cineActive || mode === 'menu' ? realDt : realDt * scale;
   renderer.draw(sim, active && !renderer.cineActive ? acc / DT : 1, renderDt);
+  if (document.body.classList.contains('wide')) renderer.drawBackdrop(backdrop, sim);
   if (router.top === 'menu' || router.top === 'wardrobe') drawShowcase(now / 1000);
   updateHud(realDt);
   requestAnimationFrame(frame);

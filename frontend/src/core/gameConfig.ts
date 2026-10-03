@@ -25,6 +25,8 @@ export interface TierConfig {
 export const gameConfig = {
   world: {
     width: 360,
+    /** Soft walls: the playable area ends this far from each side. */
+    margin: 40,
     minHeight: 560,
     maxHeight: 780,
   },
@@ -93,6 +95,10 @@ export const gameConfig = {
     /** Chance that one earlier missed item gets a second try on a new tier. */
     laterChance: 0.4,
     count: 13,
+  },
+  wall: {
+    /** Share of horizontal speed kept when bouncing off a wall. */
+    bounce: 0.45,
   },
   death: {
     hitStopMs: 120,

@@ -17,6 +17,7 @@ export interface Stats {
   total_captures?: number;
   items_mask?: number;
   item_misses?: number[];
+  duel_wins?: number;
 }
 
 export interface Bootstrap {
@@ -65,6 +66,7 @@ export interface FinishResult {
   rank_week: number | null;
   prev_rank_all: number | null;
   prev_rank_week: number | null;
+  duel?: { status: 'pending' | 'done'; outcome?: Record<string, 'win' | 'loss' | 'draw'> } | null;
 }
 
 export interface LeaderRow {
@@ -77,7 +79,7 @@ export interface LeaderRow {
 }
 
 export interface Leaderboard {
-  scope: 'week' | 'all';
+  scope: 'week' | 'all' | 'duels';
   week_id: string;
   reset_at: number;
   server_time: number;
@@ -128,8 +130,15 @@ export class Session {
   }
 
   /** Returns a server ticket, or null to play an unranked run. */
+  /** Why the last run had to start without a server ticket (shown to the player). */
+  ticketError: 'outside' | 'offline' | 'consent' | 'network' | 'timeout' | 'restart' | 'limit' | 'auth' | 'server' | null = null;
+
   async takeTicket(): Promise<RunTicket | null> {
-    if (!this.ranked) return null;
+    this.ticketError = null;
+    if (!this.ranked) {
+      this.ticketError = this.mode === 'outside' ? 'outside' : this.mode === 'offline' ? 'offline' : 'consent';
+      return null;
+    }
     if (this.prefetched) {
       const t = this.prefetched;
       this.prefetched = null;
@@ -153,12 +162,34 @@ export class Session {
     });
   }
 
+  /** Asks the server for a run ticket, retrying briefly (e.g. while the server restarts). */
   private async requestTicket(): Promise<RunTicket | null> {
-    try {
-      return await api<RunTicket>('POST', '/runs/start', undefined, RUN_START_TIMEOUT_MS);
-    } catch {
-      return null;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const t = await api<RunTicket>('POST', '/runs/start', undefined, RUN_START_TIMEOUT_MS);
+        this.ticketError = null;
+        return t;
+      } catch (e) {
+        const err = e instanceof ApiError ? e : new ApiError(0, 'network');
+        this.ticketError =
+          err.status === 0
+            ? err.code === 'timeout'
+              ? 'timeout'
+              : 'network'
+            : err.status === 429
+              ? 'limit'
+              : err.status === 401
+                ? 'auth'
+                : err.status === 403
+                  ? 'consent'
+                  : err.status === 502 || err.status === 503 || err.status === 504
+                    ? 'restart'
+                    : 'server';
+        if (err.status && err.status < 500 && err.status !== 429) break;
+        await new Promise((r) => setTimeout(r, 900));
+      }
     }
+    return null;
   }
 
   private lastReport: RunReport | null = null;
@@ -176,7 +207,7 @@ export class Session {
     }
   }
 
-  async leaderboard(scope: 'week' | 'all', force = false): Promise<Leaderboard> {
+  async leaderboard(scope: 'week' | 'all' | 'duels', force = false): Promise<Leaderboard> {
     const hit = this.lbCache.get(scope);
     if (!force && hit && Date.now() - hit.at < LEADERBOARD_CACHE_MS) return hit.data;
     const data = await api<Leaderboard>('GET', `/leaderboard?scope=${scope}`);

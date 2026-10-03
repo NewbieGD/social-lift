@@ -1,0 +1,88 @@
+// Live duels: a WebSocket to the server for presence, invitations and the opponent's inputs.
+import { API_BASE_URL } from '../config';
+import { isInVk, launchParamsRaw } from '../platform/vk';
+
+export interface DuelPlayer {
+  id: number;
+  name: string | null;
+  photo: string | null;
+}
+
+export type DuelMsg =
+  | { t: 'online'; n: number }
+  | { t: 'none'; n: number }
+  | { t: 'waiting'; to: DuelPlayer; timeout: number }
+  | { t: 'declined' }
+  | { t: 'invite'; from: DuelPlayer; timeout: number }
+  | { t: 'invite_cancel' }
+  | {
+      t: 'start';
+      duel: string;
+      seed: number;
+      start_at: number;
+      ticket: { run_id: string; seed: number; started_at: number; token: string };
+      opponent: DuelPlayer;
+    }
+  | { t: 'inputs'; upto: number; log: number[][] }
+  | { t: 'opp_dead'; score: number }
+  | { t: 'opp_left' }
+  | { t: 'result'; duel: string; outcome: 'win' | 'loss' | 'draw' };
+
+export class DuelClient {
+  online = 0;
+  connected = false;
+  onMessage: (m: DuelMsg) => void = () => undefined;
+  onStatus: () => void = () => undefined;
+  private ws: WebSocket | null = null;
+  private stopped = false;
+  private retryTimer = 0;
+
+  connect(): void {
+    if (!isInVk() || this.ws) return;
+    this.stopped = false;
+    const url = `${API_BASE_URL.replace(/^http/, 'ws')}/api/duel/ws?p=${encodeURIComponent(launchParamsRaw())}`;
+    let ws: WebSocket;
+    try {
+      ws = new WebSocket(url);
+    } catch {
+      return;
+    }
+    this.ws = ws;
+    ws.onopen = () => {
+      this.connected = true;
+      this.onStatus();
+    };
+    ws.onmessage = (ev) => {
+      let m: DuelMsg;
+      try {
+        m = JSON.parse(String(ev.data));
+      } catch {
+        return;
+      }
+      if (m.t === 'online' || m.t === 'none') this.online = m.n;
+      this.onMessage(m);
+      this.onStatus();
+    };
+    ws.onclose = (ev) => {
+      this.ws = null;
+      this.connected = false;
+      this.onStatus();
+      // 4401/4403: not allowed; 4409: replaced by another tab. Otherwise reconnect quietly.
+      if (!this.stopped && ![4401, 4403, 4409].includes(ev.code)) {
+        clearTimeout(this.retryTimer);
+        this.retryTimer = window.setTimeout(() => this.connect(), 5000);
+      }
+    };
+  }
+
+  close(): void {
+    this.stopped = true;
+    clearTimeout(this.retryTimer);
+    this.ws?.close();
+    this.ws = null;
+  }
+
+  send(msg: object): void {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) this.ws.send(JSON.stringify(msg));
+  }
+}

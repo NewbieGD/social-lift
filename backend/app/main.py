@@ -13,6 +13,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from . import game_config as gc
 from .api.routes import router
+from .duel_ws import router as duel_router
 from .config import settings
 from .core import limiter
 from .db import Base, engine
@@ -44,6 +45,7 @@ app = FastAPI(
     openapi_url="/api/openapi.json" if settings.is_dev else None,
 )
 app.include_router(router)
+app.include_router(duel_router)
 
 
 def error(status: int, code: str, message: str, headers: dict | None = None) -> JSONResponse:

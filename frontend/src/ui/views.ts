@@ -104,10 +104,15 @@ const ICON = {
   crown: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 18L2 7l5.5 4L12 4l4.5 7L22 7l-1 11z" fill="#FFD640" stroke="#8a5a00" stroke-width="1.2"/><rect x="3" y="18.5" width="18" height="2.5" rx="1" fill="#E8B23A"/></svg>',
   book: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4.5A2.5 2.5 0 016.5 2H20v17H6.5A2.5 2.5 0 004 21.5z" fill="#5AA8FF"/><path d="M4 21.5A2.5 2.5 0 016.5 19H20v3H6.5A2.5 2.5 0 014 21.5z" fill="#2257B8"/><path d="M8 6h8M8 9.5h6" stroke="#fff" stroke-width="1.6" stroke-linecap="round"/></svg>',
   gear: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10.3 2h3.4l.5 2.6 2 .9 2.2-1.5 2.4 2.4-1.5 2.2.9 2 2.6.5v3.4l-2.6.5-.9 2 1.5 2.2-2.4 2.4-2.2-1.5-2 .9-.5 2.6h-3.4l-.5-2.6-2-.9-2.2 1.5-2.4-2.4 1.5-2.2-.9-2L2 13.7v-3.4l2.6-.5.9-2L4 5.6 6.4 3.2l2.2 1.5 2-.9z" fill="#B9C1CD"/><circle cx="12" cy="12" r="3.6" fill="#4A5262"/></svg>',
+  swords:
+    '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 3l7.5 7.5-2 2L2 5V3zM20 3l-7.5 7.5 2 2L22 5V3z" fill="#D3D8E2"/><path d="M6.5 14.5l3 3-2.5 2.5-1.5-1.5-1.5 1.5L3 19l1.5-1.5L3 16zM17.5 14.5l-3 3 2.5 2.5 1.5-1.5 1.5 1.5L21 19l-1.5-1.5L21 16z" fill="#E8B23A"/></svg>',
   mail: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="5" width="20" height="14" rx="3" fill="#38C673"/><path d="M3 7l9 6.5L21 7" fill="none" stroke="#fff" stroke-width="1.8" stroke-linejoin="round"/></svg>',
   bill: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="6" width="20" height="12" rx="2" fill="#7FCF8A"/><circle cx="12" cy="12" r="3" fill="#3E8C4C"/><rect x="2" y="6" width="20" height="12" rx="2" fill="none" stroke="#3E8C4C" stroke-width="1.5"/></svg>',
   floor: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="2" width="16" height="20" rx="2" fill="#8D96A6"/><rect x="6" y="4" width="5.5" height="16" fill="#C7CCD6"/><rect x="12.5" y="4" width="5.5" height="16" fill="#C7CCD6"/><path d="M12 6.5l-2.4 3h4.8z" fill="#FFB547"/></svg>',
 };
+
+const HAND_ICON =
+  '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 11V5.5a1.5 1.5 0 013 0V10l.5-.1V8.5a1.5 1.5 0 013 0v2l.5-.1a1.5 1.5 0 013 .3V15c0 3.3-2.7 6-6 6h-1.2c-1.8 0-3.4-.8-4.5-2.2L4.6 15a1.5 1.5 0 012.3-1.9L9 15z" fill="currentColor"/></svg>';
 
 function chip(icon: string, label: string, value: string, i: number): string {
   return `<div class="chip" style="--i:${i}">${icon}<span class="chip-text"><span class="chip-label">${esc(label)}</span><b>${esc(value)}</b></span></div>`;
@@ -131,18 +136,18 @@ export function menuView(d: MenuData): string {
     status = `<p class="status small">${ru.menu.outside}</p>`;
   }
   return `<div class="menu2">
-    <p class="mini-logo">${ru.appTitle}</p>
     <div class="showcase">
       <button class="hero-stage" data-action="open" data-arg="wardrobe" aria-label="${ru.wardrobe.title}">
         <span class="stage-glow" aria-hidden="true"></span>
         <canvas id="menuHero" aria-hidden="true"></canvas>
-        <span class="tap-hint">${ru.wardrobe.hint}</span>
+        <span class="tap-hint">${HAND_ICON}${ru.wardrobe.hint}</span>
       </button>
       <div class="chips">${chips}</div>
     </div>
     <div class="menu-actions">
       <button class="primary big play" data-action="play">${ICON.play}<span>${ru.common.play}</span></button>
       <div class="grid2 stagger">
+        <button class="tile wide-tile" data-action="open" data-arg="duels">${ICON.swords}<span>${ru.menu.duels}</span></button>
         <button class="tile" data-action="open" data-arg="leaders">${ICON.crown}<span>${ru.menu.leaders}</span></button>
         <button class="tile" data-action="open" data-arg="rules">${ICON.book}<span>${ru.menu.rules}</span></button>
         <button class="tile" data-action="open" data-arg="settings">${ICON.gear}<span>${ru.menu.settings}</span></button>
@@ -290,11 +295,12 @@ export function confirmDeleteView(error: string | null): string {
 
 // ---------- Leaders ----------
 
-export function leadersShell(scope: 'week' | 'all'): string {
+export function leadersShell(scope: 'week' | 'all' | 'duels'): string {
+  const tab = (id: 'week' | 'all' | 'duels', label: string): string =>
+    `<button role="tab" class="${scope === id ? 'on' : ''}" aria-selected="${scope === id}" data-action="lbScope" data-arg="${id}">${label}</button>`;
   return `${header(ru.leaders.title)}
-    <div class="tabs" role="tablist">
-      <button role="tab" class="${scope === 'week' ? 'on' : ''}" aria-selected="${scope === 'week'}" data-action="lbScope" data-arg="week">${ru.leaders.week}</button>
-      <button role="tab" class="${scope === 'all' ? 'on' : ''}" aria-selected="${scope === 'all'}" data-action="lbScope" data-arg="all">${ru.leaders.all}</button>
+    <div class="tabs tabs-3" role="tablist">
+      ${tab('week', ru.leaders.week)}${tab('all', ru.leaders.all)}${tab('duels', ru.leaders.duels)}
     </div>
     <p class="reset-line" id="lbReset"></p>
     <div class="scroll leaders" id="lbList">${skeleton()}</div>
@@ -316,7 +322,7 @@ function avatar(row: LeaderRow): string {
 }
 
 export function leadersRows(lb: Leaderboard, myId: number | null, clickable: boolean): string {
-  if (!lb.rows.length) return `<div class="empty"><p>${ru.leaders.emptyWeek}</p></div>`;
+  if (!lb.rows.length) return `<div class="empty"><p>${lb.scope === 'duels' ? ru.leaders.emptyDuels : ru.leaders.emptyWeek}</p></div>`;
   return `<div class="stagger">${lb.rows
     .map((r) => {
       const name = r.deactivated ? ru.leaders.deleted : r.name || ru.leaders.player;
@@ -335,6 +341,11 @@ export function leadersRows(lb: Leaderboard, myId: number | null, clickable: boo
 
 export function leadersMe(lb: Leaderboard): string {
   const me = lb.me;
+  if (lb.scope === 'duels') {
+    if (!me.rank) return `<p>${ru.leaders.noDuels}</p>`;
+    const gap = me.rank > 1 && me.next_rank && me.gap_to_next ? ru.leaders.gapDuels(me.next_rank, me.gap_to_next) : me.rank === 1 ? ru.leaders.first : '';
+    return `<p class="me-main">${ru.leaders.youDuels(me.score, me.rank)}</p>${gap ? `<p class="muted">${gap}</p>` : ''}`;
+  }
   if (!me.rank) return `<p>${ru.leaders.noRuns}</p>`;
   const second =
     me.rank === 1
@@ -350,6 +361,49 @@ export function resetLine(lb: Leaderboard, clientOffsetMs: number): string {
   const left = Math.max(0, lb.reset_at - (Date.now() + clientOffsetMs));
   const m = Math.floor(left / 60000);
   return ru.leaders.resetIn(Math.floor(m / 1440), Math.floor((m % 1440) / 60), m % 60);
+}
+
+// ---------- Duels ----------
+
+export interface DuelView {
+  status: 'offline' | 'connecting' | 'idle' | 'waiting' | 'none' | 'declined';
+  online: number;
+  waitingFor: string | null;
+}
+
+export function duelsView(d: DuelView): string {
+  let status = '';
+  if (d.status === 'offline') status = ru.duel.offline;
+  else if (d.status === 'connecting') status = ru.duel.connecting;
+  else if (d.status === 'waiting') status = ru.duel.waiting(d.waitingFor || ru.duel.player);
+  else if (d.status === 'none') status = ru.duel.none;
+  else if (d.status === 'declined') status = ru.duel.declined;
+  const canFind = d.status === 'idle' || d.status === 'none' || d.status === 'declined';
+  return `${header(ru.duel.title)}<div class="panel flat duel-panel">
+    <div class="duel-hero" aria-hidden="true">${ICON.swords}</div>
+    <p>${ru.duel.lead}</p>
+    <p class="muted">${ru.duel.rulesNote}</p>
+    ${d.status !== 'offline' && d.status !== 'connecting' ? `<p class="duel-online"><span class="dot"></span>${ru.duel.online(d.online)}</p>` : ''}
+    ${status ? `<p class="status ${d.status === 'waiting' ? '' : 'warn'}">${esc(status)}</p>` : ''}
+    ${
+      d.status === 'waiting'
+        ? `<button class="secondary" data-action="duelCancel">${ru.duel.cancel}</button>`
+        : `<button class="primary" data-action="duelFind" ${canFind ? '' : 'disabled'}>${ru.duel.find}</button>`
+    }
+  </div>`;
+}
+
+export function inviteView(from: { name: string | null; photo: string | null }, seconds: number): string {
+  const name = from.name || ru.duel.player;
+  const img = from.photo ? `<img src="${esc(from.photo)}" alt="" referrerpolicy="no-referrer" />` : `<b>${esc(name.slice(0, 1))}</b>`;
+  return `<div class="panel invite">
+    <div class="invite-ava">${img}</div>
+    <h2>${ru.duel.inviteTitle}</h2>
+    <p>${esc(ru.duel.invite(name))}</p>
+    <div class="invite-timer"><i style="animation-duration:${seconds}s"></i></div>
+    <button class="primary" data-action="duelAccept">${ru.duel.accept}</button>
+    <button class="secondary" data-action="duelDecline">${ru.duel.decline}</button>
+  </div>`;
 }
 
 // ---------- Contact ----------
@@ -392,6 +446,7 @@ export interface ResultData {
   maxCombo: number;
   seconds: number;
   record: boolean;
+  canShare: boolean;
 }
 
 export function resultView(d: ResultData): string {
@@ -421,6 +476,7 @@ export function resultView(d: ResultData): string {
     <div class="big-score" id="resultScore" data-target="${d.score}">0</div>
     <div class="record ${d.record && d.score > 0 ? '' : 'hidden'}" id="resultRecord">${ru.result.record}</div>
     <p class="rank" id="resultRank"></p>
+    <p class="duel-line" id="duelLine"></p>
     <dl class="stats" id="resultStats">
       <dt>${ru.result.best}</dt><dd id="resultBest">${d.best}</dd>
       <dt>${ru.result.captures}</dt><dd>${d.captures}</dd>
@@ -429,7 +485,20 @@ export function resultView(d: ResultData): string {
     </dl>
     <button class="primary" data-action="again">${ru.result.again}</button>
     <button class="secondary" data-action="toMenu">${ru.common.menu}</button>
+    ${d.canShare ? `<button class="secondary share-btn" data-action="open" data-arg="share">${SHARE_ICON}${ru.share.button}</button>` : ''}
     <button class="link-btn" data-action="open" data-arg="rules">${ru.rules.title}</button>
+  </div>`;
+}
+
+const SHARE_ICON =
+  '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 5l7 7-7 7v-4c-5 0-8.5 1.6-11 5 1-5 4-10 11-11z" fill="currentColor"/></svg>';
+
+export function shareView(opts: { wall: boolean; story: boolean }): string {
+  return `<div class="panel">
+    <button class="icon-btn close" data-action="back" aria-label="${ru.common.close}">${'<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/></svg>'}</button>
+    <h2>${ru.share.title}</h2>
+    ${opts.story ? `<button class="primary" data-action="shareStory">${ru.share.story}</button>` : ''}
+    ${opts.wall ? `<button class="secondary" data-action="shareWall">${ru.share.wall}</button>` : ''}
   </div>`;
 }
 

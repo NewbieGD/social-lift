@@ -53,6 +53,7 @@ async def get_or_create_user(session: AsyncSession, caller: Caller) -> User:
             total_captures=0,
             items_mask=0,
             item_misses="",
+            duel_wins=0,
             profile_deactivated=False,
         )
         session.add(user)
@@ -145,6 +146,7 @@ async def player_stats(session: AsyncSession, user: User) -> dict:
         "best_combo": user.best_combo or 0,
         "total_captures": user.total_captures or 0,
         "items_mask": user.items_mask or 0,
+        "duel_wins": user.duel_wins or 0,
         "item_misses": parse_misses(user.item_misses),
         "rank_all": await rank_all(session, user.best_all, aware(user.best_all_at)),
         "rank_week": await rank_week(session, wid, wb.best_score, aware(wb.achieved_at)) if wb else None,
@@ -154,17 +156,18 @@ async def player_stats(session: AsyncSession, user: User) -> dict:
 # ---------- Runs ----------
 
 
-async def start_run(session: AsyncSession, user: User) -> dict:
+async def start_run(session: AsyncSession, user: User, *, seed: int | None = None, duel_id: str | None = None) -> dict:
     if not consent_ok(user):
         raise ApiError(403, "consent_required", "Accept the terms first")
     now = utcnow()
     run = Run(
         id=str(uuid.uuid4()),
         user_id=user.id,
-        seed=secrets.randbits(32),
+        seed=secrets.randbits(32) if seed is None else seed,
         started_at=now,
         status="started",
         items_start=user.items_mask or 0,
+        duel_id=duel_id,
     )
     session.add(run)
     await session.commit()
@@ -183,7 +186,9 @@ def _finish_response(run: Run, user: User, extra: dict) -> dict:
     return {
         "run_id": run.id,
         "status": run.status,
-        "reason": run.flags if run.status == "rejected" else None,
+        "reason": (run.flags or "").replace("duel_done:", "").replace("duel_done", "") or None
+        if run.status == "rejected"
+        else None,
         "score": run.score or 0,
         "best_all": user.best_all,
         "best_tier": user.best_tier,
@@ -267,8 +272,11 @@ async def finish_run(session: AsyncSession, caller: Caller, body: RunFinishIn) -
 
     await _cleanup_weeks(session)
     after = await player_stats(session, user)
+    duel = await resolve_duel(session, run.duel_id) if run.duel_id else None
     return _finish_response(
-        run, user, {"is_record": is_record, "is_week_record": is_week_record, **_ranks(before, after)}
+        run,
+        user,
+        {"is_record": is_record, "is_week_record": is_week_record, "duel": duel, **_ranks(before, after)},
     )
 
 
@@ -290,6 +298,80 @@ async def _cleanup_weeks(session: AsyncSession) -> None:
     _last_cleanup = time.monotonic()
     await session.execute(delete(WeekBest).where(WeekBest.week_id < old_week_ids(utcnow())))
     await session.commit()
+
+
+# ---------- Duels ----------
+
+# Called with the outcome when a duel is decided: (duel_id, {user_id: "win"|"loss"|"draw"}).
+duel_listeners: list = []
+
+
+async def resolve_duel(session: AsyncSession, duel_id: str) -> dict:
+    """Decides a duel once both runs are over (finished, rejected or abandoned).
+
+    The winner gets +1 duel win exactly once. A rejected or abandoned run loses.
+    Returns {"status": "pending"} until both sides are done.
+    """
+    result = await session.execute(select(Run).where(Run.duel_id == duel_id).with_for_update())
+    runs = list(result.scalars())
+    if len(runs) != 2 or any(r.status == "started" for r in runs):
+        await session.commit()
+        return {"status": "pending"}
+    if any(r.flags == "duel_done" or (r.flags or "").startswith("duel_done") for r in runs):
+        await session.commit()
+        return {"status": "done", "outcome": _outcomes(runs)}
+
+    outcome = _outcomes(runs)
+    now = utcnow()
+    for r in runs:
+        if outcome.get(r.user_id) == "win":
+            user = await session.get(User, r.user_id, with_for_update=True)
+            if user is not None:
+                user.duel_wins = (user.duel_wins or 0) + 1
+                user.duel_wins_at = now
+        # Mark both runs so the duel is never counted twice (keeps the review flag readable).
+        r.flags = "duel_done" if not r.flags or r.flags == "review" else f"duel_done:{r.flags}"[:64]
+    await session.commit()
+    for fn in duel_listeners:
+        try:
+            fn(duel_id, outcome)
+        except Exception:  # noqa: BLE001 - notifications must never break a finish
+            pass
+    return {"status": "done", "outcome": outcome}
+
+
+def _outcomes(runs: list[Run]) -> dict[int, str]:
+    a, b = runs
+    def score(r: Run) -> int:
+        return (r.score or 0) if r.status == "finished" else -1
+    sa_, sb = score(a), score(b)
+    if sa_ == sb:
+        return {a.user_id: "draw", b.user_id: "draw"}
+    return {a.user_id: "win" if sa_ > sb else "loss", b.user_id: "win" if sb > sa_ else "loss"}
+
+
+async def abandon_duel_run(session: AsyncSession, duel_id: str, user_id: int) -> None:
+    """A player left a duel before finishing: their run is abandoned (counts as a loss)."""
+    result = await session.execute(
+        select(Run).where(Run.duel_id == duel_id, Run.user_id == user_id).with_for_update()
+    )
+    run = result.scalars().first()
+    if run is not None and run.status == "started":
+        run.status = "abandoned"
+        run.finished_at = utcnow()
+    await session.commit()
+    await resolve_duel(session, duel_id)
+
+
+async def duel_rank(session: AsyncSession, user: User) -> tuple[int | None, int | None]:
+    wins = user.duel_wins or 0
+    if wins <= 0:
+        return None, None
+    better = await session.scalar(select(func.count()).select_from(User).where(User.duel_wins > wins))
+    nxt = await session.scalar(
+        select(User.duel_wins).where(User.duel_wins > wins).order_by(User.duel_wins.asc()).limit(1)
+    )
+    return int(better or 0) + 1, (nxt - wins + 1) if nxt is not None else None
 
 
 # ---------- Leaderboard ----------
@@ -320,6 +402,26 @@ async def leaderboard(session: AsyncSession, user: User, scope: str) -> tuple[di
         rows = await _top_rows(session, scope, wid)
         _cache[key] = _Cached(time.monotonic(), rows)
 
+    if scope == "duels":
+        my_rank, gap = await duel_rank(session, user)
+        my_score = user.duel_wins or 0
+        me = {
+            "score": my_score,
+            "rank": my_rank,
+            "next_rank": (my_rank - 1) if my_rank and my_rank > 1 else None,
+            "gap_to_next": gap,
+        }
+        stale_before = now.timestamp() - gc.PROFILE_TTL_SEC
+        stale = [r["user_id"] for r in rows if r["_synced"] is None or r["_synced"] < stale_before]
+        public_rows = [{k: v for k, v in r.items() if not k.startswith("_")} for r in rows]
+        return {
+            "scope": scope,
+            "week_id": wid,
+            "reset_at": int(week_reset_at(now).timestamp() * 1000),
+            "server_time": int(now.timestamp() * 1000),
+            "rows": public_rows,
+            "me": me,
+        }, stale
     if scope == "week":
         wb = await week_entry(session, wid, user.id)
         my_score = wb.best_score if wb else 0
@@ -353,7 +455,14 @@ async def leaderboard(session: AsyncSession, user: User, scope: str) -> tuple[di
 
 
 async def _top_rows(session: AsyncSession, scope: str, wid: str) -> list[dict]:
-    if scope == "week":
+    if scope == "duels":
+        q = (
+            select(User.duel_wins, User)
+            .where(User.duel_wins > 0)
+            .order_by(User.duel_wins.desc(), User.duel_wins_at.asc())
+            .limit(gc.LEADERBOARD_SIZE)
+        )
+    elif scope == "week":
         q = (
             select(WeekBest.best_score, User)
             .join(User, User.id == WeekBest.user_id)

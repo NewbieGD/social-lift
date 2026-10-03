@@ -36,7 +36,7 @@ export async function api<T>(
       signal: ctrl.signal,
     });
   } catch {
-    throw new ApiError(0, 'network');
+    throw new ApiError(0, ctrl.signal.aborted ? 'timeout' : 'network');
   } finally {
     clearTimeout(timer);
   }

@@ -444,12 +444,19 @@ function drawFoot(ctx: CanvasRenderingContext2D, at: P, r: number, o: Outfit, ba
     ctx.lineTo(-3.4, 1.6);
     ctx.closePath();
   } else if (o.feet === 'slippers') {
-    ctx.fillStyle = shade(SKIN, dark);
-    rr(ctx, -3, -3.2, 10.6, 4.2, 2);
+    // Closed house slipper: a soft upper over the whole foot on a thick sole.
+    ctx.fillStyle = shade('#2F6FD8', dark);
+    rr(ctx, -4, -0.2, 13.2, 2.6, 1.3);
     ctx.fill();
     stroke(ctx);
-    ctx.fillStyle = shade('#3B82F6', dark);
-    rr(ctx, -3.6, 0, 12, 2.4, 1.2);
+    ctx.fillStyle = shade('#4A8EF2', dark);
+    ctx.beginPath();
+    ctx.moveTo(-3.6, 0);
+    ctx.lineTo(-3.6, -2.8);
+    ctx.quadraticCurveTo(-3.2, -4, 0, -4);
+    ctx.lineTo(4.6, -4);
+    ctx.quadraticCurveTo(9.4, -3.8, 9.4, 0);
+    ctx.closePath();
   } else {
     ctx.fillStyle = shade(SKIN, dark);
     ctx.beginPath();
@@ -591,6 +598,7 @@ function drawHead(ctx: CanvasRenderingContext2D, rig: Rig, o: Outfit, tier: numb
   ctx.fill();
   stroke(ctx);
   const tuft = -rig.look.y * 1.4;
+  if (!(o.cap || o.suit)) {
   ctx.beginPath();
   ctx.moveTo(-1.5, -10.6);
   ctx.quadraticCurveTo(-2.4, -15.4 + tuft, 3.4, -14.6 + tuft);
@@ -598,6 +606,7 @@ function drawHead(ctx: CanvasRenderingContext2D, rig: Rig, o: Outfit, tier: numb
   ctx.closePath();
   ctx.fill();
   stroke(ctx, 1);
+  }
 
   // Eyes: far eye smaller, near eye larger; eyelids close from the top for blinks.
   const lids = face === 'squint' ? 0.55 : 0;
@@ -718,12 +727,7 @@ function drawHead(ctx: CanvasRenderingContext2D, rig: Rig, o: Outfit, tier: numb
     ctx.fillStyle = 'rgba(255,255,255,0.4)';
     ctx.fillRect(6, -3, 2.2, 0.8);
   }
-  if (o.cap && !o.suit) {
-    ctx.save();
-    ctx.translate(0.6, -0.6);
-    drawCapShape(ctx);
-    ctx.restore();
-  }
+  if (o.cap && !o.suit) drawCapShape(ctx);
   if (o.suit) {
     ctx.strokeStyle = 'rgba(220,235,255,0.95)';
     ctx.lineWidth = 2;
@@ -741,28 +745,57 @@ function drawHead(ctx: CanvasRenderingContext2D, rig: Rig, o: Outfit, tier: numb
   ctx.restore();
 }
 
-/** Cap worn backwards, in the head frame (head center at 0,0). */
+/** Cap worn backwards, in the head frame (head center at 0,0): covers the whole top of the head. */
 function drawCapShape(ctx: CanvasRenderingContext2D): void {
+  // Crown
   ctx.fillStyle = '#C8263C';
   ctx.beginPath();
-  ctx.moveTo(-9.2, -2.4);
-  ctx.bezierCurveTo(-9.6, -12.6, 8.4, -13.6, 10.2, -4.8);
-  ctx.quadraticCurveTo(0, -6.2, -9.2, -2.4);
+  ctx.moveTo(-12, -2.6);
+  ctx.bezierCurveTo(-13, -16.5, 9.5, -17.5, 11.4, -6.2);
+  ctx.quadraticCurveTo(11.6, -5, 10.8, -4.6);
+  ctx.quadraticCurveTo(0, -7.8, -12, -2.6);
   ctx.closePath();
   ctx.fill();
+  ctx.save();
+  ctx.clip();
+  ctx.fillStyle = 'rgba(0,0,0,0.14)';
+  ctx.beginPath();
+  ctx.ellipse(-9, -6, 6, 9, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = 'rgba(255,255,255,0.18)';
+  ctx.beginPath();
+  ctx.ellipse(3, -13, 5, 2, -0.2, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+  ctx.beginPath();
+  ctx.moveTo(-12, -2.6);
+  ctx.bezierCurveTo(-13, -16.5, 9.5, -17.5, 11.4, -6.2);
+  ctx.quadraticCurveTo(11.6, -5, 10.8, -4.6);
+  ctx.quadraticCurveTo(0, -7.8, -12, -2.6);
+  ctx.closePath();
   stroke(ctx);
+  // Panel seam
+  ctx.strokeStyle = 'rgba(80,10,20,0.5)';
+  ctx.lineWidth = 0.8;
+  ctx.beginPath();
+  ctx.moveTo(0.4, -15.4);
+  ctx.quadraticCurveTo(-1.5, -10, -1.2, -6.4);
+  ctx.stroke();
+  // Visor pointing backwards
   ctx.fillStyle = '#9E1B2E';
   ctx.beginPath();
-  ctx.moveTo(-8.4, -3.2);
-  ctx.quadraticCurveTo(-14.4, -3.6, -15, -0.8);
-  ctx.lineTo(-8.6, -0.6);
+  ctx.moveTo(-11.2, -4.6);
+  ctx.quadraticCurveTo(-18.5, -5.2, -19, -1.6);
+  ctx.quadraticCurveTo(-15, -0.8, -11.4, -1.4);
   ctx.closePath();
   ctx.fill();
   stroke(ctx);
+  // Button on top
   ctx.fillStyle = '#ffffff';
   ctx.beginPath();
-  ctx.arc(0.6, -11.8, 1.1, 0, Math.PI * 2);
+  ctx.arc(0.6, -15.6, 1.3, 0, Math.PI * 2);
   ctx.fill();
+  stroke(ctx, 0.8);
 }
 
 /** Draws the torso with its clothing in the torso frame. */
@@ -1067,33 +1100,6 @@ export const TORCH_TIP: [number, number] = [28, -22];
 
 // ---------- Suit-up items (fly in and snap onto the hero) ----------
 
-/** A cheap cap worn backwards (the yard item). */
-function drawCap(ctx: CanvasRenderingContext2D, hy: number): void {
-  ctx.fillStyle = '#C8263C';
-  ctx.strokeStyle = LINE;
-  ctx.lineWidth = 1.2;
-  ctx.beginPath();
-  ctx.moveTo(-9.4, hy - 3);
-  ctx.quadraticCurveTo(-9, hy - 12.5, 1.5, hy - 12.2);
-  ctx.quadraticCurveTo(10.5, hy - 11.5, 10.2, hy - 4);
-  ctx.closePath();
-  ctx.fill();
-  ctx.stroke();
-  // Visor pointing backwards.
-  ctx.beginPath();
-  ctx.moveTo(-8.5, hy - 4);
-  ctx.quadraticCurveTo(-14, hy - 4.5, -14.5, hy - 2);
-  ctx.lineTo(-8.5, hy - 1.8);
-  ctx.closePath();
-  ctx.fillStyle = '#9E1B2E';
-  ctx.fill();
-  ctx.stroke();
-  ctx.fillStyle = '#ffffff';
-  ctx.beginPath();
-  ctx.arc(1.5, hy - 12.3, 1.2, 0, Math.PI * 2);
-  ctx.fill();
-}
-
 export type Item =
   | 'cap'
   | 'slippers' | 'shoes' | 'shorts' | 'sweats' | 'trousers' | 'tank' | 'shirt' | 'jacket'
@@ -1128,6 +1134,26 @@ export function outfitChanges(from: number, to: number): ItemChange[] {
 export function drawItem(ctx: CanvasRenderingContext2D, item: Item): void {
   switch (item) {
     case 'slippers':
+      for (const dx of [-6.5, 6.5]) {
+        ctx.save();
+        ctx.translate(dx - 2.5, 1);
+        ctx.fillStyle = '#2F6FD8';
+        rr(ctx, -4, -0.2, 13.2, 2.6, 1.3);
+        ctx.fill();
+        stroke(ctx);
+        ctx.fillStyle = '#4A8EF2';
+        ctx.beginPath();
+        ctx.moveTo(-3.6, 0);
+        ctx.lineTo(-3.6, -2.8);
+        ctx.quadraticCurveTo(-3.2, -4, 0, -4);
+        ctx.lineTo(4.6, -4);
+        ctx.quadraticCurveTo(9.4, -3.8, 9.4, 0);
+        ctx.closePath();
+        ctx.fill();
+        stroke(ctx);
+        ctx.restore();
+      }
+      break;
     case 'shoes': {
       const c = item === 'shoes' ? '#121212' : '#3B82F6';
       rr(ctx, -12, -2, 11, item === 'shoes' ? 5 : 3.5, 2, );
@@ -1208,8 +1234,9 @@ export function drawItem(ctx: CanvasRenderingContext2D, item: Item): void {
       break;
     case 'cap':
       ctx.save();
-      ctx.translate(-1, 7);
-      drawCap(ctx, 0);
+      ctx.translate(0, 9);
+      ctx.scale(0.85, 0.85);
+      drawCapShape(ctx);
       ctx.restore();
       break;
     case 'helmet':

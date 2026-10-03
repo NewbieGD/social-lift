@@ -4,7 +4,7 @@ import type { ColorId } from '../core/gameConfig';
 
 type Sfx =
   | 'jump' | 'land' | 'capture' | 'tick' | 'auraOn' | 'auraOff' | 'death' | 'bell' | 'click' | 'unlock'
-  | 'snap' | 'fanfare' | 'combo' | 'break' | 'close' | 'servo';
+  | 'snap' | 'fanfare' | 'combo' | 'break' | 'close' | 'servo' | 'wall';
 
 interface MusicStyle {
   bpm: number;
@@ -216,6 +216,10 @@ export class AudioEngine {
         this.noiseHit(t, 0.7, 1800, 0.08, undefined, true);
         break;
       }
+      case 'wall':
+        this.tone(t, 'sine', 160, 90, 0.12, 0.25);
+        this.noiseHit(t, 0.06, 1200, 0.1);
+        break;
       case 'combo':
         this.tone(t, 'triangle', 880, 1760, 0.18, 0.12);
         break;

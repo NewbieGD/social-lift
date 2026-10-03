@@ -51,6 +51,8 @@ class User(Base):
     # Collection: bit N = item of tier N; misses = runs that reached the tier without it.
     items_mask: Mapped[int] = mapped_column(Integer, default=0)
     item_misses: Mapped[str] = mapped_column(String(64), default="")
+    duel_wins: Mapped[int] = mapped_column(Integer, default=0)
+    duel_wins_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     runs: Mapped[list[Run]] = relationship(back_populates="user", cascade="all, delete-orphan", passive_deletes=True)
     weeks: Mapped[list[WeekBest]] = relationship(cascade="all, delete-orphan", passive_deletes=True)
@@ -76,6 +78,7 @@ class Run(Base):
     input_log: Mapped[str | None] = mapped_column(Text)
     items_start: Mapped[int] = mapped_column(Integer, default=0)
     items: Mapped[int | None] = mapped_column(Integer)
+    duel_id: Mapped[str | None] = mapped_column(String(36), index=True)
 
     user: Mapped[User] = relationship(back_populates="runs")
 

@@ -184,14 +184,16 @@ export class Sim {
     if (Math.abs(axis) > 0.1) h.facing = axis > 0 ? 1 : -1;
 
     h.x += h.vx * DT;
+    // Soft walls: the hero bounces back off the side buildings.
     const half = cfg.width / 2;
     const W = gameConfig.world.width;
-    if (h.x < half) {
-      h.x = half;
-      h.vx = 0;
-    } else if (h.x > W - half) {
-      h.x = W - half;
-      h.vx = 0;
+    const lo = gameConfig.world.margin + half * 0.6;
+    const hi = W - gameConfig.world.margin - half * 0.6;
+    if (h.x < lo || h.x > hi) {
+      const side = h.x < lo ? -1 : 1;
+      h.x = side < 0 ? lo : hi;
+      if (Math.abs(h.vx) > 60) this.events.push({ type: 'wall', x: h.x, y: h.y, side });
+      h.vx = -h.vx * gameConfig.wall.bounce;
     }
     h.vy -= cfg.gravity * DT;
     h.y += h.vy * DT;

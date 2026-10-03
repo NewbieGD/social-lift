@@ -178,3 +178,42 @@ async def test_items_collection_and_validation(client):
     await age_run(start["run_id"], 60)
     r = (await finish(client, 60, start, score=12, duration_ms=10_000, captures=6, items=0b100)).json()
     assert r["status"] == "rejected" and r["reason"] == "items_invalid"
+
+
+async def test_duel_resolution(client):
+    from app.services import game as game_service
+
+    await ready_player(client, 70)
+    await ready_player(client, 71)
+    async with SessionLocal() as s:
+        ua = await s.get(User, 70)
+        ub = await s.get(User, 71)
+        ta = await game_service.start_run(s, ua, seed=123, duel_id="d" * 36)
+        tb = await game_service.start_run(s, ub, seed=123, duel_id="d" * 36)
+    await age_run(ta["run_id"], 60)
+    await age_run(tb["run_id"], 60)
+    r1 = (await finish(client, 70, ta, score=30, duration_ms=20_000, captures=10)).json()
+    assert r1["duel"] == {"status": "pending"}
+    r2 = (await finish(client, 71, tb, score=12, duration_ms=20_000, captures=6)).json()
+    assert r2["duel"]["status"] == "done" and r2["duel"]["outcome"] == {"70": "win", "71": "loss"} or r2["duel"]["outcome"] == {70: "win", 71: "loss"}
+    async with SessionLocal() as s:
+        assert (await s.get(User, 70)).duel_wins == 1
+        assert (await s.get(User, 71)).duel_wins == 0
+    lb = (await client.get("/api/leaderboard?scope=duels", headers=headers(71))).json()
+    assert [r["user_id"] for r in lb["rows"]] == [70] and lb["rows"][0]["score"] == 1
+
+
+async def test_duel_abandon_counts_as_loss(client):
+    from app.services import game as game_service
+
+    await ready_player(client, 72)
+    await ready_player(client, 73)
+    async with SessionLocal() as s:
+        ta = await game_service.start_run(s, await s.get(User, 72), seed=5, duel_id="e" * 36)
+        await game_service.start_run(s, await s.get(User, 73), seed=5, duel_id="e" * 36)
+        await game_service.abandon_duel_run(s, "e" * 36, 73)
+    await age_run(ta["run_id"], 60)
+    r = (await finish(client, 72, ta, score=12, duration_ms=20_000, captures=6)).json()
+    assert r["duel"]["status"] == "done"
+    async with SessionLocal() as s:
+        assert (await s.get(User, 72)).duel_wins == 1

@@ -292,6 +292,13 @@ export class Renderer {
         }
       } else if (e.type === 'aura') {
         this.auraPulse = 1;
+      } else if (e.type === 'wall') {
+        this.wallFlash = { x: e.x + e.side * 10, y: e.y + 26, t: 0, side: e.side };
+        if (!this.reducedEffects) {
+          for (let i = 0; i < 6; i++) {
+            this.particles.spawn(0, e.x + e.side * 10, e.y + 10 + Math.random() * 30, -e.side * (40 + Math.random() * 60), (Math.random() - 0.3) * 60, 0.4);
+          }
+        }
       } else if (e.type === 'close') {
         this.floaters.push({ x: e.x, y: e.y + 46, life: 0.9, max: 0.9, text: ru.hud.close, color: '#FFE58A', big: true });
       } else if (e.type === 'light') {
@@ -424,6 +431,27 @@ export class Renderer {
     this.items = this.items.filter((it) => !it.done);
   }
 
+  private wallFlash: { x: number; y: number; t: number; side: number } | null = null;
+
+  /**
+   * Soft walls: the area behind the side buildings is shaded, and a thin light edge marks
+   * where the hero bounces back. A short glow shows the bounce.
+   */
+  private drawWalls(W: number, H: number): void {
+    const ctx = this.ctx;
+    const m = gameConfig.world.margin;
+    for (const side of [-1, 1]) {
+      const x0 = side < 0 ? 0 : W - m;
+      const g = ctx.createLinearGradient(side < 0 ? m : W - m, 0, side < 0 ? 0 : W, 0);
+      g.addColorStop(0, 'rgba(6,8,14,0.22)');
+      g.addColorStop(1, 'rgba(6,8,14,0.4)');
+      ctx.fillStyle = g;
+      ctx.fillRect(x0, 0, m, H);
+      ctx.fillStyle = 'rgba(255,255,255,0.12)';
+      ctx.fillRect(side < 0 ? m - 1 : W - m, 0, 1, H);
+    }
+  }
+
   /** A brief bright outline of the hero when a piece snaps on. */
   private flash = 0;
 
@@ -498,6 +526,7 @@ export class Renderer {
       return;
     }
     this.drawAmbient(tier, W, H, frameDt);
+    this.drawWalls(W, H);
 
     for (const p of sim.platforms) {
       this.drawPlatform(p, toY(p.y), sim.time);
@@ -539,6 +568,24 @@ export class Renderer {
     this.drawItems(sim, hx, hy, toY, frameDt);
     this.drawHighlights(frameDt);
     this.drawSparkles(frameDt);
+    if (this.wallFlash) {
+      const f = this.wallFlash;
+      f.t += frameDt;
+      if (f.t > 0.35) this.wallFlash = null;
+      else {
+        const k = 1 - f.t / 0.35;
+        const sy = toY(f.y);
+        const wx = f.side < 0 ? gameConfig.world.margin : W - gameConfig.world.margin;
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        const g = ctx.createRadialGradient(wx, sy, 0, wx, sy, 40);
+        g.addColorStop(0, `rgba(200,220,255,${0.45 * k})`);
+        g.addColorStop(1, 'rgba(200,220,255,0)');
+        ctx.fillStyle = g;
+        ctx.fillRect(wx - 40, sy - 40, 80, 80);
+        ctx.restore();
+      }
+    }
     if (!this.cine) this.drawDanger(sim, W, H);
 
     this.drawFloaters(toY, frameDt);
@@ -549,6 +596,47 @@ export class Renderer {
       ctx.fillStyle = `rgba(5,6,10,${0.45 * this.deathK})`;
       ctx.fillRect(0, 0, W, H);
     }
+  }
+
+  /**
+   * Wide desktop screens: the current scene fills the whole window behind the field,
+   * dimmed, with the same parallax. Purely decorative: the game world stays the same.
+   */
+  drawBackdrop(c: HTMLCanvasElement, sim: Sim): void {
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+    if (c.width !== Math.round(w * dpr) || c.height !== Math.round(h * dpr)) {
+      c.width = Math.round(w * dpr);
+      c.height = Math.round(h * dpr);
+      c.style.width = `${w}px`;
+      c.style.height = `${h}px`;
+    }
+    const g = c.getContext('2d');
+    if (!g) return;
+    const W = gameConfig.world.width;
+    const H = sim.viewH;
+    const shown = this.heroTierOverride ?? this.sceneTier;
+    const k = h / (H * this.scale); // scene tile drawn to the window height
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    g.drawImage(this.sky(shown, W, H), 0, 0, w, h);
+    const tile = this.tile(shown, W, H);
+    const tw = W * this.scale * k;
+    const th = h;
+    const off = ((((sim.camY + this.camShift) * 0.35) % H) + H) % H;
+    const oy = off * this.scale * k;
+    for (let x = w / 2 - tw / 2 - Math.ceil(w / tw / 2 + 1) * tw; x < w; x += tw) {
+      g.drawImage(tile, x, oy - th, tw, th);
+      g.drawImage(tile, x, oy, tw, th);
+    }
+    // Dim the surroundings so the field stays the focus.
+    g.fillStyle = 'rgba(6,9,16,0.5)';
+    g.fillRect(0, 0, w, h);
+    const v = g.createRadialGradient(w / 2, h / 2, h * 0.3, w / 2, h / 2, Math.max(w, h) * 0.75);
+    v.addColorStop(0, 'rgba(0,0,0,0)');
+    v.addColorStop(1, 'rgba(0,0,0,0.45)');
+    g.fillStyle = v;
+    g.fillRect(0, 0, w, h);
   }
 
   // ---------- Background ----------
@@ -1083,12 +1171,15 @@ export class Renderer {
     const beamAngle = hero.facing > 0 ? rig.torchAngle : Math.PI - rig.torchAngle;
     if (!sim.dead) this.drawBeam(sim, tipX, tipY, beamAngle, rgb, outfit.newTorch, dt);
 
+    const shielded = sim.light === 'red' && !sim.dead;
+    if (shielded) this.drawShieldGlow(pose, rig, x, footY, sx * hero.facing, sy, sim.time, dt, 'halo');
     ctx.save();
     ctx.translate(x, footY);
     if (sim.dead) ctx.rotate(hero.spin);
     ctx.scale(sx * hero.facing, sy);
     drawHeroBody(ctx, pose, rig);
     ctx.restore();
+    if (shielded) this.drawShieldGlow(pose, rig, x, footY, sx * hero.facing, sy, sim.time, dt, 'rim');
 
     // Lens flare and a color-change ring at the flashlight.
     if (!sim.dead) {
@@ -1124,7 +1215,6 @@ export class Renderer {
       ctx.globalCompositeOperation = 'source-over';
     }
 
-    if (sim.light === 'red' && !sim.dead) this.drawAura(x, footY - 28, sim.time, dt);
     if (this.flash > 0) {
       // Snap flash: a bright burst around the whole figure.
       ctx.save();
@@ -1184,81 +1274,108 @@ export class Renderer {
     ctx.restore();
   }
 
-  /** The red shield: a living energy field around the hero instead of a plain circle. */
-  private drawAura(cx: number, cy: number, t: number, dt: number): void {
+  private glowCanvas: HTMLCanvasElement | null = null;
+  private embers: { x: number; y: number; vx: number; vy: number; t: number; max: number }[] = [];
+
+  /**
+   * The red shield: a dense but airy glow that hugs the hero's silhouette.
+   * The hero is drawn once into a small offscreen canvas and tinted red; copies of that
+   * silhouette around the figure form a soft thick halo (no blur filters). A thin bright
+   * rim on top, slow breathing and a few rising embers make it feel alive.
+   */
+  private drawShieldGlow(
+    pose: HeroPose,
+    rig: Rig,
+    x: number,
+    footY: number,
+    sx: number,
+    sy: number,
+    t: number,
+    dt: number,
+    layer: 'halo' | 'rim',
+  ): void {
     const ctx = this.ctx;
-    const pulse = this.auraPulse;
-    const reduced = this.reducedEffects;
+    const k = this.scale * this.dpr;
+    const BW = 120;
+    const BH = 130;
+    if (layer === 'halo') {
+      if (!this.glowCanvas) this.glowCanvas = document.createElement('canvas');
+      const c = this.glowCanvas;
+      const w = Math.ceil(BW * k);
+      const h = Math.ceil(BH * k);
+      if (c.width !== w || c.height !== h) {
+        c.width = w;
+        c.height = h;
+      }
+      const g = c.getContext('2d')!;
+      g.setTransform(1, 0, 0, 1, 0, 0);
+      g.globalCompositeOperation = 'source-over';
+      g.clearRect(0, 0, w, h);
+      g.setTransform(k, 0, 0, k, 0, 0);
+      g.translate(BW / 2, BH - 18);
+      g.scale(sx, sy);
+      drawHeroBody(g, pose, rig);
+      g.setTransform(1, 0, 0, 1, 0, 0);
+      g.globalCompositeOperation = 'source-in';
+      g.fillStyle = '#ff3b4f';
+      g.fillRect(0, 0, w, h);
+    }
+    const c = this.glowCanvas;
+    if (!c) return;
+    const ox = x - BW / 2;
+    const oy = footY - (BH - 18);
+    const breathe = 0.85 + 0.15 * Math.sin(t * 4.5) + this.auraPulse * 0.6;
     ctx.save();
     ctx.globalCompositeOperation = 'lighter';
-    // Soft inner glow.
-    const inner = ctx.createRadialGradient(cx, cy, 6, cx, cy, 44 + pulse * 10);
-    inner.addColorStop(0, 'rgba(255,60,80,0)');
-    inner.addColorStop(0.65, `rgba(255,60,80,${0.1 + pulse * 0.15})`);
-    inner.addColorStop(1, 'rgba(255,60,80,0)');
-    ctx.fillStyle = inner;
-    ctx.fillRect(cx - 60, cy - 60, 120, 120);
-    // Wobbling energy shells.
-    const shells = reduced ? 1 : 3;
-    for (let k = 0; k < shells; k++) {
-      ctx.beginPath();
-      for (let i = 0; i <= 48; i++) {
-        const a = (i / 48) * Math.PI * 2;
-        const w =
-          1 +
-          (reduced ? 0 : 0.07 * Math.sin(3 * a + t * (3 + k) + k * 2) + 0.045 * Math.sin(5 * a - t * (5 - k)));
-        const rx = (25 + k * 3 + pulse * 6) * w;
-        const ry = (33 + k * 3 + pulse * 6) * w;
-        const px = cx + Math.cos(a) * rx;
-        const py = cy + Math.sin(a) * ry;
-        if (i === 0) ctx.moveTo(px, py);
-        else ctx.lineTo(px, py);
+    if (layer === 'halo') {
+      // Soft body of light behind the figure.
+      const core = ctx.createRadialGradient(x, footY - 30, 4, x, footY - 30, 48 + this.auraPulse * 12);
+      core.addColorStop(0, `rgba(255,60,80,${0.16 * breathe})`);
+      core.addColorStop(1, 'rgba(255,60,80,0)');
+      ctx.fillStyle = core;
+      ctx.fillRect(x - 64, footY - 94, 128, 128);
+      // Thick soft outline: silhouette copies on two rings.
+      const rings: [number, number][] = this.reducedEffects ? [[3, 0.22]] : [[2.4, 0.26], [4.8, 0.13], [7.5, 0.06]];
+      for (const [r, a] of rings) {
+        ctx.globalAlpha = Math.min(1, a * breathe);
+        for (let i = 0; i < 8; i++) {
+          const ang = (i / 8) * Math.PI * 2 + t * 0.6;
+          ctx.drawImage(c, ox + Math.cos(ang) * r, oy + Math.sin(ang) * r - (r > 4 ? 1.5 : 0), BW, BH);
+        }
       }
-      ctx.closePath();
-      ctx.strokeStyle = `rgba(255,${80 + k * 40},${90 + k * 30},${0.55 - k * 0.14 + pulse * 0.3})`;
-      ctx.lineWidth = 2.2 - k * 0.5;
-      ctx.stroke();
-    }
-    if (!reduced) {
-      // Flame tongues licking upward over the head.
-      for (let i = 0; i < 5; i++) {
-        const a = -Math.PI / 2 + (i - 2) * 0.32;
-        const bx = cx + Math.cos(a) * 26;
-        const by = cy + Math.sin(a) * 33;
-        const h = 6 + 5 * Math.sin(t * 6 + i * 1.7);
-        ctx.fillStyle = 'rgba(255,90,90,0.35)';
-        ctx.beginPath();
-        ctx.moveTo(bx - 4, by + 2);
-        ctx.quadraticCurveTo(bx + Math.sin(t * 4 + i) * 3, by - h, bx + 4, by + 2);
-        ctx.fill();
+      ctx.globalAlpha = 1;
+    } else {
+      // Bright thin rim on top of the hero.
+      ctx.globalAlpha = 0.18 * breathe;
+      ctx.drawImage(c, ox, oy, BW, BH);
+      ctx.globalAlpha = 1;
+      if (!this.reducedEffects) {
+        if (Math.random() < dt * 14) {
+          this.embers.push({ x: x + (Math.random() - 0.5) * 30, y: footY - 10 - Math.random() * 46, vx: (Math.random() - 0.5) * 10, vy: -(18 + Math.random() * 22), t: 0, max: 0.8 + Math.random() * 0.6 });
+        }
+        this.embers = this.embers.filter((e) => (e.t += dt) < e.max);
+        for (const e of this.embers) {
+          e.x += e.vx * dt;
+          e.y += e.vy * dt;
+          const a = 1 - e.t / e.max;
+          const r = 3.2 * a + 0.8;
+          const gg = ctx.createRadialGradient(e.x, e.y, 0, e.x, e.y, r);
+          gg.addColorStop(0, `rgba(255,190,190,${0.9 * a})`);
+          gg.addColorStop(1, 'rgba(255,60,80,0)');
+          ctx.fillStyle = gg;
+          ctx.fillRect(e.x - r, e.y - r, r * 2, r * 2);
+        }
       }
-      // Sparks orbiting with short trails.
-      for (let i = 0; i < 6; i++) {
-        const a = t * 2.4 + (i * Math.PI) / 3;
-        const px = cx + Math.cos(a) * 30;
-        const py = cy + Math.sin(a) * 38;
-        const tx = cx + Math.cos(a - 0.25) * 30;
-        const ty = cy + Math.sin(a - 0.25) * 38;
-        ctx.strokeStyle = 'rgba(255,170,170,0.5)';
-        ctx.lineWidth = 1.5;
+      // A blocked hit: a quick flare outward.
+      if (this.auraPulse > 0) {
+        ctx.strokeStyle = `rgba(255,140,150,${this.auraPulse * 0.8})`;
+        ctx.lineWidth = 2.5 * this.auraPulse;
         ctx.beginPath();
-        ctx.moveTo(tx, ty);
-        ctx.lineTo(px, py);
+        ctx.ellipse(x, footY - 30, 26 + (1 - this.auraPulse) * 30, 34 + (1 - this.auraPulse) * 30, 0, 0, Math.PI * 2);
         ctx.stroke();
-        ctx.fillStyle = 'rgba(255,230,230,0.95)';
-        ctx.fillRect(px - 1.2, py - 1.2, 2.4, 2.4);
       }
-    }
-    // A blocked hit sends a ring outward.
-    if (pulse > 0) {
-      ctx.strokeStyle = `rgba(255,120,130,${pulse})`;
-      ctx.lineWidth = 3 * pulse;
-      ctx.beginPath();
-      ctx.ellipse(cx, cy, 30 + (1 - pulse) * 30, 38 + (1 - pulse) * 30, 0, 0, Math.PI * 2);
-      ctx.stroke();
     }
     ctx.restore();
-    void dt;
   }
 
   /** A colored ribbon behind the hero on a ×3 combo. */
@@ -1434,41 +1551,129 @@ function easeInOut(t: number): number {
   return k < 0.5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2;
 }
 
-/** Money grows richer with the tier: coins, bills, stacks, gold bars. */
+/**
+ * Money changes on every tier: copper, silver, small notes, big notes, a bundle, a fat bundle,
+ * an envelope, gold coins, a gold bar, a briefcase, a diamond, a gold card, a space crystal.
+ */
 function drawMoney(ctx: CanvasRenderingContext2D, x: number, y: number, rot: number, tier: number): void {
   ctx.save();
   ctx.translate(x, y);
   ctx.rotate(rot);
-  if (tier < 3) {
-    ctx.fillStyle = '#E3B341';
+  const coin = (fill: string, rim: string, r: number): void => {
+    const squeeze = Math.abs(Math.cos(rot * 2)) * 0.8 + 0.2;
+    ctx.fillStyle = rim;
     ctx.beginPath();
-    ctx.ellipse(0, 0, 4.5, 4.5 * Math.abs(Math.cos(rot * 2)) + 1, 0, 0, Math.PI * 2);
+    ctx.ellipse(0, 0, r, r * squeeze, 0, 0, Math.PI * 2);
     ctx.fill();
-    ctx.fillStyle = 'rgba(255,255,255,0.5)';
-    ctx.fillRect(-1.5, -1.5, 2, 2);
-  } else if (tier < 6) {
-    ctx.fillStyle = palette.bill;
-    ctx.fillRect(-6, -3.5, 12, 7);
-    ctx.fillStyle = palette.billMark;
-    ctx.fillRect(-2, -2, 4, 4);
-  } else if (tier < 9) {
-    ctx.fillStyle = '#4E9A5A';
-    ctx.fillRect(-7, -1, 14, 5);
-    ctx.fillStyle = palette.bill;
-    ctx.fillRect(-7, -4.5, 14, 4.5);
-    ctx.fillStyle = '#E8C060';
-    ctx.fillRect(-1.5, -4.5, 3, 9);
-  } else {
-    ctx.fillStyle = '#C99A2E';
+    ctx.fillStyle = fill;
     ctx.beginPath();
-    ctx.moveTo(-7, 3);
-    ctx.lineTo(7, 3);
-    ctx.lineTo(5, -3);
-    ctx.lineTo(-5, -3);
-    ctx.closePath();
+    ctx.ellipse(0, 0, r * 0.72, r * 0.72 * squeeze, 0, 0, Math.PI * 2);
     ctx.fill();
-    ctx.fillStyle = '#FFE58A';
-    ctx.fillRect(-4, -2.5, 8, 2);
+  };
+  const note = (w: number, h: number, fill: string, mark: string): void => {
+    ctx.fillStyle = fill;
+    ctx.fillRect(-w / 2, -h / 2, w, h);
+    ctx.fillStyle = mark;
+    ctx.fillRect(-w / 2 + 1, -h / 2 + 1, w - 2, 1);
+    ctx.beginPath();
+    ctx.arc(0, 0, h * 0.28, 0, Math.PI * 2);
+    ctx.fill();
+  };
+  switch (Math.min(12, Math.max(0, tier))) {
+    case 0:
+      coin('#C77B3A', '#8E5320', 3.8);
+      break;
+    case 1:
+      coin('#D9DDE3', '#9AA3AF', 4.2);
+      break;
+    case 2:
+      note(10, 6, '#A6D9A0', '#5E9A5A');
+      break;
+    case 3:
+      note(13, 7, '#7FCF8A', '#3E8C4C');
+      break;
+    case 4:
+      note(13, 7, '#7FCF8A', '#3E8C4C');
+      ctx.fillStyle = '#E8C060';
+      ctx.fillRect(-1.5, -3.5, 3, 7);
+      break;
+    case 5:
+      ctx.fillStyle = '#4E9A5A';
+      ctx.fillRect(-7, -1, 14, 5);
+      note(14, 5, '#7FCF8A', '#3E8C4C');
+      ctx.fillStyle = '#E8C060';
+      ctx.fillRect(-1.5, -2.5, 3, 7.5);
+      break;
+    case 6:
+      ctx.fillStyle = '#F4EAD2';
+      ctx.fillRect(-7, -4.5, 14, 9);
+      ctx.strokeStyle = '#C9B98F';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(-7, -4.5);
+      ctx.lineTo(0, 0.5);
+      ctx.lineTo(7, -4.5);
+      ctx.stroke();
+      ctx.fillStyle = '#C8263C';
+      ctx.beginPath();
+      ctx.arc(0, 0.6, 1.6, 0, Math.PI * 2);
+      ctx.fill();
+      break;
+    case 7:
+      coin('#FFD640', '#C99A2E', 4.6);
+      break;
+    case 8:
+      ctx.fillStyle = '#C99A2E';
+      ctx.beginPath();
+      ctx.moveTo(-7, 3);
+      ctx.lineTo(7, 3);
+      ctx.lineTo(5, -3);
+      ctx.lineTo(-5, -3);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = '#FFE58A';
+      ctx.fillRect(-4, -2.5, 8, 2);
+      break;
+    case 9:
+      ctx.fillStyle = '#2A2D36';
+      ctx.fillRect(-7.5, -4.5, 15, 9);
+      ctx.fillStyle = '#C7CCD6';
+      ctx.fillRect(-2.5, -6.5, 5, 2);
+      ctx.fillStyle = '#E8C060';
+      ctx.fillRect(-1, -1, 2, 2);
+      break;
+    case 10:
+      ctx.fillStyle = '#BFF3FF';
+      ctx.beginPath();
+      ctx.moveTo(-5, -2);
+      ctx.lineTo(-2.5, -4.5);
+      ctx.lineTo(2.5, -4.5);
+      ctx.lineTo(5, -2);
+      ctx.lineTo(0, 5);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = 'rgba(255,255,255,0.8)';
+      ctx.fillRect(-1.5, -4, 1.4, 3);
+      break;
+    case 11:
+      ctx.fillStyle = '#D9A520';
+      ctx.fillRect(-7, -4.5, 14, 9);
+      ctx.fillStyle = '#FFE58A';
+      ctx.fillRect(-5.5, -2.5, 3.5, 2.5);
+      ctx.fillStyle = '#8A5A00';
+      ctx.fillRect(-7, 1.5, 14, 1.2);
+      break;
+    default:
+      ctx.fillStyle = '#B9A6FF';
+      ctx.beginPath();
+      ctx.moveTo(0, -6);
+      ctx.lineTo(3.5, 0);
+      ctx.lineTo(0, 6);
+      ctx.lineTo(-3.5, 0);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = 'rgba(255,255,255,0.75)';
+      ctx.fillRect(-0.6, -4, 1.2, 4);
   }
   ctx.restore();
 }

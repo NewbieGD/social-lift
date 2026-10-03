@@ -60,4 +60,5 @@ export type SimEvent =
   | { type: 'runStart' }
   | { type: 'close'; x: number; y: number }
   | { type: 'pickup'; item: number; x: number; y: number }
-  | { type: 'itemSpawn'; item: number };
+  | { type: 'itemSpawn'; item: number }
+  | { type: 'wall'; x: number; y: number; side: number };

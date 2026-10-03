@@ -117,7 +117,7 @@ async def tutorial_complete(
 @router.get("/leaderboard")
 async def get_leaderboard(
     background: BackgroundTasks,
-    scope: Literal["week", "all"] = Query("week"),
+    scope: Literal["week", "all", "duels"] = Query("week"),
     caller: Caller = Depends(current_user),
     session: AsyncSession = Depends(get_session),
 ) -> dict:
