@@ -42,6 +42,8 @@ class RunFinishIn(Strict):
     tier: int = Field(ge=0, le=len(gc.TIER_THRESHOLDS) - 1)
     captures: int = Field(ge=0, le=1_000_000)
     max_combo: int = Field(ge=0, le=1_000_000)
+    # Items picked up in this run (bit N = item of tier N). Older clients send nothing.
+    items: int = Field(default=0, ge=0, lt=1 << gc.ITEM_COUNT)
     input_log: list[list[int]] = Field(default_factory=list, max_length=gc.MAX_INPUT_LOG)
 
     @field_validator("input_log")

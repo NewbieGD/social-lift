@@ -48,6 +48,9 @@ class User(Base):
     last_tier: Mapped[int] = mapped_column(Integer, default=0)
     best_combo: Mapped[int] = mapped_column(Integer, default=0)
     total_captures: Mapped[int] = mapped_column(Integer, default=0)
+    # Collection: bit N = item of tier N; misses = runs that reached the tier without it.
+    items_mask: Mapped[int] = mapped_column(Integer, default=0)
+    item_misses: Mapped[str] = mapped_column(String(64), default="")
 
     runs: Mapped[list[Run]] = relationship(back_populates="user", cascade="all, delete-orphan", passive_deletes=True)
     weeks: Mapped[list[WeekBest]] = relationship(cascade="all, delete-orphan", passive_deletes=True)
@@ -71,6 +74,8 @@ class Run(Base):
     max_combo: Mapped[int | None] = mapped_column(Integer)
     flags: Mapped[str | None] = mapped_column(String(64))
     input_log: Mapped[str | None] = mapped_column(Text)
+    items_start: Mapped[int] = mapped_column(Integer, default=0)
+    items: Mapped[int | None] = mapped_column(Integer)
 
     user: Mapped[User] = relationship(back_populates="runs")
 

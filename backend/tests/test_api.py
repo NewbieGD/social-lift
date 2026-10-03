@@ -157,3 +157,24 @@ async def test_validation_errors(client):
     assert r.status_code == 422 and r.json()["error"]["code"] == "invalid_request"
     r = await client.put("/api/settings", json={"settings": {"a": {"nested": 1}}, "updated_at": 1}, headers=headers(50))
     assert r.status_code == 422
+
+
+async def test_items_collection_and_validation(client):
+    await ready_player(client, 60)
+    start = (await client.post("/api/runs/start", headers=headers(60))).json()
+    await age_run(start["run_id"], 60)
+    # Cap (tier 0) and slippers (tier 1) found in a run that reached tier 1.
+    r = (await finish(client, 60, start, score=250, duration_ms=50_000, tier=1, captures=40, items=0b11)).json()
+    assert r["status"] == "finished"
+    boot = (await client.post("/api/session/bootstrap", headers=headers(60))).json()
+    assert boot["stats"]["items_mask"] == 0b11
+    # Every run starts from zero, so the same item may be picked again.
+    start = (await client.post("/api/runs/start", headers=headers(60))).json()
+    await age_run(start["run_id"], 60)
+    r = (await finish(client, 60, start, score=12, duration_ms=10_000, captures=6, items=0b1)).json()
+    assert r["status"] == "finished"
+    # An item above the reached tier is rejected.
+    start = (await client.post("/api/runs/start", headers=headers(60))).json()
+    await age_run(start["run_id"], 60)
+    r = (await finish(client, 60, start, score=12, duration_ms=10_000, captures=6, items=0b100)).json()
+    assert r["status"] == "rejected" and r["reason"] == "items_invalid"

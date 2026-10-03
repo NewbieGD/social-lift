@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from .. import game_config as gc
 from ..config import settings
 from ..core import (
+    RunVerdict,
     aware,
     check_run_token,
     make_run_token,
@@ -50,6 +51,8 @@ async def get_or_create_user(session: AsyncSession, caller: Caller) -> User:
             last_tier=0,
             best_combo=0,
             total_captures=0,
+            items_mask=0,
+            item_misses="",
             profile_deactivated=False,
         )
         session.add(user)
@@ -85,6 +88,23 @@ def profile_dict(user: User) -> dict:
         "name": user.display_name,
         "photo": None if user.profile_deactivated else user.photo_url,
     }
+
+
+# ---------- Items ----------
+
+
+def parse_misses(raw: str | None) -> list[int]:
+    out = [0] * gc.ITEM_COUNT
+    for i, part in enumerate((raw or "").split(",")[: gc.ITEM_COUNT]):
+        if part.isdigit():
+            out[i] = min(99, int(part))
+    return out
+
+
+def update_collection(user: User, picked: int, reached_tier: int) -> None:
+    """The wardrobe remembers every item ever found. It is a collection only: no score effect."""
+    del reached_tier
+    user.items_mask = (user.items_mask or 0) | picked
 
 
 # ---------- Ranks ----------
@@ -124,6 +144,8 @@ async def player_stats(session: AsyncSession, user: User) -> dict:
         "last_tier": user.last_tier or 0,
         "best_combo": user.best_combo or 0,
         "total_captures": user.total_captures or 0,
+        "items_mask": user.items_mask or 0,
+        "item_misses": parse_misses(user.item_misses),
         "rank_all": await rank_all(session, user.best_all, aware(user.best_all_at)),
         "rank_week": await rank_week(session, wid, wb.best_score, aware(wb.achieved_at)) if wb else None,
     }
@@ -142,6 +164,7 @@ async def start_run(session: AsyncSession, user: User) -> dict:
         seed=secrets.randbits(32),
         started_at=now,
         status="started",
+        items_start=user.items_mask or 0,
     )
     session.add(run)
     await session.commit()
@@ -151,6 +174,8 @@ async def start_run(session: AsyncSession, user: User) -> dict:
         "seed": run.seed,
         "started_at": int(now.timestamp() * 1000),
         "token": make_run_token(settings.run_signing_secret, run.id, user.id, started_ts),
+        "items_mask": run.items_start,
+        "item_misses": parse_misses(user.item_misses),
     }
 
 
@@ -204,6 +229,11 @@ async def finish_run(session: AsyncSession, caller: Caller, body: RunFinishIn) -
     run.captures = body.captures
     run.max_combo = body.max_combo
     run.input_log = json.dumps(body.input_log, separators=(",", ":"))
+    run.items = body.items
+
+    # Items may only come from tiers reached in this run (every run starts with nothing worn).
+    if verdict.ok and body.items and body.items >> (body.tier + 1):
+        verdict = RunVerdict(False, "items_invalid")
 
     is_record = False
     is_week_record = False
@@ -220,6 +250,7 @@ async def finish_run(session: AsyncSession, caller: Caller, body: RunFinishIn) -
         user.last_tier = body.tier
         user.best_combo = max(user.best_combo or 0, min(body.max_combo, body.captures))
         user.total_captures = (user.total_captures or 0) + body.captures
+        update_collection(user, body.items, body.tier)
         if body.score > user.best_all:
             user.best_all = body.score
             user.best_all_at = now
