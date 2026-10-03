@@ -15,7 +15,6 @@ import random
 import secrets
 import time
 import uuid
-from collections import deque
 from dataclasses import dataclass, field
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
@@ -23,8 +22,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from .config import settings
 from .db import SessionLocal
 from .models import User
-from . import chat_filter
-from .services import game, notify
+from .services import game
 from .vk_sign import verify_launch_params
 
 log = logging.getLogger("duel")
@@ -33,8 +31,6 @@ router = APIRouter(prefix="/api")
 INVITE_TIMEOUT_SEC = 15
 START_DELAY_MS = 3500
 MAX_MESSAGE_BYTES = 16_000
-CHAT_COOLDOWN_SEC = 30
-CHAT_HISTORY = 60
 
 
 @dataclass
@@ -48,9 +44,6 @@ class Conn:
     invite_from: int | None = None
     declined: dict[int, float] = field(default_factory=dict)
     msgs: list[float] = field(default_factory=list)
-    in_chat: bool = False
-    chat_rank: int | None = None
-    last_chat: float = -1e9
 
 
 @dataclass
@@ -61,8 +54,6 @@ class Duel:
     done: set[int] = field(default_factory=set)
 
 
-chat_history: deque[dict] = deque(maxlen=CHAT_HISTORY)
-chat_seq = 0
 conns: dict[int, Conn] = {}
 duels: dict[str, Duel] = {}
 invites: dict[int, tuple[int, float]] = {}  # target -> (from, time)
@@ -83,88 +74,6 @@ def opponent_of(d: Duel, user_id: int) -> int:
 
 def public(c: Conn) -> dict:
     return {"id": c.user_id, "name": c.name, "photo": c.photo}
-
-
-def chat_user(c: Conn) -> dict:
-    """Public data of a chat member: avatar, name and place in the all-time leaderboard."""
-    return {"id": c.user_id, "name": c.name, "photo": c.photo, "rank": c.chat_rank}
-
-
-def chat_members() -> list[Conn]:
-    return [c for c in conns.values() if c.in_chat]
-
-
-async def chat_broadcast(msg: dict) -> None:
-    for c in chat_members():
-        await send(c, msg)
-
-
-async def chat_send_users() -> None:
-    await chat_broadcast({"t": "chat_users", "users": [chat_user(c) for c in chat_members()]})
-
-
-def chat_wait(c: Conn) -> int:
-    return max(0, int(CHAT_COOLDOWN_SEC - (time.monotonic() - c.last_chat) + 0.999))
-
-
-async def chat_join(me: Conn) -> None:
-    fresh = not me.in_chat
-    if fresh:
-        async with SessionLocal() as session:
-            user = await session.get(User, me.user_id)
-            me.chat_rank = await game.rank_all(session, user.best_all, user.best_all_at) if user else None
-        me.in_chat = True
-    await send(
-        me,
-        {"t": "chat_hist", "msgs": list(chat_history), "users": [chat_user(c) for c in chat_members()], "wait": chat_wait(me)},
-    )
-    if fresh:
-        for c in chat_members():
-            if c is not me:
-                await send(c, {"t": "chat_user", "action": "join", "user": chat_user(me)})
-        await chat_send_users()
-
-
-async def chat_leave(me: Conn) -> None:
-    if not me.in_chat:
-        return
-    me.in_chat = False
-    await chat_send_users()
-
-
-async def chat_say(me: Conn, raw: object) -> None:
-    global chat_seq
-    if not me.in_chat:
-        return
-    text = chat_filter.clean(raw)
-    problem = chat_filter.check(text)
-    if problem:
-        await send(me, {"t": "chat_err", "code": problem})
-        return
-    wait = chat_wait(me)
-    if wait > 0:
-        await send(me, {"t": "chat_err", "code": "cooldown", "wait": wait})
-        return
-    me.last_chat = time.monotonic()
-    chat_seq += 1
-    msg = {"id": chat_seq, "ts": int(time.time() * 1000), "user": chat_user(me), "text": text}
-    chat_history.append(msg)
-    await chat_broadcast({"t": "chat", "msg": msg})
-    await send(me, {"t": "chat_cd", "wait": CHAT_COOLDOWN_SEC})
-
-
-async def challenge(me: Conn, target_id: object) -> None:
-    """A direct duel challenge to a chosen player (from the chat)."""
-    if not isinstance(target_id, int) or target_id == me.user_id:
-        return
-    target = conns.get(target_id)
-    if me.state != "idle":
-        await send(me, {"t": "busy", "who": "me"})
-        return
-    if target is None or target.state != "idle" or target.user_id in invites:
-        await send(me, {"t": "busy", "who": "them", "name": target.name if target else None})
-        return
-    await invite(me, target)
 
 
 async def broadcast_online() -> None:
@@ -241,7 +150,6 @@ async def duel_socket(ws: WebSocket) -> None:
     finally:
         if conns.get(me.user_id) is me:
             del conns[me.user_id]
-        await chat_leave(me)
         await leave_duel(me)
         await broadcast_online()
 
@@ -252,14 +160,6 @@ async def handle(me: Conn, msg: dict) -> None:
         me.state = "run" if msg.get("v") == "run" else "idle"
     elif t == "find":
         await find(me)
-    elif t == "chat_join":
-        await chat_join(me)
-    elif t == "chat_leave":
-        await chat_leave(me)
-    elif t == "chat":
-        await chat_say(me, msg.get("text"))
-    elif t == "challenge":
-        await challenge(me, msg.get("to"))
     elif t == "cancel":
         if me.state == "searching":
             me.state = "idle"
@@ -320,21 +220,13 @@ async def find(me: Conn) -> None:
     if not pool:
         await send(me, {"t": "none", "n": len(conns)})
         return
-    await invite(me, random.choice(pool))
-
-
-async def invite(me: Conn, target: Conn) -> None:
-    now = time.monotonic()
+    target = random.choice(pool)
     me.state = "searching"
     target.state = "invited"
     invites[target.user_id] = (me.user_id, now)
     await send(target, {"t": "invite", "from": public(me), "timeout": INVITE_TIMEOUT_SEC})
     await send(me, {"t": "waiting", "to": public(target), "timeout": INVITE_TIMEOUT_SEC})
     asyncio.get_event_loop().create_task(_expire_invite(target.user_id, me.user_id))
-    # Also tell the challenged player in VK, in case the game is in the background.
-    asyncio.get_event_loop().create_task(
-        notify.send_notification(target.user_id, notify.duel_challenge_text(me.name))
-    )
 
 
 async def _expire_invite(target_id: int, from_id: int) -> None:

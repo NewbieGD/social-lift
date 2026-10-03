@@ -2,7 +2,8 @@ import { gameConfig, type ColorId, type LightId } from '../core/gameConfig';
 import type { Sim } from '../core/sim';
 import type { Platform, SimEvent } from '../core/types';
 import { ru } from '../i18n/ru';
-import { drawHeroBody, drawItem, heroRig, ITEM_ANCHOR, ITEM_BY_TIER, outfitFromMask, type AttachPoint, type Face, type Gesture, type HeroPose, type Item, type Rig } from './hero';
+import { drawItem, heroRig, ITEM_ANCHOR, ITEM_BY_TIER, outfitFromMask, type AttachPoint, type Face, type Gesture, type HeroPose, type Item, type Rig } from './hero';
+import { drawBody, prepareHero } from './hero3dBridge';
 import { palette } from './palette';
 import { paintScene, paintSky } from './scenes';
 
@@ -302,7 +303,7 @@ export class Renderer {
       } else if (e.type === 'close') {
         this.floaters.push({ x: e.x, y: e.y + 46, life: 0.9, max: 0.9, text: ru.hud.close, color: '#FFE58A', big: true });
       } else if (e.type === 'light') {
-        if (e.light && !this.reducedEffects) this.rings.push({ t: 0, color: palette.light[e.light] });
+        if (!this.reducedEffects) this.rings.push({ t: 0, color: palette.light[e.light] });
       } else if (e.type === 'tier') {
         this.moneyTier = e.tier;
         this.prewarm(Math.min(e.tier + 1, 12), H);
@@ -1162,7 +1163,7 @@ export class Renderer {
       outfit,
       noBeam: true,
     };
-    const rig = heroRig(pose);
+    const rig = prepareHero(pose, heroRig(pose), this.scale * this.dpr);
     this.heroXf = sim.dead ? null : { x, y: footY, sx, sy, facing: hero.facing, rig };
 
     // The beam starts at the flashlight lens and follows its angle.
@@ -1177,7 +1178,7 @@ export class Renderer {
     ctx.translate(x, footY);
     if (sim.dead) ctx.rotate(hero.spin);
     ctx.scale(sx * hero.facing, sy);
-    drawHeroBody(ctx, pose, rig);
+    drawBody(ctx, pose, rig);
     ctx.restore();
     if (shielded) this.drawShieldGlow(pose, rig, x, footY, sx * hero.facing, sy, sim.time, dt, 'rim');
 
@@ -1314,7 +1315,7 @@ export class Renderer {
       g.setTransform(k, 0, 0, k, 0, 0);
       g.translate(BW / 2, BH - 18);
       g.scale(sx, sy);
-      drawHeroBody(g, pose, rig);
+      drawBody(g, pose, rig);
       g.setTransform(1, 0, 0, 1, 0, 0);
       g.globalCompositeOperation = 'source-in';
       g.fillStyle = '#ff3b4f';

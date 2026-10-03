@@ -3,6 +3,7 @@
 // Origin: between the feet on the floor; y grows downward.
 
 import type { Outfit } from './hero';
+import { drawFront3D } from './hero3dBridge';
 import { bodyGradient, edge, fist3d, hand3d, limb3d, sphere, spec, tone, torch3d, type P } from './shade3d';
 
 const SKIN = '#EDB48A';
@@ -95,6 +96,7 @@ export function drawHeroFront(
   pose: FrontPose = 'idle',
   face: 'normal' | 'grin' = 'normal',
 ): void {
+  if (drawFront3D(ctx, o, t, pose, face)) return;
   const breathe = Math.sin(t * 2.4) * 0.45;
   const jacket = o.top === 'jacket' && !o.suit;
   const skin = o.suit ? '#E9EEF5' : SKIN;

@@ -52,11 +52,6 @@ export class Generator {
     return this.make(x, y, 'start', null, false, 0);
   }
 
-  /** A platform placed by the tutorial script (never part of a real run). */
-  makeScripted(x: number, y: number, kind: Platform['kind'], color: ColorId | null): Platform {
-    return this.make(x, y, kind, color, false, 0);
-  }
-
   /**
    * Generate platforms until the safe path reaches `targetY`.
    * `existing` is used to respect the on-screen limit.
