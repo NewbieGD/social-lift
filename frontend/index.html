@@ -38,14 +38,20 @@
                 </button>
               </div>
             </div>
+            <div id="duelBar" class="duel-bar" aria-live="off">
+              <div class="duel-side me"><small>Вы</small><b id="duelMe">0</b></div>
+              <div class="duel-vs">:</div>
+              <div class="duel-side opp"><b id="duelOpp">0</b><small id="duelOppName"></small></div>
+            </div>
             <div id="hint" class="hint"></div>
+            <div id="tutCard" class="tut" aria-live="polite"></div>
             <div id="toast" class="toast"></div>
             <div id="press" class="press" aria-hidden="true"></div>
             <div id="floor" class="floor" aria-hidden="true"></div>
             <div id="caption" class="caption" aria-live="polite"></div>
             <div id="oppWrap" class="opp" aria-hidden="true">
               <canvas id="opp"></canvas>
-              <div class="opp-label"><span id="oppName"></span><b id="oppScore">0</b></div>
+              <div class="opp-label"><span id="oppName"></span></div>
             </div>
             <button id="skipBtn" class="skip-btn" data-action="skipTutorial"></button>
           </div>

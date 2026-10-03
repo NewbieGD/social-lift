@@ -2,28 +2,29 @@ import '@fontsource-variable/rubik';
 import './styles.css';
 import { audio } from './audio/audio';
 import { PROFILE_URL, SUPPORT_URL, TERMS_VERSION } from './config';
-import { gameConfig, isColorUnlocked, type ColorId, type LightId } from './core/gameConfig';
+import { gameConfig, type ColorId, type LightId } from './core/gameConfig';
 import { randomSeed } from './core/prng';
 import { DT, Sim } from './core/sim';
 import type { SimEvent } from './core/types';
 import { ru } from './i18n/ru';
-import { InputController } from './input/input';
+import { DEFAULT_KEYS, InputController, keyLabel, STEER_CODES } from './input/input';
 import { ApiError } from './net/api';
 import { Session, type RunTicket, type Stats } from './net/session';
 import { haptic, hapticsSupported, initHaptics } from './platform/haptics';
 import { ads, DEFAULT_ADS, type AdsConfig } from './platform/ads';
 import { canShare, initShare, shareStory, shareWall } from './platform/share';
-import { initVk } from './platform/vk';
-import { DuelClient, type DuelMsg, type DuelPlayer } from './net/duel';
+import { lockGestures } from './platform/gestures';
+import { askNotifications, initVk } from './platform/vk';
+import { DuelClient, type ChatMsg, type ChatUser, type DuelMsg, type DuelPlayer } from './net/duel';
 import { scenes } from './render/palette';
 import { drawItem, ITEM_BY_TIER, itemCount, outfitFromMask, type Item } from './render/hero';
 import { drawHeroFront } from './render/heroFront';
-import { loadHero3D } from './render/hero3dBridge';
 import { Renderer } from './render/renderer';
 import { applyControls } from './ui/controlsLayout';
 import { $ } from './ui/dom';
 import { Router } from './ui/router';
-import { settingsStore, type Settings } from './ui/settingsStore';
+import { Tutorial } from './ui/tutorial';
+import { settingsStore, type KeySetting, type Settings } from './ui/settingsStore';
 import * as V from './ui/views';
 
 // ---------- Elements ----------
@@ -47,13 +48,14 @@ const shatterEl = $('shatter');
 const edgeGlow = $('edgeGlow');
 const walletIcon = $('walletIcon');
 const bonusEl = $('bonus');
+const tutCardEl = $('tutCard');
 
 const renderer = new Renderer(canvas);
 const backdrop = $<HTMLCanvasElement>('backdrop');
 const input = new InputController([field]);
 const session = new Session();
 const router = new Router($('screens'));
-const isTouch = window.matchMedia('(pointer: coarse)').matches;
+const isTouch = window.matchMedia('(pointer: coarse)').matches || window.matchMedia('(hover: none)').matches;
 
 // ---------- Game state ----------
 
@@ -126,7 +128,6 @@ for (const light of LIGHTS) {
   const b = document.createElement('button');
   b.className = 'light-btn';
   b.dataset.light = light;
-  b.dataset.key = light === 'red' ? 'Пробел' : light === 'yellow' ? '1' : light === 'blue' ? '2' : '3';
   b.setAttribute('aria-label', ru.colors[light]);
   buttonsEl.appendChild(b);
   buttons.set(light, b);
@@ -147,7 +148,7 @@ for (const light of LIGHTS) {
 function renderButtons(): void {
   for (const light of LIGHTS) {
     const b = buttons.get(light)!;
-    const locked = light !== 'red' && !isColorUnlocked(light as ColorId, sim.tier);
+    const locked = !sim.lightAvailable(light);
     b.classList.toggle('locked', locked);
     b.classList.toggle('active', sim.light === light);
     const label = light === 'red' ? ru.common.shield : `+${gameConfig.colors[light as ColorId].points}`;
@@ -161,12 +162,19 @@ function renderButtons(): void {
 
 // ---------- Settings ----------
 
+function keyBindings(s: Settings): Record<LightId, string> {
+  return { yellow: s.keyYellow, blue: s.keyBlue, green: s.keyGreen, red: s.keyRed };
+}
+
 function applySettings(s: Settings, changed?: (keyof Settings)[]): void {
   // Beside the wide field the buttons stand in one column.
   const placement = document.body.classList.contains('wide') ? { layout: 'row' as const, side: 'left' as const } : s;
   applyControls(placement, { controls: controlsEl, buttons: buttonsEl, board, shield: buttons.get('red')! });
   input.mode = s.steer;
   input.sensitivity = s.sens;
+  const keys = keyBindings(s);
+  input.setBindings(keys);
+  for (const light of LIGHTS) buttons.get(light)!.dataset.key = keyLabel(keys[light]);
   board.classList.toggle('zones', s.steer === 'zones');
   renderer.reducedEffects = s.reducedFx;
   renderer.colorblind = s.colorblind;
@@ -345,14 +353,13 @@ function handleUiEvents(events: SimEvent[]): void {
       audio.stopTension();
       audio.play('death');
       if (settingsStore.get().vibration) haptic('heavy');
-      if (mode === 'tutorial') tutorialDeath();
-      else deathTimer = 0;
+      deathTimer = 0;
       if (duel) {
         flushDuelInputs(true);
         duelClient.send({ t: 'dead', score: sim.score });
       }
-    } else if (e.type === 'aura' && mode === 'tutorial' && tutStep === 3) {
-      advanceTutorial();
+    } else if (e.type === 'rescue') {
+      toast(e.reason === 'red' ? ru.tutorial.shieldOn : ru.tutorial.rescued, 2600);
     }
   }
 }
@@ -374,7 +381,7 @@ function updateHud(dt: number): void {
   comboBar.parentElement!.classList.toggle('on', sim.streak > 0 && mode !== 'menu');
   audio.setDanger(mode === 'run' && !paused ? renderer.danger : 0);
   tierEl.textContent = mode === 'tutorial' ? ru.tutorial.badge : ticket || mode !== 'run' ? ru.tiers[sim.tier] : ru.hud.unranked;
-  const hint = mode === 'tutorial' ? tutorialHint() : '';
+  const hint = mode === 'tutorial' ? tutorial.hint() : '';
   if (hintEl.dataset.text !== hint) {
     hintEl.dataset.text = hint;
     hintEl.textContent = hint;
@@ -385,57 +392,28 @@ function updateHud(dt: number): void {
 
 // ---------- Tutorial ----------
 
-let tutStep = 0;
-let tutRetry = false;
+const tutorial = new Tutorial(tutCardEl, {
+  sim: () => sim,
+  isTouch,
+  keyLabel: (light) => keyLabel(keyBindings(settingsStore.get())[light]),
+  highlight: (light) => {
+    for (const l of LIGHTS) buttons.get(l)!.classList.toggle('tut-target', l === light);
+    document.body.classList.toggle('tut-focus', light !== null);
+  },
+  finish: () => finishTutorial(),
+});
 
-function tutorialHint(): string {
-  if (tutRetry) return ru.tutorial.retry;
-  switch (tutStep) {
-    case 0:
-      return isTouch ? ru.tutorial.pressYellow : ru.tutorial.pressYellowKey;
-    case 1:
-      return isTouch ? ru.tutorial.jumpYellow : ru.tutorial.jumpYellowKey;
-    case 2:
-      return ru.tutorial.combo;
-    case 3:
-      return isTouch ? ru.tutorial.shield : ru.tutorial.shieldKey;
-    default:
-      return '';
+function finishTutorial(): void {
+  try {
+    localStorage.setItem('sl_tutorial', '1');
+  } catch {
+    /* ignore */
   }
-}
-
-function tutorialTick(): void {
-  if (tutStep === 0 && sim.light === 'yellow') advanceTutorial();
-  else if (tutStep === 1 && sim.captures >= 1) advanceTutorial();
-  else if (tutStep === 2 && sim.streak >= 3) advanceTutorial();
-  else if (tutStep === 3 && !sim.hasRedPhase) sim.forceRedPhase();
-}
-
-function advanceTutorial(): void {
-  tutStep++;
-  tutRetry = false;
-  if (tutStep === 3) sim.forceRedPhase();
-  if (tutStep >= 4) {
-    try {
-      localStorage.setItem('sl_tutorial', '1');
-    } catch {
-      /* ignore */
-    }
-    void session.completeTutorial();
-    session.event('tutorial_end');
-    mode = 'result';
-    router.reset('tutorialDone');
-  }
-}
-
-function tutorialDeath(): void {
-  // In the tutorial a mistake simply restarts the current lesson.
-  tutRetry = true;
-  const step = tutStep;
-  newSim(randomSeed(), true);
-  if (step >= 2) sim.light = 'yellow';
-  if (step === 3) sim.forceRedPhase();
-  setTimeout(() => (tutRetry = false), 2500);
+  void session.completeTutorial();
+  session.event('tutorial_end');
+  tutorial.stop();
+  mode = 'result';
+  router.reset('tutorialDone');
 }
 
 function tutorialDone(): boolean {
@@ -449,12 +427,11 @@ function tutorialDone(): boolean {
 
 function startTutorial(): void {
   session.event('tutorial_start');
-  tutStep = 0;
-  tutRetry = false;
   ticket = null;
   newSim(randomSeed(), true);
   mode = 'tutorial';
   router.clear();
+  tutorial.begin();
 }
 
 // ---------- Runs ----------
@@ -501,10 +478,12 @@ async function startRun(): Promise<void> {
   const ticketP = session.takeTicket();
   renderer.prewarm(0, sim.viewH);
   renderer.prewarm(1, sim.viewH);
+  if (!adAllowed()) console.info('[ads] не показываем:', adBlockReason());
   if (adAllowed()) {
     audio.suspend();
     const shown = await ads.showInterstitial(adsConfig().timeout_sec);
     audio.resume();
+    if (!shown) console.info('[ads] ВК не отдал рекламу (VKWebAppCheckNativeAds вернул false или ошибку)');
     if (shown) {
       adState.runsSince = 0;
       adState.lastAt = Date.now();
@@ -552,6 +531,17 @@ function saveAdState(): void {
 
 function adsConfig(): AdsConfig {
   return { ...DEFAULT_ADS, ...((session.data?.ads ?? {}) as Partial<AdsConfig>) };
+}
+
+/** Why no ad is shown right now (visible in the browser console, for debugging). */
+function adBlockReason(): string {
+  const c = adsConfig();
+  if (!c.enabled) return 'выключена на сервере (ADS_ENABLED не равно 1)';
+  if (session.mode !== 'online') return `режим ${session.mode}: реклама только внутри ВК`;
+  if (!tutorialDone()) return 'обучение не пройдено';
+  if (adState.completed < c.min_runs_before) return `сыграно ${adState.completed} из ${c.min_runs_before} забегов до первой рекламы`;
+  if (adState.runsSince < c.every_n_runs) return `с прошлой рекламы ${adState.runsSince} из ${c.every_n_runs} забегов`;
+  return 'пауза между показами';
 }
 
 function adAllowed(): boolean {
@@ -617,6 +607,9 @@ function finishRun(): void {
     seconds: Math.floor(sim.runTime),
     record,
     canShare: sim.score > 0 && (canShare().wall || canShare().story),
+    duel: finishedDuel
+      ? { oppName: finishedDuel.opponent.name || ru.duel.player, me: sim.score, opp: oppScoreNow(finishedDuel), oppOut: finishedDuel.opp.dead || finishedDuel.oppFinal !== null || finishedDuel.oppLeft }
+      : null,
   };
   shareData = { score: sim.score, tier: sim.tier, mask: renderer.ownedMask };
   router.reset('result');
@@ -783,6 +776,7 @@ function goMenu(): void {
   }
   mode = 'menu';
   ticket = null;
+  tutorial.stop();
   newSim(randomSeed());
   // The menu is a calm scene of the last reached place: no gameplay behind it.
   const tier = lastTier();
@@ -936,7 +930,7 @@ function resume(): void {
 
 let consentError: string | null = null;
 let deleteError: string | null = null;
-let lbScope: 'week' | 'all' | 'duels' = 'week';
+let lbScope: 'week' | 'all' = 'week';
 let bootState = { progress: 0, label: ru.loading.fonts, error: null as string | null };
 let docKind: 'terms' | 'privacy' | 'rules' = 'rules';
 
@@ -970,6 +964,7 @@ router.register('settings', {
       vibration: hapticsSupported(),
       playerId: session.data?.profile.id ?? null,
       canDelete: session.mode === 'online',
+      keys: { show: !isTouch, rebinding, error: keyError },
     }),
   cls: 'solid',
 });
@@ -993,14 +988,28 @@ router.register('duels', {
       status: session.mode !== 'online' ? 'offline' : !duelClient.connected ? 'connecting' : duelUi,
       online: duelClient.online,
       waitingFor: duelWaitingFor,
+      leadersHtml: duelLbHtml,
     }),
   cls: 'solid',
   mount: () => {
     if (session.mode === 'online') duelClient.connect();
+    void loadDuelLeaders();
   },
 });
 router.register('invite', {
   html: () => (invite ? V.inviteView(invite.from, invite.timeout) : ''),
+  modal: true,
+});
+router.register('chat', {
+  html: () => V.chatView(),
+  cls: 'solid',
+  mount: () => mountChat(),
+});
+router.register('player', {
+  html: () => {
+    const u = chat.known.get(chat.cardId);
+    return u ? V.playerCardView(u, u.id === myId()) : '';
+  },
   modal: true,
 });
 router.register('share', { html: () => V.shareView(canShare()), modal: true });
@@ -1015,6 +1024,11 @@ function errorCode(): string | null {
 }
 
 router.onChange = (top) => {
+  syncChatRoom();
+  if (top !== 'settings') {
+    rebinding = null;
+    keyError = null;
+  }
   // Players who are in a run are not offered as duel opponents.
   duelClient.send({ t: 'state', v: mode === 'run' || mode === 'tutorial' ? 'run' : 'idle' });
   document.body.classList.toggle('playing', top === null && (mode === 'run' || mode === 'tutorial'));
@@ -1057,6 +1071,28 @@ function rememberLocalRun(score: number, tier: number): void {
   }
 }
 
+let duelLbHtml: { rows: string; me: string } | null = null;
+
+/** Rating of duel wins, shown on the Duels screen. */
+async function loadDuelLeaders(): Promise<void> {
+  const list = document.getElementById('duelLbList');
+  const me = document.getElementById('duelLbMe');
+  if (!list || !me || session.mode !== 'online') return;
+  try {
+    const lb = await session.leaderboard('duels', false);
+    duelLbHtml = { rows: V.leadersRows(lb, session.data?.profile.id ?? null, true), me: V.leadersMe(lb) };
+    if (router.top !== 'duels') return;
+    list.innerHTML = duelLbHtml.rows;
+    me.innerHTML = duelLbHtml.me;
+    list.querySelectorAll<HTMLElement>('.stagger > *').forEach((c, i) => c.style.setProperty('--i', String(i)));
+    list.querySelectorAll<HTMLImageElement>('img').forEach((img) =>
+      img.addEventListener('error', () => img.remove(), { once: true }),
+    );
+  } catch {
+    if (!duelLbHtml) list.innerHTML = V.leadersError(ru.leaders.error, false);
+  }
+}
+
 async function loadLeaders(force: boolean): Promise<void> {
   const list = document.getElementById('lbList');
   const me = document.getElementById('lbMe');
@@ -1086,6 +1122,51 @@ async function loadLeaders(force: boolean): Promise<void> {
   }
 }
 
+/** Once per device, after a tap: VK asks whether the game may send notifications (duel challenges). */
+function askNotificationsOnce(): void {
+  if (session.mode !== 'online') return;
+  try {
+    if (localStorage.getItem('sl_notif_asked')) return;
+    localStorage.setItem('sl_notif_asked', '1');
+  } catch {
+    /* ask anyway */
+  }
+  void askNotifications();
+}
+
+// ---------- Key bindings (browser) ----------
+
+const KEY_FIELD: Record<LightId, KeySetting> = { yellow: 'keyYellow', blue: 'keyBlue', green: 'keyGreen', red: 'keyRed' };
+let rebinding: LightId | null = null;
+let keyError: string | null = null;
+
+/** While a button waits for its key, the next key press is taken as the new binding. */
+window.addEventListener(
+  'keydown',
+  (e) => {
+    if (!rebinding) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    if (e.code === 'Escape') {
+      rebinding = null;
+      keyError = null;
+    } else if (STEER_CODES.includes(e.code)) {
+      keyError = ru.settings.keyBusy;
+    } else if (/^[A-Za-z0-9]{2,20}$/.test(e.code)) {
+      const cur = keyBindings(settingsStore.get());
+      const patch: Partial<Settings> = { [KEY_FIELD[rebinding]]: e.code };
+      // A key that already belongs to another button swaps places with this one.
+      const other = LIGHTS.find((l) => l !== rebinding && cur[l] === e.code);
+      if (other) patch[KEY_FIELD[other]] = cur[rebinding] as never;
+      settingsStore.set(patch);
+      rebinding = null;
+      keyError = null;
+    } else return; // Meta/unknown keys: keep waiting
+    if (router.top === 'settings') router.refresh();
+  },
+  true,
+);
+
 // ---------- Actions ----------
 
 const actions: Record<string, (arg: string, el: HTMLElement) => void> = {
@@ -1107,14 +1188,50 @@ const actions: Record<string, (arg: string, el: HTMLElement) => void> = {
   again: () => (settingsStore.get().rulesCard ? router.open('rulesCard') : void startRun()),
   afterTutorial: () => void startRun(),
   skipTutorial: () => {
-    tutStep = 3;
-    advanceTutorial();
+    // Skipping counts as done: the player goes straight to the menu.
+    tutorial.stop();
+    try {
+      localStorage.setItem('sl_tutorial', '1');
+    } catch {
+      /* ignore */
+    }
+    void session.completeTutorial();
+    session.event('tutorial_end');
+    goMenu();
+  },
+  tutOk: () => tutorial.ok(),
+  player: (arg) => {
+    const id = Number(arg);
+    if (!chat.known.has(id)) return;
+    chat.cardId = id;
+    router.open('player');
+  },
+  challenge: (arg) => {
+    askNotificationsOnce();
+    router.back();
+    duelClient.send({ t: 'challenge', to: Number(arg) });
+  },
+  rebind: (arg) => {
+    rebinding = rebinding === arg ? null : (arg as LightId);
+    keyError = null;
+    router.refresh();
+  },
+  keysReset: () => {
+    rebinding = null;
+    keyError = null;
+    settingsStore.set({
+      keyYellow: DEFAULT_KEYS.yellow,
+      keyBlue: DEFAULT_KEYS.blue,
+      keyGreen: DEFAULT_KEYS.green,
+      keyRed: DEFAULT_KEYS.red,
+    });
+    router.refresh();
   },
   toMenu: () => goMenu(),
   resume: () => resume(),
   setSeg: (arg, el) => settingsStore.set({ [el.dataset.key as keyof Settings]: arg } as Partial<Settings>),
   lbScope: (arg) => {
-    lbScope = arg as 'week' | 'all' | 'duels';
+    lbScope = arg as 'week' | 'all';
     router.refresh();
   },
   lbRetry: () => {
@@ -1129,6 +1246,7 @@ const actions: Record<string, (arg: string, el: HTMLElement) => void> = {
   },
   acceptConsent: () => void acceptConsent(),
   duelFind: () => {
+    askNotificationsOnce();
     duelUi = 'waiting';
     duelWaitingFor = null;
     duelClient.send({ t: 'find' });
@@ -1140,6 +1258,7 @@ const actions: Record<string, (arg: string, el: HTMLElement) => void> = {
     router.refresh();
   },
   duelAccept: () => {
+    askNotificationsOnce();
     duelClient.send({ t: 'accept' });
     router.back();
   },
@@ -1286,8 +1405,6 @@ async function boot(): Promise<void> {
     new Promise((r) => setTimeout(r, 2000)),
   ]).catch(() => undefined);
   setBoot(0.35, ru.loading.graphics);
-  // The 3D hero; if it is slow or missing the game starts with the flat hero (and switches when it arrives).
-  await Promise.race([loadHero3D(`${import.meta.env.BASE_URL}hero.glb`), new Promise((r) => setTimeout(r, 6000))]);
   await initHaptics();
   await initShare();
   await new Promise((r) => requestAnimationFrame(r));
@@ -1311,6 +1428,169 @@ function afterBoot(): void {
   else goMenu();
 }
 
+// ---------- Chat ----------
+
+const chat = {
+  msgs: [] as ChatMsg[],
+  online: [] as ChatUser[],
+  known: new Map<number, ChatUser>(),
+  cardId: 0,
+  cdUntil: 0,
+  wanted: false,
+  joined: false,
+  lastText: '',
+  statusTimer: 0,
+};
+
+function myId(): number | null {
+  return session.data?.profile.id ?? null;
+}
+
+function remember(u: ChatUser): void {
+  chat.known.set(u.id, u);
+}
+
+/** Joins the chat room while the chat screen is open (also over the player card), leaves otherwise. */
+function syncChatRoom(): void {
+  const want = router.has('chat');
+  if (want && !chat.wanted) {
+    chat.wanted = true;
+    tryJoinChat();
+  } else if (!want && chat.wanted) {
+    chat.wanted = false;
+    if (chat.joined) duelClient.send({ t: 'chat_leave' });
+    chat.joined = false;
+  }
+}
+
+function tryJoinChat(): void {
+  if (chat.wanted && !chat.joined && duelClient.connected) {
+    chat.joined = true;
+    duelClient.send({ t: 'chat_join' });
+  }
+}
+
+function chatStatus(text: string, ms = 4000): void {
+  const el = document.getElementById('chatStatus');
+  if (!el) return;
+  el.textContent = text;
+  clearTimeout(chat.statusTimer);
+  if (text && ms > 0) chat.statusTimer = window.setTimeout(() => (el.textContent = ''), ms);
+}
+
+function renderChatWho(): void {
+  const who = document.getElementById('chatWho');
+  const count = document.getElementById('chatCount');
+  if (who) who.innerHTML = V.chatWhoHtml(chat.online);
+  if (count) count.textContent = ru.chat.online(chat.online.length);
+  who?.querySelectorAll<HTMLImageElement>('img').forEach((img) => img.addEventListener('error', () => img.remove(), { once: true }));
+}
+
+function chatRowHtml(m: ChatMsg): string {
+  return V.chatMsgHtml(m, myId());
+}
+
+function renderChatList(): void {
+  const list = document.getElementById('chatList');
+  if (!list) return;
+  list.innerHTML = chat.msgs.length ? chat.msgs.map(chatRowHtml).join('') : `<div class="empty"><p>${ru.chat.empty}</p></div>`;
+  list.scrollTop = list.scrollHeight;
+}
+
+function appendChat(m: ChatMsg): void {
+  chat.msgs.push(m);
+  if (chat.msgs.length > 100) chat.msgs.shift();
+  const list = document.getElementById('chatList');
+  if (!list) return;
+  const stick = list.scrollHeight - list.scrollTop - list.clientHeight < 80;
+  if (chat.msgs.length === 1) list.innerHTML = '';
+  list.insertAdjacentHTML('beforeend', chatRowHtml(m));
+  while (list.children.length > 100) list.firstElementChild?.remove();
+  if (stick || m.user.id === myId()) list.scrollTop = list.scrollHeight;
+}
+
+function updateChatSend(): void {
+  const btn = document.getElementById('chatSend') as HTMLButtonElement | null;
+  if (!btn) return;
+  const left = Math.ceil((chat.cdUntil - Date.now()) / 1000);
+  btn.disabled = left > 0 || !chat.joined;
+  btn.textContent = left > 0 ? ru.chat.wait(left) : ru.chat.send;
+}
+
+function mountChat(): void {
+  const form = document.getElementById('chatForm') as HTMLFormElement | null;
+  const input = document.getElementById('chatInput') as HTMLInputElement | null;
+  if (!form || !input) return;
+  renderChatList();
+  renderChatWho();
+  if (session.mode !== 'online') chatStatus(ru.chat.offline, 0);
+  else if (!duelClient.connected) chatStatus(ru.chat.connecting, 0);
+  form.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const text = input.value.trim();
+    if (!text) return;
+    if (!chat.joined) return chatStatus(ru.chat.connecting, 4000);
+    const left = Math.ceil((chat.cdUntil - Date.now()) / 1000);
+    if (left > 0) return chatStatus(ru.chat.errWait(left));
+    chat.lastText = text;
+    duelClient.send({ t: 'chat', text });
+    input.value = '';
+  });
+  const tick = window.setInterval(() => {
+    if (!document.getElementById('chatSend')) return clearInterval(tick);
+    updateChatSend();
+  }, 400);
+  updateChatSend();
+}
+
+function onChatMessage(m: DuelMsg): void {
+  switch (m.t) {
+    case 'chat_hist':
+      chat.msgs = m.msgs;
+      chat.online = m.users;
+      for (const x of m.msgs) remember(x.user);
+      for (const u of m.users) remember(u);
+      chat.cdUntil = Date.now() + m.wait * 1000;
+      chatStatus('');
+      renderChatList();
+      renderChatWho();
+      updateChatSend();
+      break;
+    case 'chat':
+      remember(m.msg.user);
+      appendChat(m.msg);
+      break;
+    case 'chat_users':
+      chat.online = m.users;
+      for (const u of m.users) remember(u);
+      renderChatWho();
+      break;
+    case 'chat_user':
+      remember(m.user);
+      if (m.user.id !== myId()) {
+        appendChat({ id: -Date.now(), ts: Date.now(), user: m.user, text: ru.chat.joined(m.user.name || ru.leaders.player, m.user.rank), sys: true });
+      }
+      break;
+    case 'chat_cd':
+      chat.cdUntil = Date.now() + m.wait * 1000;
+      updateChatSend();
+      break;
+    case 'chat_err': {
+      const input = document.getElementById('chatInput') as HTMLInputElement | null;
+      if (input && !input.value) input.value = chat.lastText;
+      if (m.code === 'cooldown') {
+        chat.cdUntil = Date.now() + (m.wait ?? 30) * 1000;
+        chatStatus(ru.chat.errWait(m.wait ?? 30));
+      } else chatStatus(m.code === 'words' ? ru.chat.errWords : m.code === 'link' ? ru.chat.errLink : ru.chat.errEmpty, 5000);
+      updateChatSend();
+      break;
+    }
+    case 'busy':
+      chatStatus(m.who === 'me' ? ru.chat.busyMe : ru.chat.busyThem, 5000);
+      break;
+  }
+}
+
 // ---------- Duels ----------
 
 interface DuelRun {
@@ -1327,6 +1607,12 @@ interface DuelRun {
   lastSend: number;
   oppDeadShown: boolean;
   oppLeft: boolean;
+  /** Playback clock of the opponent (smoothed against network jitter). */
+  oppAcc: number;
+  oppStarted: boolean;
+  /** Exact final score once the opponent is out. */
+  oppFinal: number | null;
+  skipDraw: boolean;
 }
 
 const duelClient = new DuelClient();
@@ -1337,13 +1623,23 @@ let duelWaitingFor: string | null = null;
 let invite: { from: DuelPlayer; timeout: number } | null = null;
 const oppCanvas = $<HTMLCanvasElement>('opp');
 const oppName = $('oppName');
-const oppScore = $('oppScore');
+const duelMeEl = $('duelMe');
+const duelOppEl = $('duelOpp');
+const duelOppNameEl = $('duelOppName');
+const duelBarEl = $('duelBar');
 
 duelClient.onStatus = () => {
+  if (!duelClient.connected) chat.joined = false;
+  else tryJoinChat();
   if (router.top === 'duels') router.refresh();
+  if (router.has('chat') && !duelClient.connected && session.mode === 'online') {
+    const c = duelClient.lastClose;
+    chatStatus(c ? ru.chat.noLink(c.opened ? String(c.code) : `нет соединения, ${c.code}`) : ru.chat.connecting, 0);
+  }
 };
 
 duelClient.onMessage = (m: DuelMsg) => {
+  onChatMessage(m);
   switch (m.t) {
     case 'none':
       duelUi = 'none';
@@ -1351,9 +1647,11 @@ duelClient.onMessage = (m: DuelMsg) => {
     case 'waiting':
       duelUi = 'waiting';
       duelWaitingFor = m.to.name;
+      if (router.has('chat')) chatStatus(ru.chat.challengeSent(m.to.name || ru.duel.player), 0);
       break;
     case 'declined':
       duelUi = 'declined';
+      if (router.has('chat')) chatStatus(ru.chat.declined, 5000);
       break;
     case 'invite':
       // Only offered while not playing; the invite card opens over any menu screen.
@@ -1372,14 +1670,20 @@ duelClient.onMessage = (m: DuelMsg) => {
     case 'start':
       void startDuel(m);
       break;
-    case 'inputs':
-      if (duel) {
-        for (const e of m.log) duel.queue.push(e);
-        duel.upto = Math.max(duel.upto, m.upto);
+    case 'inputs': {
+      // Keeps arriving after our own run is over, so the result card can show the live score.
+      const d = duel ?? finishedDuel;
+      if (d) {
+        for (const e of m.log) d.queue.push(e);
+        d.upto = Math.max(d.upto, m.upto);
       }
       break;
-    case 'opp_dead':
+    }
+    case 'opp_dead': {
+      const d = duel ?? finishedDuel;
+      if (d) d.oppFinal = m.score;
       break;
+    }
     case 'opp_left': {
       const d = duel ?? finishedDuel;
       if (d) {
@@ -1417,10 +1721,15 @@ async function startDuel(m: Extract<DuelMsg, { t: 'start' }>): Promise<void> {
     lastSend: 0,
     oppDeadShown: false,
     oppLeft: false,
+    oppAcc: 0,
+    oppStarted: false,
+    oppFinal: null,
+    skipDraw: false,
   };
   finishedDuel = null;
   duelOutcome = null;
   oppName.textContent = m.opponent.name || ru.duel.player;
+  duelOppNameEl.textContent = m.opponent.name || ru.duel.player;
   document.body.classList.add('duel');
   newSim(m.seed, false, true);
   sizeOpp();
@@ -1441,12 +1750,28 @@ function sizeOpp(): void {
   duel.oppRenderer.resize(w, Math.round(700 * s), s);
 }
 
-/** Re-simulates the opponent from the relayed inputs, and sends ours ~10 times a second. */
-function duelFrame(dt: number): void {
-  const d = duel!;
-  void dt;
+const OPP_BUFFER_TICKS = 6;
+
+/**
+ * Plays the opponent's relayed inputs at a steady pace. Inputs arrive in bursts (network jitter),
+ * so the playback speed follows how much is buffered: a little slower when it runs dry, faster
+ * when it piles up. This replaces jumping ahead by whole bursts, which looked like lag.
+ */
+function advanceOpp(d: DuelRun, dt: number): void {
+  const lag = d.upto - d.opp.tick;
+  if (!d.oppStarted) {
+    if (lag < OPP_BUFFER_TICKS) return;
+    d.oppStarted = true;
+  }
+  let rate = 1;
+  if (lag > 90) rate = 4;
+  else if (lag > 40) rate = 2.2;
+  else if (lag > 20) rate = 1.35;
+  else if (lag < 2) rate = 0.5;
+  else if (lag < OPP_BUFFER_TICKS) rate = 0.85;
+  d.oppAcc += dt * rate;
   let steps = 0;
-  while (d.opp.tick < d.upto && steps < 40) {
+  while (d.oppAcc >= DT && d.opp.tick < d.upto && steps < 60) {
     let press: LightId | null = null;
     while (d.queue.length && d.queue[0][0] <= d.opp.tick) {
       const e = d.queue.shift()!;
@@ -1457,23 +1782,71 @@ function duelFrame(dt: number): void {
     }
     d.opp.step({ axis: d.oppAxis, press });
     d.oppRenderer.handleEvents(d.opp.events, d.opp);
+    d.oppAcc -= DT;
     steps++;
   }
-  d.oppRenderer.ownedMask = d.opp.owned;
-  d.oppRenderer.draw(d.opp, 1, 1 / 60);
-  oppScore.textContent = String(d.opp.score);
+  if (d.opp.tick >= d.upto) d.oppAcc = Math.min(d.oppAcc, DT * 0.99);
+  else if (d.oppAcc > DT * 4) d.oppAcc = DT * 4;
+}
+
+/** Re-simulates the opponent from the relayed inputs, and sends ours ~20 times a second. */
+function duelFrame(dt: number): void {
+  const d = duel!;
+  advanceOpp(d, dt);
+  // On a slow device the small preview draws every other frame so the player's own game stays smooth.
+  d.skipDraw = dt > 0.024 ? !d.skipDraw : false;
+  if (!d.skipDraw) {
+    d.oppRenderer.ownedMask = d.opp.owned;
+    d.oppRenderer.draw(d.opp, Math.min(1, d.oppAcc / DT), dt);
+  }
+  updateDuelBar(d);
   if (d.opp.dead && !d.oppDeadShown) {
     d.oppDeadShown = true;
-    toast(ru.duel.oppDead(d.opp.score), 2200);
+    toast(ru.duel.oppDead(d.oppFinal ?? d.opp.score), 2200);
   }
   flushDuelInputs(false);
+}
+
+function oppScoreNow(d: DuelRun): number {
+  return d.oppFinal ?? d.opp.score;
+}
+
+/** Big scoreboard on the field: our score against the opponent's, the leader is highlighted. */
+function updateDuelBar(d: DuelRun): void {
+  const me = sim.score;
+  const op = oppScoreNow(d);
+  duelMeEl.textContent = String(me);
+  duelOppEl.textContent = String(op);
+  duelBarEl.classList.toggle('lead-me', me > op);
+  duelBarEl.classList.toggle('lead-opp', op > me);
+  duelBarEl.classList.toggle('opp-out', d.opp.dead || d.oppFinal !== null);
+}
+
+/** After our run ended the opponent may still be playing: keep following them for the result card. */
+function followFinishedDuel(dt: number): void {
+  const d = finishedDuel;
+  if (!d || duelOutcome || d.opp.dead) {
+    if (d) refreshDuelScore(d);
+    return;
+  }
+  advanceOpp(d, dt);
+  refreshDuelScore(d);
+}
+
+function refreshDuelScore(d: DuelRun): void {
+  const el = document.getElementById('duelOppFinal');
+  if (!el) return;
+  const out = d.opp.dead || d.oppFinal !== null || d.oppLeft;
+  el.textContent = String(oppScoreNow(d));
+  const st = document.getElementById('duelOppState');
+  if (st) st.textContent = out ? '' : ru.duel.playing;
 }
 
 function flushDuelInputs(force: boolean): void {
   const d = duel;
   if (!d) return;
   const now = performance.now();
-  if (!force && now - d.lastSend < 100) return;
+  if (!force && now - d.lastSend < 50) return;
   d.lastSend = now;
   const log = sim.inputLog.slice(d.sent);
   d.sent = sim.inputLog.length;
@@ -1492,6 +1865,7 @@ function setDuelLine(text: string): void {
 
 function showDuelOutcome(outcome: 'win' | 'loss' | 'draw'): void {
   duelOutcome = outcome;
+  document.getElementById('duelScore')?.classList.add(outcome);
   setDuelLine(outcome === 'win' ? ru.duel.win : outcome === 'loss' ? ru.duel.loss : ru.duel.draw);
   if (outcome === 'win') audio.play('fanfare');
   if (session.data && outcome === 'win') session.data.stats.duel_wins = (session.data.stats.duel_wins ?? 0) + 1;
@@ -1516,23 +1890,31 @@ function frame(now: number): void {
     } else if (mode === 'tutorial') {
       scale = 0.8; // the tutorial runs a little slower
     }
-    if (renderer.cineActive) {
+    const tutFrozen = mode === 'tutorial' && tutorial.frozen;
+    if (tutFrozen) {
+      // A tutorial card is open: the game waits. The awaited light press stays queued for the game.
+      acc = 0;
+      const pending = input.peekPress();
+      if (pending && !tutorial.acceptPress(pending)) input.takePress();
+    } else if (renderer.cineActive) {
       // The suit-up is a short movie: the game is frozen, input is ignored.
       acc = 0;
       input.takePress();
     } else acc += realDt * scale;
-    while (acc >= DT && (mode === 'run' || mode === 'tutorial') && !renderer.cineActive) {
+    while (acc >= DT && (mode === 'run' || mode === 'tutorial') && !renderer.cineActive && !(mode === 'tutorial' && tutorial.frozen)) {
       sim.step({ axis: input.axis(sim.hero.x), press: input.takePress() });
       renderer.handleEvents(sim.events, sim);
       handleUiEvents(sim.events);
-      if (mode === 'tutorial') tutorialTick();
+      if (mode === 'tutorial') tutorial.tick();
       acc -= DT;
     }
   }
   if (duel) duelFrame(realDt);
+  else if (finishedDuel) followFinishedDuel(realDt);
 
   const renderDt = paused ? 0 : renderer.cineActive || mode === 'menu' ? realDt : realDt * scale;
-  renderer.draw(sim, active && !renderer.cineActive ? acc / DT : 1, renderDt);
+  const tutFrozenNow = mode === 'tutorial' && tutorial.frozen;
+  renderer.draw(sim, active && !renderer.cineActive && !tutFrozenNow ? acc / DT : 1, renderDt);
   if (document.body.classList.contains('wide')) renderer.drawBackdrop(backdrop, sim);
   if (router.top === 'menu' || router.top === 'wardrobe') drawShowcase(now / 1000);
   updateHud(realDt);
@@ -1540,6 +1922,7 @@ function frame(now: number): void {
 }
 
 input.heroXProvider = () => sim.hero.x;
+lockGestures();
 initVk({
   onHide: () => {
     pause();

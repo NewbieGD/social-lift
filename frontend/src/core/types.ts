@@ -54,11 +54,13 @@ export type SimEvent =
   | { type: 'death'; reason: DeathReason }
   | { type: 'tier'; tier: number }
   | { type: 'unlock'; color: ColorId }
-  | { type: 'light'; light: LightId }
+  | { type: 'light'; light: LightId | null }
   | { type: 'warn'; id: number }
   | { type: 'comboReset' }
   | { type: 'runStart' }
   | { type: 'close'; x: number; y: number }
   | { type: 'pickup'; item: number; x: number; y: number }
   | { type: 'itemSpawn'; item: number }
-  | { type: 'wall'; x: number; y: number; side: number };
+  | { type: 'wall'; x: number; y: number; side: number }
+  /** Tutorial only: a mistake was forgiven (the hero was put back, or the shield switched on). */
+  | { type: 'rescue'; reason: 'fall' | 'red' };

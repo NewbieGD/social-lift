@@ -33,9 +33,9 @@ PROFILE_TTL_SEC = 24 * 3600
 # only after accepting the ad offer and enabling monetization in the VK developer panel.
 ADS = {
     "enabled": os.environ.get("ADS_ENABLED", "0").strip().lower() in {"1", "true", "yes", "on"},
-    "min_runs_before": 2,
-    "every_n_runs": 3,
-    "min_interval_sec": 120,
+    "min_runs_before": int(os.environ.get("ADS_MIN_RUNS_BEFORE", "1")),
+    "every_n_runs": int(os.environ.get("ADS_EVERY_N_RUNS", "2")),
+    "min_interval_sec": int(os.environ.get("ADS_MIN_INTERVAL_SEC", "90")),
     "timeout_sec": 5,
 }
 

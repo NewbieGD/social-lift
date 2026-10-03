@@ -1,8 +1,11 @@
 // HTML for every screen. Buttons use data-action/data-arg; main.ts handles them.
 import { AGE_LABEL } from '../config';
 import { legal, ru, type DocSection } from '../i18n/ru';
+import type { ChatMsg, ChatUser } from '../net/duel';
 import type { FinishResult, Leaderboard, LeaderRow, Stats } from '../net/session';
 import { esc } from './dom';
+import { keyLabel } from '../input/input';
+import type { LightId } from '../core/gameConfig';
 import type { Settings } from './settingsStore';
 
 const BACK_ICON =
@@ -106,6 +109,7 @@ const ICON = {
   gear: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10.3 2h3.4l.5 2.6 2 .9 2.2-1.5 2.4 2.4-1.5 2.2.9 2 2.6.5v3.4l-2.6.5-.9 2 1.5 2.2-2.4 2.4-2.2-1.5-2 .9-.5 2.6h-3.4l-.5-2.6-2-.9-2.2 1.5-2.4-2.4 1.5-2.2-.9-2L2 13.7v-3.4l2.6-.5.9-2L4 5.6 6.4 3.2l2.2 1.5 2-.9z" fill="#B9C1CD"/><circle cx="12" cy="12" r="3.6" fill="#4A5262"/></svg>',
   swords:
     '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 3l7.5 7.5-2 2L2 5V3zM20 3l-7.5 7.5 2 2L22 5V3z" fill="#D3D8E2"/><path d="M6.5 14.5l3 3-2.5 2.5-1.5-1.5-1.5 1.5L3 19l1.5-1.5L3 16zM17.5 14.5l-3 3 2.5 2.5 1.5-1.5 1.5 1.5L21 19l-1.5-1.5L21 16z" fill="#E8B23A"/></svg>',
+  chat: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h16a2 2 0 012 2v9a2 2 0 01-2 2h-8l-5 4v-4H4a2 2 0 01-2-2V6a2 2 0 012-2z" fill="#5AA8FF"/><circle cx="8" cy="10.5" r="1.3" fill="#fff"/><circle cx="12" cy="10.5" r="1.3" fill="#fff"/><circle cx="16" cy="10.5" r="1.3" fill="#fff"/></svg>',
   mail: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="5" width="20" height="14" rx="3" fill="#38C673"/><path d="M3 7l9 6.5L21 7" fill="none" stroke="#fff" stroke-width="1.8" stroke-linejoin="round"/></svg>',
   bill: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="6" width="20" height="12" rx="2" fill="#7FCF8A"/><circle cx="12" cy="12" r="3" fill="#3E8C4C"/><rect x="2" y="6" width="20" height="12" rx="2" fill="none" stroke="#3E8C4C" stroke-width="1.5"/></svg>',
   floor: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="2" width="16" height="20" rx="2" fill="#8D96A6"/><rect x="6" y="4" width="5.5" height="16" fill="#C7CCD6"/><rect x="12.5" y="4" width="5.5" height="16" fill="#C7CCD6"/><path d="M12 6.5l-2.4 3h4.8z" fill="#FFB547"/></svg>',
@@ -147,7 +151,8 @@ export function menuView(d: MenuData): string {
     <div class="menu-actions">
       <button class="primary big play" data-action="play">${ICON.play}<span>${ru.common.play}</span></button>
       <div class="grid2 stagger">
-        <button class="tile wide-tile" data-action="open" data-arg="duels">${ICON.swords}<span>${ru.menu.duels}</span></button>
+        <button class="tile accent duel-tile" data-action="open" data-arg="duels">${ICON.swords}<span>${ru.menu.duels}</span></button>
+        <button class="tile accent chat-tile" data-action="open" data-arg="chat">${ICON.chat}<span>${ru.menu.chat}</span></button>
         <button class="tile" data-action="open" data-arg="leaders">${ICON.crown}<span>${ru.menu.leaders}</span></button>
         <button class="tile" data-action="open" data-arg="rules">${ICON.book}<span>${ru.menu.rules}</span></button>
         <button class="tile" data-action="open" data-arg="settings">${ICON.gear}<span>${ru.menu.settings}</span></button>
@@ -246,7 +251,35 @@ function seg<T extends string>(key: keyof Settings, label: string, options: Reco
   </div>`;
 }
 
-export function settingsView(s: Settings, opts: { vibration: boolean; playerId: number | null; canDelete: boolean }): string {
+export interface KeysView {
+  /** Only the browser version has a keyboard to configure. */
+  show: boolean;
+  rebinding: LightId | null;
+  error: string | null;
+}
+
+function keyRows(s: Settings, k: KeysView): string {
+  const codes: Record<LightId, string> = { yellow: s.keyYellow, blue: s.keyBlue, green: s.keyGreen, red: s.keyRed };
+  const rows = (['yellow', 'blue', 'green', 'red'] as LightId[])
+    .map((l) => {
+      const listening = k.rebinding === l;
+      return `<div class="row key-row">
+        <span class="key-name"><i class="key-dot ${l}" aria-hidden="true"></i>${ru.settings.keyNames[l]}</span>
+        <button type="button" class="key-btn${listening ? ' listening' : ''}" data-action="rebind" data-arg="${l}">${listening ? ru.settings.keyPress : esc(keyLabel(codes[l]))}</button>
+      </div>`;
+    })
+    .join('');
+  return `<h3>${ru.settings.keys}</h3>
+    <p class="muted">${ru.settings.keysHint}</p>
+    ${rows}
+    ${k.error ? `<p class="status warn">${esc(k.error)}</p>` : ''}
+    <button type="button" class="secondary key-reset" data-action="keysReset">${ru.settings.keysReset}</button>`;
+}
+
+export function settingsView(
+  s: Settings,
+  opts: { vibration: boolean; playerId: number | null; canDelete: boolean; keys: KeysView },
+): string {
   return `${header(ru.settings.title)}<div class="scroll settings">
     <h3>${ru.settings.sound}</h3>
     ${toggle('music', ru.settings.music, s.music)}
@@ -259,6 +292,7 @@ export function settingsView(s: Settings, opts: { vibration: boolean; playerId: 
     ${s.steer === 'drag' ? slider('sens', ru.settings.sens, s.sens, 0.6, 1.8, 0.05) : ''}
     ${seg('layout', ru.settings.layout, ru.settings.layouts, s.layout)}
     ${seg('side', ru.settings.side, ru.settings.sides, s.side)}
+    ${opts.keys.show ? keyRows(s, opts.keys) : ''}
 
     <h3>${ru.settings.comfort}</h3>
     ${toggle('colorblind', ru.settings.colorblind, s.colorblind)}
@@ -295,12 +329,12 @@ export function confirmDeleteView(error: string | null): string {
 
 // ---------- Leaders ----------
 
-export function leadersShell(scope: 'week' | 'all' | 'duels'): string {
-  const tab = (id: 'week' | 'all' | 'duels', label: string): string =>
+export function leadersShell(scope: 'week' | 'all'): string {
+  const tab = (id: 'week' | 'all', label: string): string =>
     `<button role="tab" class="${scope === id ? 'on' : ''}" aria-selected="${scope === id}" data-action="lbScope" data-arg="${id}">${label}</button>`;
   return `${header(ru.leaders.title)}
-    <div class="tabs tabs-3" role="tablist">
-      ${tab('week', ru.leaders.week)}${tab('all', ru.leaders.all)}${tab('duels', ru.leaders.duels)}
+    <div class="tabs" role="tablist">
+      ${tab('week', ru.leaders.week)}${tab('all', ru.leaders.all)}
     </div>
     <p class="reset-line" id="lbReset"></p>
     <div class="scroll leaders" id="lbList">${skeleton()}</div>
@@ -369,6 +403,8 @@ export interface DuelView {
   status: 'offline' | 'connecting' | 'idle' | 'waiting' | 'none' | 'declined';
   online: number;
   waitingFor: string | null;
+  /** Last loaded duel rating (shown at once while a fresh copy loads). */
+  leadersHtml: { rows: string; me: string } | null;
 }
 
 export function duelsView(d: DuelView): string {
@@ -379,7 +415,7 @@ export function duelsView(d: DuelView): string {
   else if (d.status === 'none') status = ru.duel.none;
   else if (d.status === 'declined') status = ru.duel.declined;
   const canFind = d.status === 'idle' || d.status === 'none' || d.status === 'declined';
-  return `${header(ru.duel.title)}<div class="panel flat duel-panel">
+  return `${header(ru.duel.title)}<div class="scroll duel-scroll"><div class="panel flat duel-panel">
     <div class="duel-hero" aria-hidden="true">${ICON.swords}</div>
     <p>${ru.duel.lead}</p>
     <p class="muted">${ru.duel.rulesNote}</p>
@@ -390,7 +426,10 @@ export function duelsView(d: DuelView): string {
         ? `<button class="secondary" data-action="duelCancel">${ru.duel.cancel}</button>`
         : `<button class="primary" data-action="duelFind" ${canFind ? '' : 'disabled'}>${ru.duel.find}</button>`
     }
-  </div>`;
+    <h3 class="duel-lb-title">${ru.duel.leaders}</h3>
+    <div class="duel-lb" id="duelLbList">${d.leadersHtml?.rows ?? '<div class="lb-row skeleton"><span></span><span></span><span></span></div>'}</div>
+    <div class="me-card" id="duelLbMe">${d.leadersHtml?.me ?? ''}</div>
+  </div></div>`;
 }
 
 export function inviteView(from: { name: string | null; photo: string | null }, seconds: number): string {
@@ -447,6 +486,7 @@ export interface ResultData {
   seconds: number;
   record: boolean;
   canShare: boolean;
+  duel: { oppName: string; me: number; opp: number; oppOut: boolean } | null;
 }
 
 export function resultView(d: ResultData): string {
@@ -476,6 +516,15 @@ export function resultView(d: ResultData): string {
     <div class="big-score" id="resultScore" data-target="${d.score}">0</div>
     <div class="record ${d.record && d.score > 0 ? '' : 'hidden'}" id="resultRecord">${ru.result.record}</div>
     <p class="rank" id="resultRank"></p>
+    ${
+      d.duel
+        ? `<div class="duel-score" id="duelScore">
+        <div class="ds-side me"><small>${ru.duel.you}</small><b>${d.duel.me}</b></div>
+        <div class="ds-vs">:</div>
+        <div class="ds-side opp"><small>${esc(d.duel.oppName)}</small><b id="duelOppFinal">${d.duel.opp}</b><em id="duelOppState">${d.duel.oppOut ? '' : ru.duel.playing}</em></div>
+      </div>`
+        : ''
+    }
     <p class="duel-line" id="duelLine"></p>
     <dl class="stats" id="resultStats">
       <dt>${ru.result.best}</dt><dd id="resultBest">${d.best}</dd>
@@ -514,11 +563,11 @@ export function rankHtml(res: FinishResult): string {
 }
 
 export function tutorialDoneView(): string {
-  return `<div class="panel">
+  return `<div class="panel tut-done">
     <h2>${ru.tutorial.doneTitle}</h2>
     <p>${ru.tutorial.doneText}</p>
-    <button class="primary" data-action="afterTutorial">${ru.common.play}</button>
-    <button class="secondary" data-action="toMenu">${ru.common.menu}</button>
+    <button class="primary" data-action="toMenu">${ru.tutorial.doneMenu}</button>
+    <button class="secondary" data-action="afterTutorial">${ru.common.play}</button>
   </div>`;
 }
 
@@ -541,5 +590,59 @@ export function stubView(kind: StubKind, code: string | null): string {
     ${kind === 'unsupported' ? '' : `<button class="primary" data-action="retryBoot">${ru.common.retry}</button>`}
     ${kind === 'offline' || kind === 'server' ? `<button class="secondary" data-action="playOffline">${t.playOffline}</button>` : ''}
     ${code ? `<p class="note">${esc(t.errorCode(code))}</p>` : ''}
+  </div>`;
+}
+
+// ---------- Chat ----------
+
+
+function chatAva(u: ChatUser, size = ''): string {
+  const name = u.name || ru.leaders.player;
+  const inner = u.photo
+    ? `<img src="${esc(u.photo)}" alt="" loading="lazy" referrerpolicy="no-referrer" />`
+    : `<b>${esc(name.slice(0, 1))}</b>`;
+  return `<button type="button" class="chat-ava ${size}" data-action="player" data-arg="${u.id}" aria-label="${esc(name)}">${inner}</button>`;
+}
+
+export function chatView(): string {
+  return `${header(ru.chat.title)}
+    <div class="chat-top"><span class="chat-count" id="chatCount"></span><div class="chat-who" id="chatWho"></div></div>
+    <p class="chat-rules">${ru.chat.rules}</p>
+    <div class="scroll chat-list" id="chatList"></div>
+    <p class="chat-status" id="chatStatus"></p>
+    <form class="chat-form" id="chatForm" autocomplete="off">
+      <input id="chatInput" type="text" maxlength="200" placeholder="${ru.chat.placeholder}" enterkeyhint="send" />
+      <button type="submit" class="primary" id="chatSend">${ru.chat.send}</button>
+    </form>`;
+}
+
+export function chatWhoHtml(users: ChatUser[]): string {
+  return users.map((u) => chatAva(u, 'small')).join('');
+}
+
+export function chatMsgHtml(m: ChatMsg, myId: number | null): string {
+  if (m.sys) return `<p class="chat-sys">${esc(m.text)}</p>`;
+  const t = new Date(m.ts);
+  const time = `${String(t.getHours()).padStart(2, '0')}:${String(t.getMinutes()).padStart(2, '0')}`;
+  const name = m.user.name || ru.leaders.player;
+  return `<div class="chat-msg${m.user.id === myId ? ' mine' : ''}">
+    ${chatAva(m.user)}
+    <div class="chat-body">
+      <div class="chat-meta"><button type="button" class="chat-name" data-action="player" data-arg="${m.user.id}">${esc(name)}</button>${m.user.rank ? `<span class="chat-rank">#${m.user.rank}</span>` : ''}<time>${time}</time></div>
+      <p>${esc(m.text)}</p>
+    </div>
+  </div>`;
+}
+
+export function playerCardView(u: ChatUser, mine: boolean): string {
+  const name = u.name || ru.leaders.player;
+  const img = u.photo ? `<img src="${esc(u.photo)}" alt="" referrerpolicy="no-referrer" />` : `<b>${esc(name.slice(0, 1))}</b>`;
+  return `<div class="panel invite">
+    <button class="icon-btn close" data-action="back" aria-label="${ru.chat.close}">${CLOSE_ICON}</button>
+    <div class="invite-ava">${img}</div>
+    <h2>${esc(name)}</h2>
+    <p>${mine ? ru.chat.you : ru.chat.rank(u.rank)}</p>
+    ${mine ? '' : `<button class="primary" data-action="challenge" data-arg="${u.id}">${ru.chat.duelBtn}</button>`}
+    <button class="secondary" data-action="profile" data-arg="${u.id}">${ru.chat.profileBtn}</button>
   </div>`;
 }

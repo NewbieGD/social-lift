@@ -29,6 +29,8 @@ export class Sim {
 
   hero: Hero;
   light: LightId | null = null;
+  /** Color that was lit when the shield went on; the next shield press returns to it. */
+  private lightBeforeShield: LightId | null = null;
   platforms: Platform[] = [];
 
   score = 0;
@@ -63,8 +65,11 @@ export class Sim {
   /** Items waiting for a platform ahead to be placed on. */
   private pendingItems: number[] = [];
 
-  /** Guided tutorial: no wave, no random hazards, red phases only when forced. */
+  /** Guided tutorial: no wave, no random platforms; the tutorial script places every platform. */
   readonly tutorial: boolean;
+  /** Tutorial only: lights the player may use right now (the script unlocks them one by one). */
+  readonly tutAllowed = new Set<LightId>();
+  private tutSets = 0;
 
   constructor(
     seed: number,
@@ -97,6 +102,12 @@ export class Sim {
     this.camY = 0;
     this.prevCamY = 0;
     this.fillPlatforms();
+  }
+
+  /** True if the light button can be used now. Tutorial: unlocked step by step; otherwise by tier. */
+  lightAvailable(light: LightId): boolean {
+    if (this.tutorial) return this.tutAllowed.has(light);
+    return light === 'red' || isColorUnlocked(light as ColorId, this.tier);
   }
 
   get runTime(): number {
@@ -164,8 +175,17 @@ export class Sim {
   }
 
   private applyPress(press: LightId | null): void {
-    if (!press || press === this.light) return;
-    if (press !== 'red' && !isColorUnlocked(press as ColorId, this.tier)) return;
+    if (!press) return;
+    if (press === 'red' && this.light === 'red') {
+      // A second press of the shield drops it and brings back the color used before.
+      this.light = this.lightBeforeShield;
+      this.lightBeforeShield = null;
+      this.events.push({ type: 'light', light: this.light });
+      return;
+    }
+    if (press === this.light) return;
+    if (!this.lightAvailable(press)) return;
+    if (press === 'red') this.lightBeforeShield = this.light;
     this.light = press;
     if (press === 'red' && this.streak > 0) {
       this.streak = 0;
@@ -203,7 +223,8 @@ export class Sim {
   private updatePlatforms(): void {
     for (const p of this.platforms) {
       if (p.kind === 'white') {
-        p.whiteT -= DT;
+        // In the tutorial used platforms stay, so the player can always climb back.
+        if (!this.tutorial) p.whiteT -= DT;
         p.whiteAge += DT;
       }
       if (!p.phases) continue;
@@ -266,6 +287,12 @@ export class Sim {
     const lethal = p.kind === 'red' || p.phase === 'red';
     if (lethal) {
       if (this.light === 'red') {
+        this.events.push({ type: 'aura', x: this.hero.x, y: p.y });
+      } else if (this.tutorial) {
+        // Nobody loses in the tutorial: the shield switches on by itself and the lesson goes on.
+        this.light = 'red';
+        this.events.push({ type: 'light', light: 'red' });
+        this.events.push({ type: 'rescue', reason: 'red' });
         this.events.push({ type: 'aura', x: this.hero.x, y: p.y });
       } else {
         this.die('red');
@@ -405,7 +432,49 @@ export class Sim {
       return;
     }
     if (this.waveActive && this.hero.y < this.waveY) this.die('wave');
-    else if (this.hero.y + gameConfig.hero.height < this.camY - 10) this.die('fall');
+    else if (this.hero.y + gameConfig.hero.height < this.camY - 10) {
+      if (this.tutorial) this.tutorialRescue();
+      else this.die('fall');
+    }
+  }
+
+  /** Tutorial: a missed jump puts the hero back on the lowest visible platform. */
+  private tutorialRescue(): void {
+    let best: Platform | null = null;
+    for (const p of this.platforms) {
+      if (p.kind === 'red' || p.y < this.camY + 70) continue;
+      if (!best || p.y < best.y) best = p;
+    }
+    if (!best) {
+      best = this.gen.makeStart(gameConfig.world.width / 2, this.camY + 150);
+      this.platforms.push(best);
+    }
+    const h = this.hero;
+    h.x = h.prevX = best.x;
+    h.y = h.prevY = best.y;
+    h.vx = 0;
+    h.vy = gameConfig.hero.jumpImpulse;
+    this.events.push({ type: 'rescue', reason: 'fall' });
+  }
+
+  /** Tutorial: allows a light button from now on. */
+  tutorialAllow(light: LightId): void {
+    this.tutAllowed.add(light);
+  }
+
+  /**
+   * Tutorial: puts three platforms of one kind above the highest platform, zig-zagging so
+   * the player has to steer. Used colors keep their white platforms, so the way up stays open.
+   */
+  tutorialSpawn(kind: ColorId | 'red'): void {
+    const W = gameConfig.world.width;
+    let top = this.platforms[0];
+    for (const p of this.platforms) if (p.y > top.y) top = p;
+    const flip = this.tutSets++ % 2 === 1;
+    const xs = flip ? [W / 2 + 75, W / 2 - 75, W / 2] : [W / 2 - 75, W / 2 + 75, W / 2];
+    for (let i = 0; i < 3; i++) {
+      this.platforms.push(this.gen.makeScripted(xs[i], top.y + 82 * (i + 1), kind === 'red' ? 'red' : 'color', kind === 'red' ? null : kind));
+    }
   }
 
   private die(reason: DeathReason): void {
@@ -417,6 +486,7 @@ export class Sim {
   }
 
   private fillPlatforms(): void {
+    if (this.tutorial) return;
     const target = this.camY + this.viewH + gameConfig.platform.spawnAhead;
     if (this.gen.anchorY >= target) return;
     const added = this.gen.generateUpTo(target, this.tier, this.viewH, this.platforms);
@@ -425,6 +495,6 @@ export class Sim {
 
   private cullPlatforms(): void {
     const floor = Math.max(this.camY - 60, this.waveActive ? this.waveY - 20 : -Infinity);
-    this.platforms = this.platforms.filter((p) => p.y > floor && !(p.kind === 'white' && p.whiteT <= 0));
+    this.platforms = this.platforms.filter((p) => p.y > floor && (this.tutorial || !(p.kind === 'white' && p.whiteT <= 0)));
   }
 }
