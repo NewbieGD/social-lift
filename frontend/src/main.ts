@@ -818,7 +818,8 @@ function drawStageHero(c: HTMLCanvasElement, _tier: number, t: number, _silhouet
   const w = c.clientWidth;
   const h = c.clientHeight;
   g.clearRect(0, 0, w, h);
-  const scale = Math.min(w / 44, h / 74);
+  // About a quarter smaller than the stage, so the hero does not crowd the menu.
+  const scale = Math.min(w / 58, h / 96);
   const base = h - 6 * scale;
   // Podium: the soles stand exactly on its top surface.
   g.fillStyle = '#565C6B';

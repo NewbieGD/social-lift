@@ -2,6 +2,8 @@
 // Origin is at the feet; negative y goes up. Outfit is chosen by wealth tier (design doc, section 4).
 // No filters or shadowBlur: shading is done with gradients.
 
+import { bodyGradient, edge, fist3d, hand3d, limb3d, spec, tone, torch3d } from './shade3d';
+
 export type Face = 'normal' | 'grin' | 'scared' | 'squint';
 export type Gesture = 'none' | 'scratch' | 'pocket' | 'tie' | 'wave';
 
@@ -106,9 +108,8 @@ export const ITEM_ANCHOR: Record<string, [number, number]> = {
 const SKIN = '#F0BE94';
 const SKIN_SHADE = '#D79C72';
 const HAIR = '#3B2A22';
-const LINE = '#2A1E22';
-const LW = 1.25;
-const OUT = LW * 2;
+const LINE = '#3A2A30';
+const LW = 1.0;
 
 type P = { x: number; y: number };
 type Limb3 = [P, P, P];
@@ -383,17 +384,8 @@ function capsule(ctx: CanvasRenderingContext2D, a: P, b: P, wa: number, wb: numb
  * then the fills, so the elbow/knee has no seam and no gap.
  */
 function drawLimb(ctx: CanvasRenderingContext2D, l: Limb3, w: [number, number, number], upper: string, lower: string): void {
-  ctx.fillStyle = LINE;
-  capsule(ctx, l[0], l[1], w[0] + OUT, w[1] + OUT);
-  ctx.fill();
-  capsule(ctx, l[1], l[2], w[1] + OUT, w[2] + OUT);
-  ctx.fill();
-  ctx.fillStyle = lower;
-  capsule(ctx, l[1], l[2], w[1], w[2]);
-  ctx.fill();
-  ctx.fillStyle = upper;
-  capsule(ctx, l[0], l[1], w[0], w[1]);
-  ctx.fill();
+  // Soft 3D: one continuous tapered shape lit from the top-left, no seam at the joint.
+  limb3d(ctx, l[0], l[1], l[2], w, upper, 1, lower);
 }
 
 function stroke(ctx: CanvasRenderingContext2D, w = LW): void {
@@ -467,70 +459,41 @@ function drawFoot(ctx: CanvasRenderingContext2D, at: P, r: number, o: Outfit, ba
     ctx.lineTo(-3, 1.2);
     ctx.closePath();
   }
+  // Volume: light from above, darker sole edge, a glossy toe.
+  const base = typeof ctx.fillStyle === 'string' ? ctx.fillStyle : '#888888';
+  const fg = ctx.createLinearGradient(0, -4, 0, 2);
+  fg.addColorStop(0, tone(base, 0.28));
+  fg.addColorStop(0.55, base);
+  fg.addColorStop(1, tone(base, -0.32));
+  ctx.fillStyle = fg;
   ctx.fill();
-  stroke(ctx);
-  if (o.feet === 'shoes' && !o.suit) {
-    ctx.fillStyle = 'rgba(255,255,255,0.45)';
-    ctx.fillRect(3, -2.4, 3.6, 0.9);
-  }
+  edge(ctx, base);
+  if ((o.feet === 'shoes' || o.feet === 'slippers') && !o.suit) spec(ctx, 4.5, -2.2, 2.4, 0.8, o.feet === 'shoes' ? 0.75 : 0.5);
   ctx.restore();
 }
 
 /** Draws a hand gripping a held object along its axis (fingers wrap over it). */
 function drawGrip(ctx: CanvasRenderingContext2D, skin: string): void {
-  ctx.fillStyle = skin;
-  ctx.beginPath();
-  ctx.ellipse(0.4, 0, 3.6, 3.1, 0, 0, Math.PI * 2);
-  ctx.fill();
-  stroke(ctx);
-  // Finger creases across the grip.
-  ctx.strokeStyle = 'rgba(42,30,34,0.55)';
-  ctx.lineWidth = 0.7;
-  ctx.beginPath();
-  ctx.moveTo(-0.4, -2.2);
-  ctx.lineTo(-0.4, 2.2);
-  ctx.moveTo(1.4, -2.3);
-  ctx.lineTo(1.4, 2.3);
-  ctx.stroke();
+  ctx.save();
+  ctx.translate(0.4, 0);
+  ctx.scale(0.95, 0.9);
+  fist3d(ctx, skin);
+  ctx.restore();
 }
 
 function drawOpenHand(ctx: CanvasRenderingContext2D, l: Limb3, skin: string): void {
   const a = Math.atan2(l[2].y - l[1].y, l[2].x - l[1].x);
   ctx.save();
-  ctx.translate(l[2].x, l[2].y);
+  ctx.translate(l[2].x + Math.cos(a) * 1.2, l[2].y + Math.sin(a) * 1.2);
   ctx.rotate(a);
-  ctx.fillStyle = skin;
-  ctx.beginPath();
-  ctx.ellipse(1.6, 0, 3.6, 3, 0, 0, Math.PI * 2);
-  ctx.fill();
-  stroke(ctx);
-  // Thumb
-  ctx.beginPath();
-  ctx.ellipse(1.2, -2.6, 1.5, 1.1, -0.5, 0, Math.PI * 2);
-  ctx.fill();
-  stroke(ctx, 1);
+  hand3d(ctx, skin, false);
   ctx.restore();
 }
 
 /** Flashlight in its held frame: grip at 0,0, lens along +x. */
 function drawTorch(ctx: CanvasRenderingContext2D, o: Outfit, light: string): number {
   const len = o.newTorch ? 11.5 : 9.5;
-  ctx.fillStyle = o.newTorch ? '#D3D8E2' : '#3F4450';
-  rr(ctx, -3.5, -2.2, len + 1.5, 4.4, 1.6);
-  ctx.fill();
-  stroke(ctx);
-  // Head of the torch, slightly wider.
-  ctx.fillStyle = o.newTorch ? '#B9C0CC' : '#30343E';
-  rr(ctx, len - 3, -3, 4, 6, 1.4);
-  ctx.fill();
-  stroke(ctx);
-  ctx.fillStyle = `rgb(${light})`;
-  rr(ctx, len + 0.5, -2.6, 1.6, 5.2, 0.8);
-  ctx.fill();
-  if (o.newTorch) {
-    ctx.fillStyle = 'rgba(255,255,255,0.6)';
-    ctx.fillRect(-2, -1.4, len - 4, 0.9);
-  }
+  torch3d(ctx, len - 1.5, 1.1, light, o.newTorch);
   return len;
 }
 
@@ -556,7 +519,11 @@ function drawHead(ctx: CanvasRenderingContext2D, rig: Rig, o: Outfit, tier: numb
   ctx.quadraticCurveTo(1, 11, -4.4, 8.6);
   ctx.bezierCurveTo(-8, 6.8, -8.8, 2.4, -8.6, -2);
   ctx.closePath();
-  ctx.fillStyle = SKIN;
+  const headG = ctx.createRadialGradient(3, -5, 1, 1, 0, 13);
+  headG.addColorStop(0, tone(SKIN, 0.38));
+  headG.addColorStop(0.5, SKIN);
+  headG.addColorStop(1, tone(SKIN, -0.2));
+  ctx.fillStyle = headG;
   ctx.fill();
   ctx.save();
   ctx.clip();
@@ -615,11 +582,18 @@ function drawHead(ctx: CanvasRenderingContext2D, rig: Rig, o: Outfit, tier: numb
     ctx.save();
     ctx.beginPath();
     ctx.ellipse(cx, -1, rx, ry, 0, 0, Math.PI * 2);
-    ctx.fillStyle = '#ffffff';
+    const ew = ctx.createLinearGradient(0, -1 - ry, 0, -1 + ry);
+    ew.addColorStop(0, '#D6DAE3');
+    ew.addColorStop(0.4, '#FFFFFF');
+    ew.addColorStop(1, '#EEF0F5');
+    ctx.fillStyle = ew;
     ctx.fill();
     ctx.clip();
     const pr = face === 'scared' ? rx * 0.42 : rx * 0.62;
-    ctx.fillStyle = '#2B2023';
+    const irisG = ctx.createRadialGradient(cx, -1, 0.1, cx, -1, pr * 1.2);
+    irisG.addColorStop(0, '#6E4426');
+    irisG.addColorStop(1, '#1E140F');
+    ctx.fillStyle = irisG;
     ctx.beginPath();
     ctx.arc(cx + rig.look.x * rx * 0.45, -1 + rig.look.y * ry * 0.35, pr, 0, Math.PI * 2);
     ctx.fill();
@@ -808,7 +782,7 @@ function drawTorso(ctx: CanvasRenderingContext2D, rig: Rig, o: Outfit, t: number
   ctx.rotate(rig.lean);
   const color = o.suit ? '#E9EEF5' : jacket ? jacketC : o.top === 'shirt' ? '#CFE3F5' : '#F1ECDF';
   torsoShape(ctx, len);
-  ctx.fillStyle = color;
+  ctx.fillStyle = bodyGradient(ctx, color, -9, 9);
   ctx.fill();
   ctx.save();
   ctx.clip();

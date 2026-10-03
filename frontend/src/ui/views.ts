@@ -114,8 +114,8 @@ const ICON = {
 const HAND_ICON =
   '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 11V5.5a1.5 1.5 0 013 0V10l.5-.1V8.5a1.5 1.5 0 013 0v2l.5-.1a1.5 1.5 0 013 .3V15c0 3.3-2.7 6-6 6h-1.2c-1.8 0-3.4-.8-4.5-2.2L4.6 15a1.5 1.5 0 012.3-1.9L9 15z" fill="currentColor"/></svg>';
 
-function chip(icon: string, label: string, value: string, i: number): string {
-  return `<div class="chip" style="--i:${i}">${icon}<span class="chip-text"><span class="chip-label">${esc(label)}</span><b>${esc(value)}</b></span></div>`;
+function chip(icon: string, label: string, value: string, i: number, kind = ''): string {
+  return `<div class="chip ${kind}" style="--i:${i}"><span class="chip-ico">${icon}</span><span class="chip-text"><span class="chip-label">${esc(label)}</span><b>${esc(value)}</b></span></div>`;
 }
 
 export function menuView(d: MenuData): string {
@@ -125,9 +125,9 @@ export function menuView(d: MenuData): string {
   const chips = fresh
     ? `<div class="chip wide" style="--i:0">${ICON.floor}<span class="chip-text"><b>${ru.menu.firstRun}</b></span></div>`
     : [
-        chip(ICON.crown, ru.menu.chipRank, s?.rank_all ? String(s.rank_all) : ru.wardrobe.none, 0),
-        chip(ICON.bill, ru.menu.chipLast, String(s?.last_score ?? 0), 1),
-        chip(ICON.floor, ru.menu.chipTier, ru.tiers[tier] ?? ru.tiers[0], 2),
+        chip(ICON.crown, ru.menu.chipRank, s?.rank_all ? String(s.rank_all) : ru.wardrobe.none, 0, 'gold'),
+        chip(ICON.bill, ru.menu.chipLast, String(s?.last_score ?? 0), 1, 'green'),
+        chip(ICON.floor, ru.menu.chipTier, ru.tiers[tier] ?? ru.tiers[0], 2, 'blue'),
       ].join('');
   let status = '';
   if (d.mode === 'offline') {
