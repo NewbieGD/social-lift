@@ -18,7 +18,7 @@ import { askNotifications, initVk } from './platform/vk';
 import { DuelClient, type ChatMsg, type ChatUser, type DuelMsg, type DuelPlayer } from './net/duel';
 import { scenes } from './render/palette';
 import { drawItem, ITEM_BY_TIER, itemCount, outfitFromMask, type Item } from './render/hero';
-import { drawGround, GROUND_DEPTH } from './render/ground';
+import { drawStageBackdrop, stageLayout } from './render/ground';
 import { CROWN_LIFT_FRONT, crownBob, drawCrown } from './render/crown';
 import { drawHeroFront } from './render/heroFront';
 import { Renderer } from './render/renderer';
@@ -844,15 +844,24 @@ function drawStageHero(c: HTMLCanvasElement, _tier: number, t: number, _silhouet
   const w = c.clientWidth;
   const h = c.clientHeight;
   g.clearRect(0, 0, w, h);
-  // About a quarter smaller than the stage, so the hero does not crowd the menu.
-  const scale = Math.min(w / 58, h / ((hasCrown() ? 124 : 96) + GROUND_DEPTH * 0.6));
-  // The hero stands on the street: asphalt from edge to edge, soles exactly on its top line.
-  const base = h - GROUND_DEPTH * scale;
-  drawGround(g, w, base, h, scale);
-  // He stands still (no hopping).
+  // The hero stands on the street in front of a brick wall; the soles are on the `feet` line.
+  const L = stageLayout(h);
+  const scale = Math.min(w / 58, (L.feet - 6) / (hasCrown() ? 124 : 96));
+  const base = L.feet;
+  drawStageBackdrop(g, w, h, L, scale);
   // On the main screen the stats panel stands at the right: the hero is centered in the free part.
   const side = c.id === 'menuHero' ? (document.querySelector('.menu2 .chips') as HTMLElement | null)?.offsetWidth ?? 0 : 0;
   const cx = side ? (w - side - 8) / 2 : w / 2;
+  if (c.id === 'menuHero') {
+    // The "tap the hero" hint sits exactly over the hero.
+    const hint = c.parentElement?.querySelector<HTMLElement>('.tap-hint');
+    if (hint) {
+      hint.style.left = `${cx}px`;
+      // Just above the crown (or the head), with a small gap so they never touch.
+      const topY = base - (hasCrown() ? 100 : 72) * scale;
+      hint.style.top = `${Math.max(0, topY - hint.offsetHeight - 6)}px`;
+    }
+  }
   g.save();
   g.translate(cx, base);
   g.scale(scale, scale);

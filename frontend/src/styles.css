@@ -3447,3 +3447,19 @@ body.reduced .crown-card .crown-big {
 .showcase > .hero-stage .tap-hint {
   left: 36%;
 }
+
+/* The stage (alley + street) fills the free space down to the "Play" button. */
+.showcase {
+  align-items: stretch;
+  grid-template-rows: minmax(0, 1fr);
+  padding-top: 0;
+}
+.showcase > .hero-stage {
+  height: auto;
+  min-height: 260px;
+  overflow: hidden;
+  border-radius: 0 0 14px 14px;
+}
+.showcase > .hero-stage .stage-glow {
+  display: none;
+}
