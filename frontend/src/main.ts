@@ -581,6 +581,7 @@ function finishRun(): void {
   adState.runsSince++;
   saveAdState();
   session.event('run_end', sim.score);
+  historyRuns = null;
   rememberLocalRun(sim.score, sim.tier);
   if (session.mode === 'outside') {
     const local = readLocalItems();
@@ -931,6 +932,11 @@ function resume(): void {
 let consentError: string | null = null;
 let deleteError: string | null = null;
 let lbScope: 'week' | 'all' = 'week';
+// ---- history ----
+let historyRuns: import('./net/session').HistoryRun[] | null = null;
+let historyLoading = false;
+let historyError = false;
+
 let bootState = { progress: 0, label: ru.loading.fonts, error: null as string | null };
 let docKind: 'terms' | 'privacy' | 'rules' = 'rules';
 
@@ -947,6 +953,25 @@ router.register('consent', {
 router.register('declined', { html: () => V.declinedView(), cls: 'solid' });
 router.register('doc', { html: () => V.docView(docKind), cls: 'solid' });
 router.register('rules', { html: () => V.docView('rules'), cls: 'solid' });
+router.register('history', {
+  html: () => V.historyView(historyRuns, historyLoading, historyError),
+  cls: 'solid',
+  mount: () => {
+    if (historyRuns !== null) return;
+    historyLoading = true;
+    historyError = false;
+    router.refresh();
+    session.fetchHistory().then((rows) => {
+      historyRuns = rows;
+      historyLoading = false;
+      router.refresh();
+    }).catch(() => {
+      historyError = true;
+      historyLoading = false;
+      router.refresh();
+    });
+  },
+});
 router.register('wardrobe', {
   html: () => V.wardrobeView(session.data?.stats ?? localStats(), ownedMask()),
   cls: 'solid',

@@ -527,3 +527,32 @@ async def delete_player(session: AsyncSession, caller: Caller) -> None:
 async def log_event(session: AsyncSession, type_: str, platform: str, value: int | None) -> None:
     session.add(Event(created_at=utcnow(), type=type_, platform=platform[:32] or None, value=value))
     await session.commit()
+
+
+# ---------- Run history ----------
+
+HISTORY_LIMIT = 5
+
+
+async def run_history(session: AsyncSession, user: User) -> list[dict]:
+    """Return the player's last HISTORY_LIMIT finished runs, newest first."""
+    result = await session.execute(
+        select(Run)
+        .where(Run.user_id == user.id, Run.status == "finished")
+        .order_by(Run.finished_at.desc())
+        .limit(HISTORY_LIMIT)
+    )
+    runs = list(result.scalars())
+    return [
+        {
+            "run_id": r.id,
+            "finished_at": int(r.finished_at.timestamp() * 1000) if r.finished_at else None,
+            "score": r.score or 0,
+            "tier": r.tier or 0,
+            "captures": r.captures or 0,
+            "max_combo": r.max_combo or 0,
+            "duration_ms": r.duration_ms or 0,
+            "items": r.items or 0,
+        }
+        for r in runs
+    ]

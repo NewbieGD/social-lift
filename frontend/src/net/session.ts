@@ -87,6 +87,18 @@ export interface Leaderboard {
   me: { score: number; rank: number | null; next_rank: number | null; gap_to_next: number | null };
 }
 
+
+export interface HistoryRun {
+  run_id: string;
+  finished_at: number | null;   // ms unix
+  score: number;
+  tier: number;
+  captures: number;
+  max_combo: number;
+  duration_ms: number;
+  items: number;                // bitmask — count bits for worn-items count
+}
+
 export type Mode = 'loading' | 'online' | 'offline' | 'outside';
 
 const QUEUE_KEY = 'sl_pending_runs';
@@ -273,6 +285,12 @@ export class Session {
     if (this.lastReport) {
       s.items_mask = (s.items_mask ?? 0) | this.lastReport.items;
     }
+  }
+
+  
+  async fetchHistory(): Promise<HistoryRun[]> {
+    const data = await api<{ runs: HistoryRun[] }>('GET', '/runs/history');
+    return data.runs;
   }
 
   private enqueue(report: RunReport): void {

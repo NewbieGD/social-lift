@@ -140,6 +140,18 @@ async def post_event(
     return {"ok": True}
 
 
+
+@router.get("/runs/history")
+async def runs_history(
+    caller: Caller = Depends(current_user),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    enforce_limit(f"u:{caller.user_id}:misc", gc.LIMIT_DEFAULT)
+    user = await game.require_user(session, caller)
+    rows = await game.run_history(session, user)
+    return {"runs": rows}
+
+
 @router.delete("/me")
 async def delete_me(
     caller: Caller = Depends(current_user),
