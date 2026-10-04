@@ -3247,10 +3247,6 @@ body.duel .duel-bar {
   filter: drop-shadow(0 0 14px rgba(255, 200, 60, 0.85));
   animation: crownFloat 2.4s ease-in-out infinite;
 }
-.crown-card .crown-big svg {
-  width: 100%;
-  height: 100%;
-}
 .crown-card.lost .crown-big {
   filter: grayscale(0.85) drop-shadow(0 0 6px rgba(255, 255, 255, 0.25));
   opacity: 0.8;
@@ -3306,9 +3302,14 @@ body.reduced .crown-card .crown-big {
   height: 26px;
   filter: drop-shadow(0 0 6px rgba(255, 200, 60, 0.7));
 }
-.crown-info .ci-icon svg {
+.crown-info .ci-icon svg,
+.crown-card .crown-big svg {
+  position: static;
+  display: block;
   width: 100%;
   height: 100%;
+  margin: 0;
+  animation: none;
 }
 .crown-info b {
   color: #ffd640;
@@ -3394,4 +3395,55 @@ body.reduced .crown-card .crown-big {
 .chip.blue b {
   -webkit-line-clamp: 3;
   font-size: 12px;
+}
+
+/* ===== Main screen: the street spans the whole width, one joined stats panel on top of it ===== */
+.showcase {
+  position: relative;
+  align-items: start;
+}
+.showcase > .hero-stage {
+  grid-column: 1 / -1;
+  grid-row: 1;
+}
+.stage-glow {
+  left: 4%;
+  right: 44%;
+}
+.showcase > .chips {
+  grid-column: 2;
+  grid-row: 1;
+  z-index: 2;
+  align-self: start;
+  margin: 2px 4px 0 0;
+  gap: 0;
+  padding: 3px 0;
+  border-radius: 16px;
+  overflow: hidden;
+  pointer-events: none;
+  background:
+    linear-gradient(160deg, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0.03) 60%),
+    rgba(12, 16, 26, 0.6);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.12),
+    0 8px 20px rgba(0, 0, 0, 0.32);
+}
+.showcase > .chips .chip {
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+.showcase > .chips .chip + .chip {
+  border-top: 1px solid rgba(255, 255, 255, 0.09);
+}
+.showcase > .chips .chip::before {
+  top: 9px;
+  bottom: 9px;
+}
+.showcase > .hero-stage .tap-hint {
+  left: 36%;
 }

@@ -735,7 +735,6 @@ export class Renderer {
     const deep = !this.reducedEffects;
     if (deep) {
       this.drawParLayer(shown, 0, 0.07, cam, W, H);
-      this.drawParLayer(shown, 1, 0.17, cam, W, H);
     }
     const off = (((cam * 0.35) % H) + H) % H;
     ctx.drawImage(tile, 0, off - H, W, H);

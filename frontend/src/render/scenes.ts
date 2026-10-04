@@ -494,18 +494,6 @@ export function paintParallax(g: G, tier: number, W: number, H: number, layer: 0
       g.fillRect(x - ry, y - ry, ry * 2, ry * 2);
       g.restore();
     }
-    for (let i = 0; i < 7; i++) {
-      const left = r() < 0.5;
-      const x = left ? 6 + r() * 50 : W - 6 - r() * 50;
-      const y = 20 + r() * (H - 40);
-      const rad = 10 + r() * 16;
-      const gr = g.createRadialGradient(x, y, 0, x, y, rad);
-      gr.addColorStop(0, sc.dot);
-      gr.addColorStop(1, 'rgba(255,255,255,0)');
-      g.globalAlpha = 0.16 + r() * 0.1;
-      g.fillStyle = gr;
-      g.fillRect(x - rad, y - rad, rad * 2, rad * 2);
-    }
     g.globalAlpha = 1;
   }
 }

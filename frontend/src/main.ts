@@ -18,6 +18,7 @@ import { askNotifications, initVk } from './platform/vk';
 import { DuelClient, type ChatMsg, type ChatUser, type DuelMsg, type DuelPlayer } from './net/duel';
 import { scenes } from './render/palette';
 import { drawItem, ITEM_BY_TIER, itemCount, outfitFromMask, type Item } from './render/hero';
+import { drawGround, GROUND_DEPTH } from './render/ground';
 import { CROWN_LIFT_FRONT, crownBob, drawCrown } from './render/crown';
 import { drawHeroFront } from './render/heroFront';
 import { Renderer } from './render/renderer';
@@ -844,25 +845,19 @@ function drawStageHero(c: HTMLCanvasElement, _tier: number, t: number, _silhouet
   const h = c.clientHeight;
   g.clearRect(0, 0, w, h);
   // About a quarter smaller than the stage, so the hero does not crowd the menu.
-  const scale = Math.min(w / 58, h / (hasCrown() ? 124 : 96));
-  const base = h - 6 * scale;
-  // Podium: the soles stand exactly on its top surface.
-  g.fillStyle = '#565C6B';
-  g.beginPath();
-  g.roundRect(w / 2 - 16 * scale, base, 32 * scale, 4.6 * scale, 2.3 * scale);
-  g.fill();
-  g.fillStyle = '#8C93A3';
-  g.beginPath();
-  g.roundRect(w / 2 - 16 * scale, base, 32 * scale, 3 * scale, 2.3 * scale);
-  g.fill();
-  // A little hop every few seconds.
-  const cycle = still ? 3 : t % 6;
-  const hop = cycle > 5.3 ? Math.sin(((cycle - 5.3) / 0.7) * Math.PI) * 6 * scale : 0;
+  const scale = Math.min(w / 58, h / ((hasCrown() ? 124 : 96) + GROUND_DEPTH * 0.6));
+  // The hero stands on the street: asphalt from edge to edge, soles exactly on its top line.
+  const base = h - GROUND_DEPTH * scale;
+  drawGround(g, w, base, h, scale);
+  // He stands still (no hopping).
+  // On the main screen the stats panel stands at the right: the hero is centered in the free part.
+  const side = c.id === 'menuHero' ? (document.querySelector('.menu2 .chips') as HTMLElement | null)?.offsetWidth ?? 0 : 0;
+  const cx = side ? (w - side - 8) / 2 : w / 2;
   g.save();
-  g.translate(w / 2, base - hop);
+  g.translate(cx, base);
   g.scale(scale, scale);
   const outfit = outfitFromMask(mask);
-  drawHeroFront(g, outfit, t, still ? 'hips' : 'idle', !still && cycle < 2.2 ? 'grin' : 'normal');
+  drawHeroFront(g, outfit, t, still ? 'hips' : 'idle', !still && t % 6 < 2.2 ? 'grin' : 'normal');
   // The weekly leader's crown floats above the head (higher than a cap or a helmet).
   if (hasCrown()) {
     g.translate(0, -(outfit.suit ? 68 : outfit.cap ? 64 : 61) - CROWN_LIFT_FRONT - crownBob(t));
