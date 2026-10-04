@@ -414,51 +414,95 @@ export function paintParallax(g: G, tier: number, W: number, H: number, layer: 0
   const sc = scenes[Math.min(tier, scenes.length - 1)];
   const r = rng(7000 + tier * 31 + layer * 977);
   if (layer === 0) {
-    // Far skyline: tall slim towers, drawn in the scene's block color, very faint.
-    g.globalAlpha = 0.22;
-    let x = -6;
-    while (x < W) {
-      const w = 22 + r() * 38;
-      const h = 90 + r() * (H * 0.55);
-      const top = H - 8 - h;
-      rect(g, x, top, w, h, sc.block);
-      // A few windows and a thin antenna on some of them.
-      for (let wy = top + 8; wy < H - 16; wy += 12) {
-        for (let wx = x + 4; wx < x + w - 5; wx += 8) {
-          if (r() < 0.28) rect(g, wx, wy, 3, 4, sc.window);
+    // Far skyline in two rows: the farthest is pale and hazy (it melts into the sky), the nearer
+    // one is darker with lit windows. A mist at the foot of the tile hides the repeat.
+    const row = (alpha: number, minH: number, spanH: number, color: string, winP: number, haze: number): void => {
+      g.globalAlpha = alpha;
+      let x = -10;
+      while (x < W) {
+        const w = 20 + r() * 40;
+        const h = minH + r() * spanH;
+        const top = H - 6 - h;
+        rect(g, x, top, w, h, color);
+        if (r() < 0.4) rect(g, x + w * 0.3, top - 8 - r() * 10, w * 0.4, 10, color); // roof block
+        if (r() < 0.3) rect(g, x + w / 2 - 0.7, top - 22, 1.4, 22, color); // antenna
+        g.globalAlpha = alpha * 1.6;
+        for (let wy = top + 8; wy < H - 14; wy += 11) {
+          for (let wx = x + 4; wx < x + w - 5; wx += 8) if (r() < winP) rect(g, wx, wy, 3, 4, sc.window);
         }
+        g.globalAlpha = alpha;
+        x += w + 2 + r() * 14;
       }
-      if (r() < 0.35) rect(g, x + w / 2 - 0.7, top - 14, 1.4, 14, sc.block);
-      x += w + 4 + r() * 18;
-    }
+      // Haze: the lower part of the row fades into the sky color.
+      g.globalAlpha = haze;
+      const m = g.createLinearGradient(0, H - 150, 0, H);
+      m.addColorStop(0, 'rgba(255,255,255,0)');
+      m.addColorStop(1, sc.skyBottom);
+      g.fillStyle = m;
+      g.fillRect(0, H - 150, W, 150);
+    };
+    row(0.2, 120, H * 0.5, sc.dot, 0.05, 0.35);
+    row(0.34, 80, H * 0.38, sc.block, 0.2, 0.4);
+    // Fade the foot of the tile out completely, so the repeat has no visible seam.
     g.globalAlpha = 1;
+    g.globalCompositeOperation = 'destination-out';
+    const cut = g.createLinearGradient(0, H - 90, 0, H);
+    cut.addColorStop(0, 'rgba(0,0,0,0)');
+    cut.addColorStop(1, 'rgba(0,0,0,1)');
+    g.fillStyle = cut;
+    g.fillRect(0, H - 90, W, 90);
+    g.globalCompositeOperation = 'source-over';
   } else if (layer === 1) {
-    // Soft clouds: a few overlapping circles.
-    const n = 7;
+    // Volumetric clouds: a lit top, a darker belly and a soft glow around them.
+    const n = 6;
     for (let i = 0; i < n; i++) {
-      const cy = 40 + (i / n) * (H - 80) + (r() - 0.5) * 30;
+      const cy = 50 + (i / n) * (H - 100) + (r() - 0.5) * 30;
       const cx = r() * W;
-      const s = 0.8 + r() * 0.9;
-      g.fillStyle = sc.dot;
-      g.globalAlpha = 0.1 + r() * 0.07;
-      for (let j = 0; j < 5; j++) {
-        g.beginPath();
-        g.arc(cx + (j - 2) * 14 * s, cy + (j % 2 ? -5 : 3) * s, (14 + r() * 8) * s, 0, Math.PI * 2);
-        g.fill();
+      const s2 = 0.9 + r() * 1.1;
+      const puffs = 6;
+      for (let pass = 0; pass < 3; pass++) {
+        for (let j = 0; j < puffs; j++) {
+          const px = cx + (j - puffs / 2) * 13 * s2;
+          const py = cy + Math.sin(j * 1.7) * 5 * s2 + (pass === 1 ? 3 : pass === 2 ? -2.5 : 0);
+          const rad = (13 + ((j * 7) % 5)) * s2;
+          g.globalAlpha = pass === 0 ? 0.07 : pass === 1 ? 0.13 : 0.1;
+          g.fillStyle = pass === 1 ? sc.block : sc.dot;
+          g.beginPath();
+          g.arc(px, py, rad * (pass === 0 ? 1.5 : 1), 0, Math.PI * 2);
+          g.fill();
+        }
       }
     }
     g.globalAlpha = 1;
   } else {
-    // Near plane: out-of-focus specks and wisps that rush past at the sides.
-    for (let i = 0; i < 16; i++) {
-      const side = r() < 0.5 ? 0 : 1;
-      const x = side ? W - r() * 70 : r() * 70;
+    // Foreground close to the camera: big dark soft shapes at the edges and a few large blurred lights.
+    for (let i = 0; i < 6; i++) {
+      const left = i % 2 === 0;
+      const y = (i / 6) * H + r() * 80;
+      const rx = 26 + r() * 30;
+      const ry = 60 + r() * 90;
+      const x = left ? -rx * 0.35 : W + rx * 0.35;
+      const gr = g.createRadialGradient(x, y, 0, x, y, ry);
+      gr.addColorStop(0, 'rgba(4,6,10,0.55)');
+      gr.addColorStop(0.6, 'rgba(4,6,10,0.22)');
+      gr.addColorStop(1, 'rgba(4,6,10,0)');
+      g.save();
+      g.translate(x, y);
+      g.scale(rx / ry, 1);
+      g.translate(-x, -y);
+      g.fillStyle = gr;
+      g.fillRect(x - ry, y - ry, ry * 2, ry * 2);
+      g.restore();
+    }
+    for (let i = 0; i < 7; i++) {
+      const left = r() < 0.5;
+      const x = left ? 6 + r() * 50 : W - 6 - r() * 50;
       const y = 20 + r() * (H - 40);
-      const rad = 4 + r() * 12;
+      const rad = 10 + r() * 16;
       const gr = g.createRadialGradient(x, y, 0, x, y, rad);
       gr.addColorStop(0, sc.dot);
       gr.addColorStop(1, 'rgba(255,255,255,0)');
-      g.globalAlpha = 0.12 + r() * 0.1;
+      g.globalAlpha = 0.16 + r() * 0.1;
       g.fillStyle = gr;
       g.fillRect(x - rad, y - rad, rad * 2, rad * 2);
     }

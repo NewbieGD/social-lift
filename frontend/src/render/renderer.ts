@@ -734,13 +734,13 @@ export class Renderer {
     // Parallax: far towers and clouds behind, the edge buildings in the middle, specks in front.
     const deep = !this.reducedEffects;
     if (deep) {
-      this.drawParLayer(shown, 0, 0.1, cam, W, H);
-      this.drawParLayer(shown, 1, 0.2, cam, W, H);
+      this.drawParLayer(shown, 0, 0.07, cam, W, H);
+      this.drawParLayer(shown, 1, 0.17, cam, W, H);
     }
     const off = (((cam * 0.35) % H) + H) % H;
     ctx.drawImage(tile, 0, off - H, W, H);
     ctx.drawImage(tile, 0, off, W, H);
-    if (deep) this.drawParLayer(shown, 2, 0.75, cam, W, H);
+    if (deep) this.drawParLayer(shown, 2, 1.4, cam, W, H);
     this.clock += dt;
     if (!this.reducedEffects) this.drawDecor(shown, W, H, off);
 

@@ -348,6 +348,7 @@ export function leadersShell(scope: 'week' | 'all'): string {
     <div class="tabs" role="tablist">
       ${tab('week', ru.leaders.week)}${tab('all', ru.leaders.all)}
     </div>
+    <div class="crown-info"><span class="ci-icon" aria-hidden="true">${CROWN}</span><div><b>${ru.leaders.crownTitle}</b><p>${ru.leaders.crownText}</p></div></div>
     <p class="reset-line" id="lbReset"></p>
     <div class="scroll leaders" id="lbList">${skeleton()}</div>
     <div class="me-card" id="lbMe"></div>`;
