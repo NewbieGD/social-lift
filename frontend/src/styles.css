@@ -3271,3 +3271,15 @@ body.duel .duel-bar {
 body.reduced .crown-card .crown-big {
   animation: none;
 }
+
+/* The hint is a bit smaller and sits at the very top, clear of the leader's crown. */
+.tap-hint {
+  top: 0;
+  padding: 3px 8px;
+  font-size: 10.5px;
+  gap: 4px;
+}
+.tap-hint svg {
+  width: 12px;
+  height: 12px;
+}

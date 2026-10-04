@@ -201,7 +201,7 @@ export class Renderer {
   private rings: { t: number; color: string }[] = [];
   private trail: { x: number; y: number; age: number }[] = [];
   /** Light waves that run out from a captured platform. */
-  private waves: { x: number; y: number; t: number; rgb: string; big: boolean }[] = [];
+  private waves: { x: number; y: number; t: number; rgb: string; big: boolean; dust: { dx: number; vx: number; vy: number; r: number; life: number }[] }[] = [];
   /** Colored flash over the whole field on a new combo step. */
   private pulse: { t: number; rgb: string } | null = null;
   private lastMult = 1;
@@ -285,7 +285,15 @@ export class Renderer {
         if (!this.reducedEffects) {
           this.spots.push({ x: e.x, y: e.y, t: 0, color: c });
           const rgbc = hexRgb(c);
-          this.waves.push({ x: e.x, y: e.y, t: 0, rgb: rgbc, big: e.mult > 1 });
+          const count = this.lowQuality ? 7 : e.mult > 1 ? 18 : 13;
+          const dust = Array.from({ length: count }, () => ({
+            dx: (Math.random() - 0.5) * 64,
+            vx: (Math.random() - 0.5) * 46,
+            vy: 8 + Math.random() * 26,
+            r: 1.4 + Math.random() * 2.6,
+            life: 0.5 + Math.random() * 0.5,
+          }));
+          this.waves.push({ x: e.x, y: e.y, t: 0, rgb: rgbc, big: e.mult > 1, dust });
           if (e.mult > this.lastMult && e.mult >= 2) this.pulse = { t: 0, rgb: rgbc };
         }
         this.lastMult = e.mult;
@@ -1482,30 +1490,29 @@ export class Renderer {
     ctx.restore();
   }
 
-  /** Rings of light that run out from a captured platform. */
+  /** A puff of glowing dust that rises from a captured platform and drifts apart. */
   private drawWaves(toY: (y: number) => number, dt: number): void {
     if (!this.waves.length) return;
     const ctx = this.ctx;
-    this.waves = this.waves.filter((w) => (w.t += dt) < 0.65);
+    this.waves = this.waves.filter((w) => (w.t += dt) < 1);
     ctx.save();
     ctx.globalCompositeOperation = 'lighter';
     for (const w of this.waves) {
-      const k = w.t / 0.65;
-      const e = 1 - (1 - k) * (1 - k);
       const sy = toY(w.y);
-      const reach = (w.big ? 120 : 90) * e;
-      ctx.strokeStyle = `rgba(${w.rgb},${0.8 * (1 - k)})`;
-      ctx.lineWidth = 3.2 * (1 - k) + 0.6;
-      ctx.beginPath();
-      ctx.ellipse(w.x, sy, 14 + reach, 4 + reach * 0.16, 0, 0, Math.PI * 2);
-      ctx.stroke();
-      // A light column that rises from the platform and fades.
-      const colH = 70 * Math.min(1, k * 3) * (1 - k * 0.6);
-      const cg = ctx.createLinearGradient(0, sy, 0, sy - colH);
-      cg.addColorStop(0, `rgba(${w.rgb},${0.35 * (1 - k)})`);
-      cg.addColorStop(1, `rgba(${w.rgb},0)`);
-      ctx.fillStyle = cg;
-      ctx.fillRect(w.x - 26 * (1 - k * 0.5), sy - colH, 52 * (1 - k * 0.5), colH);
+      for (const d of w.dust) {
+        const k = w.t / d.life;
+        if (k >= 1) continue;
+        const ease = 1 - (1 - k) * (1 - k);
+        const px = w.x + d.dx + d.vx * ease;
+        const py = sy - 2 - d.vy * ease * 1.6;
+        const rad = d.r * (1 + k * 1.6);
+        const al = 0.55 * (1 - k);
+        const g = ctx.createRadialGradient(px, py, 0, px, py, rad * 2);
+        g.addColorStop(0, `rgba(${w.rgb},${al})`);
+        g.addColorStop(1, `rgba(${w.rgb},0)`);
+        ctx.fillStyle = g;
+        ctx.fillRect(px - rad * 2, py - rad * 2, rad * 4, rad * 4);
+      }
     }
     ctx.restore();
   }
