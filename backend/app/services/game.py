@@ -29,6 +29,7 @@ from ..core import (
 from ..deps import ApiError, Caller
 from ..models import Event, Run, User, WeekBest
 from ..schemas import RunFinishIn
+from . import crown
 
 # ---------- Users ----------
 
@@ -273,6 +274,9 @@ async def finish_run(session: AsyncSession, caller: Caller, body: RunFinishIn) -
     await _cleanup_weeks(session)
     after = await player_stats(session, user)
     duel = await resolve_duel(session, run.duel_id) if run.duel_id else None
+    if is_week_record:
+        # A new weekly best may change the first place: move the crown and send the notices.
+        await crown.refresh(session)
     return _finish_response(
         run,
         user,
@@ -298,6 +302,7 @@ async def _cleanup_weeks(session: AsyncSession) -> None:
     _last_cleanup = time.monotonic()
     await session.execute(delete(WeekBest).where(WeekBest.week_id < old_week_ids(utcnow())))
     await session.commit()
+    await crown.prune(session)
 
 
 # ---------- Duels ----------
@@ -527,32 +532,3 @@ async def delete_player(session: AsyncSession, caller: Caller) -> None:
 async def log_event(session: AsyncSession, type_: str, platform: str, value: int | None) -> None:
     session.add(Event(created_at=utcnow(), type=type_, platform=platform[:32] or None, value=value))
     await session.commit()
-
-
-# ---------- Run history ----------
-
-HISTORY_LIMIT = 5
-
-
-async def run_history(session: AsyncSession, user: User) -> list[dict]:
-    """Return the player's last HISTORY_LIMIT finished runs, newest first."""
-    result = await session.execute(
-        select(Run)
-        .where(Run.user_id == user.id, Run.status == "finished")
-        .order_by(Run.finished_at.desc())
-        .limit(HISTORY_LIMIT)
-    )
-    runs = list(result.scalars())
-    return [
-        {
-            "run_id": r.id,
-            "finished_at": int(r.finished_at.timestamp() * 1000) if r.finished_at else None,
-            "score": r.score or 0,
-            "tier": r.tier or 0,
-            "captures": r.captures or 0,
-            "max_combo": r.max_combo or 0,
-            "duration_ms": r.duration_ms or 0,
-            "items": r.items or 0,
-        }
-        for r in runs
-    ]

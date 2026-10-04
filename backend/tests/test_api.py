@@ -217,3 +217,27 @@ async def test_duel_abandon_counts_as_loss(client):
     assert r["duel"]["status"] == "done"
     async with SessionLocal() as s:
         assert (await s.get(User, 72)).duel_wins == 1
+
+
+async def test_weekly_crown_moves_and_notifies(client):
+    for uid in (31, 32):
+        await ready_player(client, uid)
+
+    async def play(uid, score):
+        start = (await client.post("/api/runs/start", headers=headers(uid))).json()
+        await age_run(start["run_id"], 30)
+        return (await finish(client, uid, start, score=score, duration_ms=10_000, captures=10)).json()
+
+    await play(31, 30)
+    first = (await client.get("/api/crown", headers=headers(31))).json()
+    assert first["crown"] is True and first["holder"]["id"] == 31
+    assert [n["kind"] for n in first["notices"]] == ["won"]
+    # notices are handed over once
+    assert (await client.get("/api/crown", headers=headers(31))).json()["notices"] == []
+
+    await play(32, 40)  # 32 takes the first place of the week
+    mine = (await client.get("/api/crown", headers=headers(31))).json()
+    assert mine["crown"] is False and mine["holder"]["id"] == 32
+    assert [n["kind"] for n in mine["notices"]] == ["lost"]
+    boot = (await client.post("/api/session/bootstrap", headers=headers(32))).json()
+    assert boot["stats"]["crown"] is True

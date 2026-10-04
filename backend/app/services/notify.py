@@ -64,3 +64,16 @@ async def send_notification(user_id: int, message: str) -> bool:
 def duel_challenge_text(from_name: str | None) -> str:
     who = (from_name or "Игрок").strip()[:60]
     return f"{who} вызывает вас на дуэль в «Социальном лифте»! Зайдите в игру и примите вызов."
+
+
+def crown_lost_text(new_holder: str | None) -> str:
+    who = (new_holder or "Игрок").strip()[:60]
+    return f"{who} теперь с короной — лидер недельного рейтинга в «Социальном лифте»! Заходите и верните корону себе."
+
+
+def crown_expired_text() -> str:
+    return "Неделя закончилась, корона лидера снята. Играйте — новая корона ждёт самого быстрого в «Социальном лифте»!"
+
+
+def crown_won_text() -> str:
+    return "Вы лидер недельного рейтинга — корона ваша! Удержите первое место в «Социальном лифте»."

@@ -13,7 +13,7 @@ from ..core import aware, utcnow
 from ..db import get_session
 from ..deps import ApiError, Caller, current_user, enforce_limit
 from ..schemas import ConsentIn, EventIn, RunFinishIn, SettingsIn
-from ..services import game
+from ..services import crown, game
 from ..services.profiles import refresh_profiles
 
 router = APIRouter(prefix="/api")
@@ -35,7 +35,11 @@ async def bootstrap(
     synced = aware(user.profile_synced_at)
     if synced is None or (utcnow() - synced).total_seconds() > gc.PROFILE_TTL_SEC:
         background.add_task(refresh_profiles, [user.id])
+    crown_info = await crown.info(session, user)
+    stats = await game.player_stats(session, user)
+    stats["crown"] = crown_info["crown"]
     return {
+        "crown": crown_info,
         "profile": game.profile_dict(user),
         "flags": {
             "consent_ok": game.consent_ok(user),
@@ -44,7 +48,7 @@ async def bootstrap(
         "terms_version": settings.terms_version,
         "settings": user.settings or {},
         "settings_updated_at": user.settings_updated_at,
-        "stats": await game.player_stats(session, user),
+        "stats": stats,
         "server_time": int(utcnow().timestamp() * 1000),
         "ads": gc.ADS,
     }
@@ -102,6 +106,17 @@ async def runs_finish(
     return await game.finish_run(session, caller, body)
 
 
+@router.get("/crown")
+async def crown_state(
+    caller: Caller = Depends(current_user),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Crown holder of the week and the player's own pending crown notices."""
+    enforce_limit(f"u:{caller.user_id}:crown", gc.LIMIT_DEFAULT)
+    user = await game.require_user(session, caller)
+    return await crown.info(session, user)
+
+
 @router.post("/tutorial/complete")
 async def tutorial_complete(
     caller: Caller = Depends(current_user),
@@ -138,18 +153,6 @@ async def post_event(
     enforce_limit(f"u:{caller.user_id}:ev", gc.LIMIT_DEFAULT)
     await game.log_event(session, body.type, caller.platform, body.value)
     return {"ok": True}
-
-
-
-@router.get("/runs/history")
-async def runs_history(
-    caller: Caller = Depends(current_user),
-    session: AsyncSession = Depends(get_session),
-) -> dict:
-    enforce_limit(f"u:{caller.user_id}:misc", gc.LIMIT_DEFAULT)
-    user = await game.require_user(session, caller)
-    rows = await game.run_history(session, user)
-    return {"runs": rows}
 
 
 @router.delete("/me")

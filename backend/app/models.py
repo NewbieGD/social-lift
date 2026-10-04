@@ -104,3 +104,26 @@ class Event(Base):
     type: Mapped[str] = mapped_column(String(32))
     platform: Mapped[str | None] = mapped_column(String(32))
     value: Mapped[int | None] = mapped_column(Integer)
+
+
+class CrownState(Base):
+    """Who holds the crown of the weekly leader. One row (id = 1)."""
+
+    __tablename__ = "crown_state"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False)
+    week_id: Mapped[str] = mapped_column(String(10), default="")
+    holder_id: Mapped[int | None] = mapped_column(BigInteger)
+    since: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class CrownNotice(Base):
+    """An in-game message for a player about the crown; shown once, then deleted."""
+
+    __tablename__ = "crown_notices"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    kind: Mapped[str] = mapped_column(String(8))  # won | lost | expired
+    other_name: Mapped[str | None] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
