@@ -96,6 +96,15 @@ export const ru = {
     offline: 'Нет связи с сервером: результаты не попадут в рейтинг.',
     outside: 'Игра открыта вне ВКонтакте: результаты не сохраняются.',
   },
+  crown: {
+    title: 'Корона недели',
+    won: 'Вы лидер недельного рейтинга! Корона парит над вашим героем и в меню, и в игре. Удержите первое место до конца недели.',
+    lost: (name: string) => `${name} теперь с короной — он лидер недельного рейтинга. Корону у вас забрали. Побейте его рекорд и верните её!`,
+    expired: 'Неделя закончилась, и корона снята. Сыграйте раньше всех — новая корона достанется лидеру новой недели!',
+    ok: 'Понятно',
+    play: 'Вернуть корону',
+    someone: 'Игрок',
+  },
   rulesCard: {
     title: 'Коротко о главном',
     items: [
@@ -492,34 +501,6 @@ export const ru = {
   },
 };
 
-
-  history: {
-    title: 'Последние забеги',
-    btn: 'История забегов',
-    empty: 'Пока нет завершённых забегов.',
-    loading: 'Загружаем историю…',
-    error: 'Не удалось загрузить историю забегов.',
-    score: 'Очки',
-    tier: 'Этап',
-    captures: 'Платформ',
-    combo: 'Серия',
-    time: 'Время',
-    items: (n: number) => n > 0 ? `+${n * 5}% (вещей: ${n})` : 'Без вещей',
-    duration: (ms: number): string => {
-      const s = Math.floor(ms / 1000);
-      const m = Math.floor(s / 60);
-      return m > 0 ? `${m} мин ${s % 60} с` : `${s} с`;
-    },
-    ago: (ms: number): string => {
-      const s = Math.floor((Date.now() - ms) / 1000);
-      if (s < 60) return 'только что';
-      const m = Math.floor(s / 60);
-      if (m < 60) return `${m} мин назад`;
-      const h = Math.floor(m / 60);
-      if (h < 24) return `${h} ч назад`;
-      return `${Math.floor(h / 24)} дн назад`;
-    },
-  },
 export type Ru = typeof ru;
 
 // Generated from docs/USER_AGREEMENT.md and docs/PRIVACY_POLICY.md (keep in sync).

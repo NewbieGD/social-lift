@@ -9,7 +9,7 @@ import type { SimEvent } from './core/types';
 import { ru } from './i18n/ru';
 import { DEFAULT_KEYS, InputController, keyLabel, STEER_CODES } from './input/input';
 import { ApiError } from './net/api';
-import { Session, type RunTicket, type Stats } from './net/session';
+import { Session, type CrownNotice, type RunTicket, type Stats } from './net/session';
 import { haptic, hapticsSupported, initHaptics } from './platform/haptics';
 import { ads, DEFAULT_ADS, type AdsConfig } from './platform/ads';
 import { canShare, initShare, shareStory, shareWall } from './platform/share';
@@ -18,6 +18,7 @@ import { askNotifications, initVk } from './platform/vk';
 import { DuelClient, type ChatMsg, type ChatUser, type DuelMsg, type DuelPlayer } from './net/duel';
 import { scenes } from './render/palette';
 import { drawItem, ITEM_BY_TIER, itemCount, outfitFromMask, type Item } from './render/hero';
+import { CROWN_LIFT_FRONT, crownBob, drawCrown } from './render/crown';
 import { drawHeroFront } from './render/heroFront';
 import { Renderer } from './render/renderer';
 import { applyControls } from './ui/controlsLayout';
@@ -451,6 +452,7 @@ function newSim(seed: number, tutorial = false, items = false): void {
   last = performance.now();
   document.body.style.backgroundColor = scenes[0].page;
   renderer.setScene(0);
+  renderer.crown = hasCrown();
   renderer.heroTierOverride = null;
   renderer.menuGesture = null;
   renderer.sceneOnly = false;
@@ -581,7 +583,6 @@ function finishRun(): void {
   adState.runsSince++;
   saveAdState();
   session.event('run_end', sim.score);
-  historyRuns = null;
   rememberLocalRun(sim.score, sim.tier);
   if (session.mode === 'outside') {
     const local = readLocalItems();
@@ -653,6 +654,7 @@ function finishRun(): void {
         if (res.duel.status === 'done' && res.duel.outcome) showDuelOutcome(res.duel.outcome[myId] ?? 'draw');
         else if (!duelOutcome) setDuelLine(ru.duel.pending);
       }
+      if (res?.is_week_record) void checkCrown(true);
       session.prefetch();
     });
 }
@@ -769,6 +771,31 @@ function lastTier(): number {
   return session.data?.stats.last_tier ?? localStats()?.last_tier ?? 0;
 }
 
+// ---------- Weekly crown ----------
+
+let crownNotice: CrownNotice | null = null;
+const crownQueue: CrownNotice[] = [];
+let crownCheckedAt = 0;
+
+/** Asks the server who wears the crown (at most every 30 s unless forced) and queues the messages. */
+async function checkCrown(force = false): Promise<void> {
+  if (session.mode !== 'online') return;
+  if (!force && Date.now() - crownCheckedAt < 30_000) return;
+  crownCheckedAt = Date.now();
+  const info = await session.syncCrown();
+  if (!info) return;
+  crownQueue.push(...info.notices);
+  showCrownNotice();
+}
+
+/** One message at a time, only over the menu, never in the middle of a run. */
+function showCrownNotice(): void {
+  if (crownNotice && !router.has('crownCard')) crownNotice = null;
+  if (crownNotice || !crownQueue.length || router.top !== 'menu') return;
+  crownNotice = crownQueue.shift() ?? null;
+  if (crownNotice) router.open('crownCard');
+}
+
 function goMenu(): void {
   if (duel) {
     // Leaving a duel counts as a loss.
@@ -789,6 +816,8 @@ function goMenu(): void {
   setWallet(tier);
   document.body.style.backgroundColor = scenes[tier].page;
   router.reset('menu');
+  void checkCrown();
+  showCrownNotice();
 }
 
 // ---------- Menu showcase: the hero on a stage ----------
@@ -815,7 +844,7 @@ function drawStageHero(c: HTMLCanvasElement, _tier: number, t: number, _silhouet
   const h = c.clientHeight;
   g.clearRect(0, 0, w, h);
   // About a quarter smaller than the stage, so the hero does not crowd the menu.
-  const scale = Math.min(w / 58, h / 96);
+  const scale = Math.min(w / 58, h / (hasCrown() ? 114 : 96));
   const base = h - 6 * scale;
   // Podium: the soles stand exactly on its top surface.
   g.fillStyle = '#565C6B';
@@ -832,8 +861,20 @@ function drawStageHero(c: HTMLCanvasElement, _tier: number, t: number, _silhouet
   g.save();
   g.translate(w / 2, base - hop);
   g.scale(scale, scale);
-  drawHeroFront(g, outfitFromMask(mask), t, still ? 'hips' : 'idle', !still && cycle < 2.2 ? 'grin' : 'normal');
+  const outfit = outfitFromMask(mask);
+  drawHeroFront(g, outfit, t, still ? 'hips' : 'idle', !still && cycle < 2.2 ? 'grin' : 'normal');
+  // The weekly leader's crown floats above the head (higher than a cap or a helmet).
+  if (hasCrown()) {
+    g.translate(0, -(outfit.suit ? 68 : outfit.cap ? 64 : 61) - CROWN_LIFT_FRONT - crownBob(t));
+    g.scale(1.15, 1.15);
+    drawCrown(g, t, settingsStore.get().reducedFx);
+  }
   g.restore();
+}
+
+/** The player holds the crown of the weekly leader. */
+function hasCrown(): boolean {
+  return !!session.data?.stats.crown;
 }
 
 function drawShowcase(t: number): void {
@@ -932,11 +973,6 @@ function resume(): void {
 let consentError: string | null = null;
 let deleteError: string | null = null;
 let lbScope: 'week' | 'all' = 'week';
-// ---- history ----
-let historyRuns: import('./net/session').HistoryRun[] | null = null;
-let historyLoading = false;
-let historyError = false;
-
 let bootState = { progress: 0, label: ru.loading.fonts, error: null as string | null };
 let docKind: 'terms' | 'privacy' | 'rules' = 'rules';
 
@@ -953,25 +989,6 @@ router.register('consent', {
 router.register('declined', { html: () => V.declinedView(), cls: 'solid' });
 router.register('doc', { html: () => V.docView(docKind), cls: 'solid' });
 router.register('rules', { html: () => V.docView('rules'), cls: 'solid' });
-router.register('history', {
-  html: () => V.historyView(historyRuns, historyLoading, historyError),
-  cls: 'solid',
-  mount: () => {
-    if (historyRuns !== null) return;
-    historyLoading = true;
-    historyError = false;
-    router.refresh();
-    session.fetchHistory().then((rows) => {
-      historyRuns = rows;
-      historyLoading = false;
-      router.refresh();
-    }).catch(() => {
-      historyError = true;
-      historyLoading = false;
-      router.refresh();
-    });
-  },
-});
 router.register('wardrobe', {
   html: () => V.wardrobeView(session.data?.stats ?? localStats(), ownedMask()),
   cls: 'solid',
@@ -982,6 +999,7 @@ router.register('menu', {
   cls: 'menu-screen',
 });
 router.register('preparing', { html: () => V.preparingView(), cls: 'solid preparing' });
+router.register('crownCard', { html: () => V.crownCardView(crownNotice), modal: true });
 router.register('rulesCard', { html: () => V.rulesCardView(), modal: true });
 router.register('settings', {
   html: () =>
@@ -1196,6 +1214,11 @@ window.addEventListener(
 
 const actions: Record<string, (arg: string, el: HTMLElement) => void> = {
   back: () => router.back(),
+  crownOk: () => {
+    crownNotice = null;
+    router.back();
+    window.setTimeout(showCrownNotice, 350);
+  },
   open: (arg) => {
     if (arg === 'confirmDelete') deleteError = null;
     router.open(arg);
@@ -1449,6 +1472,8 @@ async function boot(): Promise<void> {
 
 function afterBoot(): void {
   if (session.mode === 'online') duelClient.connect();
+  crownQueue.push(...(session.data?.crown?.notices ?? []));
+  crownCheckedAt = Date.now();
   if (!hasConsent()) router.reset('consent');
   else goMenu();
 }

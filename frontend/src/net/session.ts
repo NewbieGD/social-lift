@@ -18,6 +18,19 @@ export interface Stats {
   items_mask?: number;
   item_misses?: number[];
   duel_wins?: number;
+  /** The player holds the crown of the weekly leader. */
+  crown?: boolean;
+}
+
+export interface CrownNotice {
+  kind: 'won' | 'lost' | 'expired';
+  name: string | null;
+}
+
+export interface CrownInfo {
+  crown: boolean;
+  holder: { id: number; name: string | null; photo: string | null } | null;
+  notices: CrownNotice[];
 }
 
 export interface Bootstrap {
@@ -29,6 +42,7 @@ export interface Bootstrap {
   stats: Stats;
   server_time: number;
   ads: Record<string, number | boolean>;
+  crown?: CrownInfo;
 }
 
 export interface RunTicket {
@@ -85,18 +99,6 @@ export interface Leaderboard {
   server_time: number;
   rows: LeaderRow[];
   me: { score: number; rank: number | null; next_rank: number | null; gap_to_next: number | null };
-}
-
-
-export interface HistoryRun {
-  run_id: string;
-  finished_at: number | null;   // ms unix
-  score: number;
-  tier: number;
-  captures: number;
-  max_combo: number;
-  duration_ms: number;
-  items: number;                // bitmask — count bits for worn-items count
 }
 
 export type Mode = 'loading' | 'online' | 'offline' | 'outside';
@@ -227,6 +229,18 @@ export class Session {
     return data;
   }
 
+  /** Who wears the weekly crown now, plus my pending crown messages. Updates my own flag. */
+  async syncCrown(): Promise<CrownInfo | null> {
+    if (this.mode !== 'online' || !this.data) return null;
+    try {
+      const info = await api<CrownInfo>('GET', '/crown');
+      this.data.stats.crown = info.crown;
+      return info;
+    } catch {
+      return null;
+    }
+  }
+
   /** Anonymous funnel event; failures are ignored. */
   event(type: 'tutorial_start' | 'tutorial_end' | 'run_start' | 'run_end' | 'tier_reached' | 'ad_shown' | 'settings_changed', value?: number): void {
     if (this.mode !== 'online') return;
@@ -285,12 +299,6 @@ export class Session {
     if (this.lastReport) {
       s.items_mask = (s.items_mask ?? 0) | this.lastReport.items;
     }
-  }
-
-  
-  async fetchHistory(): Promise<HistoryRun[]> {
-    const data = await api<{ runs: HistoryRun[] }>('GET', '/runs/history');
-    return data.runs;
   }
 
   private enqueue(report: RunReport): void {

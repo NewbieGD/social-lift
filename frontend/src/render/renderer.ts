@@ -4,7 +4,8 @@ import type { Platform, SimEvent } from '../core/types';
 import { ru } from '../i18n/ru';
 import { drawHeroBody, drawItem, heroRig, ITEM_ANCHOR, ITEM_BY_TIER, outfitFromMask, type AttachPoint, type Face, type Gesture, type HeroPose, type Item, type Rig } from './hero';
 import { palette } from './palette';
-import { paintScene, paintSky } from './scenes';
+import { CROWN_LIFT_SIDE, crownBob, drawCrown } from './crown';
+import { paintParallax, paintScene, paintSky } from './scenes';
 
 const MAX_PARTICLES = 220;
 
@@ -198,7 +199,14 @@ export class Renderer {
   }
   private sparkles: { x: number; y: number; t: number }[] = [];
   private rings: { t: number; color: string }[] = [];
-  private trail: { x: number; y: number }[] = [];
+  private trail: { x: number; y: number; age: number }[] = [];
+  /** Light waves that run out from a captured platform. */
+  private waves: { x: number; y: number; t: number; rgb: string; big: boolean }[] = [];
+  /** Colored flash over the whole field on a new combo step. */
+  private pulse: { t: number; rgb: string } | null = null;
+  private lastMult = 1;
+  /** The player holds the weekly crown: it floats above the hero's head. */
+  crown = false
   private motes: Mote[] = [];
   private beamMotes: { u: number; v: number; s: number }[] = Array.from({ length: 12 }, () => ({
     u: Math.random(),
@@ -243,6 +251,10 @@ export class Renderer {
     this.sparkles.length = 0;
     this.trail.length = 0;
     this.rings.length = 0;
+    this.waves.length = 0;
+    this.trail.length = 0;
+    this.pulse = null;
+    this.lastMult = 1;
     this.bills.length = 0;
     this.floaters.length = 0;
     this.ambient.length = 0;
@@ -270,7 +282,13 @@ export class Renderer {
     for (const e of events) {
       if (e.type === 'capture') {
         const c = palette.light[e.color];
-        if (!this.reducedEffects) this.spots.push({ x: e.x, y: e.y, t: 0, color: c });
+        if (!this.reducedEffects) {
+          this.spots.push({ x: e.x, y: e.y, t: 0, color: c });
+          const rgbc = hexRgb(c);
+          this.waves.push({ x: e.x, y: e.y, t: 0, rgb: rgbc, big: e.mult > 1 });
+          if (e.mult > this.lastMult && e.mult >= 2) this.pulse = { t: 0, rgb: rgbc };
+        }
+        this.lastMult = e.mult;
         this.floaters.push({ x: e.x, y: e.y + 28, life: 0.9, max: 0.9, text: `+${e.points}`, color: c, big: e.mult > 1 });
         const n = this.reducedEffects ? 3 : this.lowQuality ? 6 : 8 + Math.floor(Math.random() * 7);
         const sy = toScreenY(e.y);
@@ -290,6 +308,8 @@ export class Renderer {
         for (let i = 0; i < 5; i++) {
           this.particles.spawn(0, e.x + (Math.random() - 0.5) * 24, e.y + 2, (Math.random() - 0.5) * 90, 20 + Math.random() * 30, 0.35);
         }
+      } else if (e.type === 'comboReset') {
+        this.lastMult = 1;
       } else if (e.type === 'aura') {
         this.auraPulse = 1;
       } else if (e.type === 'wall') {
@@ -536,7 +556,8 @@ export class Renderer {
 
     this.drawWave(sim, toY, W, H);
     this.drawParticles(toY);
-    this.drawTrail(sim, hx, hy, toY);
+    this.drawWaves(toY, frameDt);
+    this.drawTrail(sim, hx, hy, toY, frameDt);
 
     if (this.cine) {
       // Dim the scene and light the hero with a spotlight.
@@ -587,6 +608,7 @@ export class Renderer {
       }
     }
     if (!this.cine) this.drawDanger(sim, W, H);
+    this.drawPulse(W, H, frameDt);
 
     this.drawFloaters(toY, frameDt);
     ctx.setTransform(s, 0, 0, s, 0, 0);
@@ -661,6 +683,27 @@ export class Renderer {
     return c;
   }
 
+  private par = new Map<number, HTMLCanvasElement>();
+
+  private parLayer(tier: number, layer: 0 | 1 | 2, W: number, H: number): HTMLCanvasElement {
+    const key = tier * 3 + layer;
+    let c = this.par.get(key);
+    if (!c) {
+      c = this.offscreen(W, H);
+      paintParallax(this.ctxOf(c), tier, W, H, layer);
+      this.par.set(key, c);
+    }
+    return c;
+  }
+
+  /** One looping parallax layer; speed is the share of the camera movement. */
+  private drawParLayer(tier: number, layer: 0 | 1 | 2, speed: number, cam: number, W: number, H: number): void {
+    const c = this.parLayer(tier, layer, W, H);
+    const off = (((cam * speed) % H) + H) % H;
+    this.ctx.drawImage(c, 0, off - H, W, H);
+    this.ctx.drawImage(c, 0, off, W, H);
+  }
+
   private offscreen(W: number, H: number): HTMLCanvasElement {
     const c = document.createElement('canvas');
     c.width = Math.max(1, Math.round(W * this.scale * this.dpr));
@@ -680,10 +723,16 @@ export class Renderer {
     const shown = this.heroTierOverride ?? this.sceneTier;
     ctx.drawImage(this.sky(shown, W, H), 0, 0, W, H);
     const tile = this.tile(shown, W, H);
-    // Parallax: the edge buildings scroll slower than the platforms.
+    // Parallax: far towers and clouds behind, the edge buildings in the middle, specks in front.
+    const deep = !this.reducedEffects;
+    if (deep) {
+      this.drawParLayer(shown, 0, 0.1, cam, W, H);
+      this.drawParLayer(shown, 1, 0.2, cam, W, H);
+    }
     const off = (((cam * 0.35) % H) + H) % H;
     ctx.drawImage(tile, 0, off - H, W, H);
     ctx.drawImage(tile, 0, off, W, H);
+    if (deep) this.drawParLayer(shown, 2, 0.75, cam, W, H);
     this.clock += dt;
     if (!this.reducedEffects) this.drawDecor(shown, W, H, off);
 
@@ -1181,6 +1230,19 @@ export class Renderer {
     ctx.restore();
     if (shielded) this.drawShieldGlow(pose, rig, x, footY, sx * hero.facing, sy, sim.time, dt, 'rim');
 
+    // The weekly leader's crown floats above the head, above any cap or helmet.
+    if (this.crown && !sim.dead) {
+      const up = outfit.suit ? 8 : outfit.cap ? 3 : 0;
+      const cx = x + rig.points.headTop.x * sx * hero.facing;
+      const cy = footY + rig.points.headTop.y * sy - CROWN_LIFT_SIDE - 4 - up + crownBob(this.clock * 1 + sim.time);
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.rotate(hero.vx * 0.0004);
+      ctx.scale(1.3, 1.3);
+      drawCrown(ctx, this.clock, this.reducedEffects);
+      ctx.restore();
+    }
+
     // Lens flare and a color-change ring at the flashlight.
     if (!sim.dead) {
       ctx.globalCompositeOperation = 'lighter';
@@ -1378,30 +1440,94 @@ export class Renderer {
     ctx.restore();
   }
 
-  /** A colored ribbon behind the hero on a ×3 combo. */
-  private drawTrail(sim: Sim, x: number, worldY: number, toY: (y: number) => number): void {
-    if (this.reducedEffects || sim.multiplier < 3 || sim.dead) {
+  /**
+   * A glowing ribbon behind the hero in the color of the flashlight. Points age by time,
+   * so the tail has the same length on 60 and 144 Hz screens. It gets longer and brighter
+   * with the combo multiplier.
+   */
+  private drawTrail(sim: Sim, x: number, worldY: number, toY: (y: number) => number, dt: number): void {
+    if (this.reducedEffects || sim.dead || this.cine) {
       this.trail.length = 0;
       return;
     }
-    this.trail.push({ x, y: worldY + 26 });
-    if (this.trail.length > 14) this.trail.shift();
+    const life = 0.26 + Math.min(3, sim.multiplier - 1) * 0.07;
+    for (const p of this.trail) p.age += dt;
+    while (this.trail.length && this.trail[0].age > life) this.trail.shift();
+    const last = this.trail[this.trail.length - 1];
+    if (!last || Math.abs(last.x - x) + Math.abs(last.y - (worldY + 26)) > 1.5) {
+      this.trail.push({ x, y: worldY + 26, age: 0 });
+    }
+    if (this.trail.length < 2) return;
     const ctx = this.ctx;
     const rgb = this.flashlightColor.map(Math.round).join(',');
+    const on = sim.light !== null;
+    const strength = (on ? 0.5 : 0.14) + Math.min(3, sim.multiplier - 1) * 0.1;
     ctx.save();
     ctx.globalCompositeOperation = 'lighter';
     ctx.lineCap = 'round';
-    for (let i = 1; i < this.trail.length; i++) {
-      const a = this.trail[i - 1];
-      const b = this.trail[i];
-      const k = i / this.trail.length;
-      ctx.strokeStyle = `rgba(${rgb},${0.35 * k})`;
-      ctx.lineWidth = 14 * k;
-      ctx.beginPath();
-      ctx.moveTo(a.x, toY(a.y));
-      ctx.lineTo(b.x, toY(b.y));
-      ctx.stroke();
+    // Two passes: a wide soft glow and a thin bright core.
+    for (const [wid, al] of [[16, 0.4], [6, 1]] as const) {
+      for (let i = 1; i < this.trail.length; i++) {
+        const a = this.trail[i - 1];
+        const b = this.trail[i];
+        const k = 1 - b.age / life;
+        ctx.strokeStyle = `rgba(${rgb},${strength * al * k * k})`;
+        ctx.lineWidth = wid * (0.25 + 0.75 * k);
+        ctx.beginPath();
+        ctx.moveTo(a.x, toY(a.y));
+        ctx.lineTo(b.x, toY(b.y));
+        ctx.stroke();
+      }
     }
+    ctx.restore();
+  }
+
+  /** Rings of light that run out from a captured platform. */
+  private drawWaves(toY: (y: number) => number, dt: number): void {
+    if (!this.waves.length) return;
+    const ctx = this.ctx;
+    this.waves = this.waves.filter((w) => (w.t += dt) < 0.65);
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    for (const w of this.waves) {
+      const k = w.t / 0.65;
+      const e = 1 - (1 - k) * (1 - k);
+      const sy = toY(w.y);
+      const reach = (w.big ? 120 : 90) * e;
+      ctx.strokeStyle = `rgba(${w.rgb},${0.8 * (1 - k)})`;
+      ctx.lineWidth = 3.2 * (1 - k) + 0.6;
+      ctx.beginPath();
+      ctx.ellipse(w.x, sy, 14 + reach, 4 + reach * 0.16, 0, 0, Math.PI * 2);
+      ctx.stroke();
+      // A light column that rises from the platform and fades.
+      const colH = 70 * Math.min(1, k * 3) * (1 - k * 0.6);
+      const cg = ctx.createLinearGradient(0, sy, 0, sy - colH);
+      cg.addColorStop(0, `rgba(${w.rgb},${0.35 * (1 - k)})`);
+      cg.addColorStop(1, `rgba(${w.rgb},0)`);
+      ctx.fillStyle = cg;
+      ctx.fillRect(w.x - 26 * (1 - k * 0.5), sy - colH, 52 * (1 - k * 0.5), colH);
+    }
+    ctx.restore();
+  }
+
+  /** The whole field flashes softly in the platform color on every new combo step. */
+  private drawPulse(W: number, H: number, dt: number): void {
+    const p = this.pulse;
+    if (!p) return;
+    p.t += dt;
+    if (p.t > 0.5) {
+      this.pulse = null;
+      return;
+    }
+    const k = 1 - p.t / 0.5;
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    const g = ctx.createRadialGradient(W / 2, H / 2, H * 0.25, W / 2, H / 2, H * 0.75);
+    g.addColorStop(0, `rgba(${p.rgb},0)`);
+    g.addColorStop(1, `rgba(${p.rgb},${0.3 * k * k})`);
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, W, H);
     ctx.restore();
   }
 
@@ -1676,6 +1802,12 @@ function drawMoney(ctx: CanvasRenderingContext2D, x: number, y: number, rot: num
       ctx.fillRect(-0.6, -4, 1.2, 4);
   }
   ctx.restore();
+}
+
+/** '#RRGGBB' -> 'r,g,b' for rgba() strings. */
+function hexRgb(hex: string): string {
+  const n = parseInt(hex.slice(1), 16);
+  return `${(n >> 16) & 255},${(n >> 8) & 255},${n & 255}`;
 }
 
 function lightRgb(light: LightId | null): [number, number, number] {

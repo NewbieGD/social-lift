@@ -2,7 +2,7 @@
 import { AGE_LABEL } from '../config';
 import { legal, ru, type DocSection } from '../i18n/ru';
 import type { ChatMsg, ChatUser } from '../net/duel';
-import type { FinishResult, HistoryRun, Leaderboard, LeaderRow, Stats } from '../net/session';
+import type { FinishResult, Leaderboard, LeaderRow, Stats } from '../net/session';
 import { esc } from './dom';
 import { keyLabel } from '../input/input';
 import type { LightId } from '../core/gameConfig';
@@ -179,9 +179,6 @@ export function wardrobeView(s: Stats | null, mask: number): string {
     'cap', 'slippers', 'sweats', 'shirt', 'trousers', 'jacket', 'watch', 'newTorch', 'tie', 'shoes', 'phone', 'glasses', 'helmet',
   ];
   return `${header(ru.wardrobe.title)}<div class="scroll wardrobe">
-    <div class="ward-history-btn">
-      <button class="secondary small" data-action="open" data-arg="history">${ru.history.btn}</button>
-    </div>
     <div class="ward-top">
       <div class="ward-stage"><span class="stage-glow"></span><canvas id="wardHero" aria-hidden="true"></canvas></div>
       <div class="ward-info">
@@ -220,6 +217,18 @@ export function rulesCardView(): string {
     <label class="check-row"><input type="checkbox" id="dontShowRules" /> <span>${ru.rulesCard.dontShow}</span></label>
     <button class="primary" data-action="playFromCard">${ru.common.play}</button>
     <button class="link-btn" data-action="open" data-arg="rules">${ru.rulesCard.fullRules}</button>
+  </div>`;
+}
+
+/** Message about the crown: you got it, it was taken, or the week ended. */
+export function crownCardView(n: { kind: 'won' | 'lost' | 'expired'; name: string | null } | null): string {
+  const t = ru.crown;
+  const text = !n ? '' : n.kind === 'won' ? t.won : n.kind === 'lost' ? t.lost(esc(n.name || t.someone)) : t.expired;
+  return `<div class="panel crown-card ${n?.kind === 'won' ? 'won' : 'lost'}">
+    <div class="crown-big" aria-hidden="true">${CROWN}</div>
+    <h2>${t.title}</h2>
+    <p>${text}</p>
+    <button class="primary" data-action="crownOk">${n?.kind === 'lost' ? t.play : t.ok}</button>
   </div>`;
 }
 
@@ -649,42 +658,3 @@ export function playerCardView(u: ChatUser, mine: boolean): string {
     <button class="secondary" data-action="profile" data-arg="${u.id}">${ru.chat.profileBtn}</button>
   </div>`;
 }
-
-// ---------- Run history ----------
-
-export function historyView(runs: HistoryRun[] | null, loading: boolean, error: boolean): string {
-  const TIER_ICON =
-    '<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M12 2l2.9 6.6 7.1.6-5.4 4.7 1.6 7L12 17.3 5.8 20.9l1.6-7L2 9.2l7.1-.6z" fill="#F6C343"/></svg>';
-
-  let body: string;
-  if (loading) {
-    body = `<p class="status">${ru.history.loading}</p>`;
-  } else if (error) {
-    body = `<p class="status warn">${ru.history.error}</p>`;
-  } else if (!runs || runs.length === 0) {
-    body = `<p class="muted" style="text-align:center;margin-top:2rem">${ru.history.empty}</p>`;
-  } else {
-    body = runs
-      .map((r, idx) => {
-        const itemCount = (() => { let n = 0; for (let b = r.items; b; b >>= 1) n += b & 1; return n; })();
-        const tierName = ru.tiers[Math.min(r.tier, ru.tiers.length - 1)];
-        return `<div class="history-card stagger" style="animation-delay:${idx * 60}ms">
-          <div class="history-head">
-            <span class="history-score">${r.score.toLocaleString('ru')}</span>
-            <span class="history-ago">${r.finished_at ? ru.history.ago(r.finished_at) : ''}</span>
-          </div>
-          <div class="history-meta">
-            <span>${TIER_ICON}${esc(tierName)}</span>
-            <span>\u23f1 ${ru.history.duration(r.duration_ms)}</span>
-            <span>\uD83C\uDFAF ${r.captures}</span>
-            <span>\u26A1 x${r.max_combo}</span>
-          </div>
-          ${itemCount > 0 ? `<p class="history-items">${esc(ru.history.items(itemCount))}</p>` : ''}
-        </div>`;
-      })
-      .join('');
-  }
-
-  return header(ru.history.title) + '<div class="scroll history-list">' + body + '</div>';
-}
-

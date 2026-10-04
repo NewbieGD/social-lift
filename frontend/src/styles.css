@@ -3236,61 +3236,38 @@ body.duel .duel-bar {
   opacity: 0.55;
 }
 
-/* ---------- Run history ---------- */
-.history-list {
-  padding: 1rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
+/* ---- Crown of the weekly leader ---- */
+.crown-card {
+  text-align: center;
 }
-
-.history-card {
-  background: var(--card-bg, rgba(255,255,255,0.06));
-  border-radius: 12px;
-  padding: 0.85rem 1rem;
-  box-shadow: 0 1px 6px rgba(0,0,0,0.18);
+.crown-card .crown-big {
+  width: 84px;
+  height: 84px;
+  margin: 0 auto 6px;
+  filter: drop-shadow(0 0 14px rgba(255, 200, 60, 0.85));
+  animation: crownFloat 2.4s ease-in-out infinite;
 }
-
-.history-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  margin-bottom: 0.35rem;
+.crown-card .crown-big svg {
+  width: 100%;
+  height: 100%;
 }
-
-.history-score {
-  font-size: 1.4rem;
-  font-weight: 700;
-  color: var(--accent, #F6C343);
-  letter-spacing: 0.01em;
+.crown-card.lost .crown-big {
+  filter: grayscale(0.85) drop-shadow(0 0 6px rgba(255, 255, 255, 0.25));
+  opacity: 0.8;
 }
-
-.history-ago {
-  font-size: 0.78rem;
-  color: var(--text-muted, #888);
+.crown-card p {
+  margin: 8px 0 16px;
+  line-height: 1.4;
 }
-
-.history-meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem 1rem;
-  font-size: 0.82rem;
-  color: var(--text-secondary, #ccc);
+@keyframes crownFloat {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-6px);
+  }
 }
-
-.history-items {
-  margin-top: 0.4rem;
-  font-size: 0.78rem;
-  color: var(--text-muted, #888);
-}
-
-.ward-history-btn {
-  padding: 0.5rem 1rem 0;
-  display: flex;
-  justify-content: flex-end;
-}
-
-button.secondary.small {
-  padding: 0.35rem 0.85rem;
-  font-size: 0.82rem;
+body.reduced .crown-card .crown-big {
+  animation: none;
 }

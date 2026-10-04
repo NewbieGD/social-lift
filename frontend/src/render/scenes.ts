@@ -403,3 +403,65 @@ export function paintScene(g: G, tier: number, W: number, H: number): void {
   }
 
 }
+
+/**
+ * Extra parallax layers on transparent tiles that scroll at different speeds:
+ * 0 - distant towers (slowest), 1 - clouds and haze, 2 - near drifting specks (fastest).
+ * Nothing crosses the tile edge, so the tile repeats without a seam. They are faint and
+ * stay away from the middle of the field, so they never hide a platform.
+ */
+export function paintParallax(g: G, tier: number, W: number, H: number, layer: 0 | 1 | 2): void {
+  const sc = scenes[Math.min(tier, scenes.length - 1)];
+  const r = rng(7000 + tier * 31 + layer * 977);
+  if (layer === 0) {
+    // Far skyline: tall slim towers, drawn in the scene's block color, very faint.
+    g.globalAlpha = 0.22;
+    let x = -6;
+    while (x < W) {
+      const w = 22 + r() * 38;
+      const h = 90 + r() * (H * 0.55);
+      const top = H - 8 - h;
+      rect(g, x, top, w, h, sc.block);
+      // A few windows and a thin antenna on some of them.
+      for (let wy = top + 8; wy < H - 16; wy += 12) {
+        for (let wx = x + 4; wx < x + w - 5; wx += 8) {
+          if (r() < 0.28) rect(g, wx, wy, 3, 4, sc.window);
+        }
+      }
+      if (r() < 0.35) rect(g, x + w / 2 - 0.7, top - 14, 1.4, 14, sc.block);
+      x += w + 4 + r() * 18;
+    }
+    g.globalAlpha = 1;
+  } else if (layer === 1) {
+    // Soft clouds: a few overlapping circles.
+    const n = 7;
+    for (let i = 0; i < n; i++) {
+      const cy = 40 + (i / n) * (H - 80) + (r() - 0.5) * 30;
+      const cx = r() * W;
+      const s = 0.8 + r() * 0.9;
+      g.fillStyle = sc.dot;
+      g.globalAlpha = 0.1 + r() * 0.07;
+      for (let j = 0; j < 5; j++) {
+        g.beginPath();
+        g.arc(cx + (j - 2) * 14 * s, cy + (j % 2 ? -5 : 3) * s, (14 + r() * 8) * s, 0, Math.PI * 2);
+        g.fill();
+      }
+    }
+    g.globalAlpha = 1;
+  } else {
+    // Near plane: out-of-focus specks and wisps that rush past at the sides.
+    for (let i = 0; i < 16; i++) {
+      const side = r() < 0.5 ? 0 : 1;
+      const x = side ? W - r() * 70 : r() * 70;
+      const y = 20 + r() * (H - 40);
+      const rad = 4 + r() * 12;
+      const gr = g.createRadialGradient(x, y, 0, x, y, rad);
+      gr.addColorStop(0, sc.dot);
+      gr.addColorStop(1, 'rgba(255,255,255,0)');
+      g.globalAlpha = 0.12 + r() * 0.1;
+      g.fillStyle = gr;
+      g.fillRect(x - rad, y - rad, rad * 2, rad * 2);
+    }
+    g.globalAlpha = 1;
+  }
+}
