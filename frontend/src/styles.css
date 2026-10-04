@@ -3287,20 +3287,23 @@ body.reduced .crown-card .crown-big {
 /* Short explanation of the weekly crown at the top of the leaderboard */
 .crown-info {
   display: flex;
-  gap: 10px;
+  gap: 9px;
   align-items: flex-start;
-  margin: 8px 0 4px;
-  padding: 9px 11px;
+  box-sizing: border-box;
+  width: 100%;
+  max-width: min(480px, var(--board-w));
+  margin: 0 auto 6px;
+  padding: 8px 10px;
   border-radius: 12px;
   background: linear-gradient(135deg, rgba(255, 200, 60, 0.16), rgba(255, 200, 60, 0.05));
   border: 1px solid rgba(255, 200, 60, 0.35);
-  font-size: 12px;
-  line-height: 1.35;
+  font-size: 11.5px;
+  line-height: 1.3;
 }
 .crown-info .ci-icon {
-  flex: 0 0 30px;
-  width: 30px;
-  height: 30px;
+  flex: 0 0 26px;
+  width: 26px;
+  height: 26px;
   filter: drop-shadow(0 0 6px rgba(255, 200, 60, 0.7));
 }
 .crown-info .ci-icon svg {
@@ -3313,4 +3316,82 @@ body.reduced .crown-card .crown-big {
 .crown-info p {
   margin: 2px 0 0;
   color: var(--ink-dim);
+}
+
+/* ===== Stat chips v3: slim frosted glass strips with a colored accent ===== */
+.chips {
+  gap: 7px;
+}
+.chip {
+  --chip-c: #888;
+  padding: 7px 10px 7px 12px;
+  gap: 9px;
+  border-radius: 13px;
+  overflow: hidden;
+  background:
+    linear-gradient(100deg, color-mix(in srgb, var(--chip-c) 26%, transparent), rgba(255, 255, 255, 0.03) 70%),
+    rgba(12, 16, 26, 0.62);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.1),
+    0 5px 14px rgba(0, 0, 0, 0.28);
+}
+.chip::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 7px;
+  bottom: 7px;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+  background: var(--chip-c);
+  box-shadow: 0 0 8px var(--chip-c);
+}
+.chip.gold {
+  --chip-c: #f2b62d;
+}
+.chip.green {
+  --chip-c: #38c673;
+}
+.chip.blue {
+  --chip-c: #5aa8ff;
+}
+.chip-ico {
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--chip-c) 30%, rgba(0, 0, 0, 0.25));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--chip-c) 55%, transparent);
+}
+.chip-ico svg {
+  width: 17px;
+  height: 17px;
+}
+.chip-label {
+  font-size: 9.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.62);
+}
+.chip b {
+  font-size: 15px;
+  font-weight: 800;
+  white-space: normal;
+  line-height: 1.12;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.chip.blue b {
+  font-size: 12.5px;
+}
+.chip.gold b {
+  color: #ffd640;
+  text-shadow: 0 0 10px rgba(255, 200, 60, 0.55);
+}
+.chip.blue b {
+  -webkit-line-clamp: 3;
+  font-size: 12px;
 }

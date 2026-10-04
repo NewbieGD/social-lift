@@ -129,7 +129,7 @@ export function menuView(d: MenuData): string {
   const chips = fresh
     ? `<div class="chip wide" style="--i:0">${ICON.floor}<span class="chip-text"><b>${ru.menu.firstRun}</b></span></div>`
     : [
-        chip(ICON.crown, ru.menu.chipRank, s?.rank_all ? String(s.rank_all) : ru.wardrobe.none, 0, 'gold'),
+        chip(ICON.crown, ru.menu.chipRank, s?.rank_all ? `#${s.rank_all}` : ru.wardrobe.none, 0, 'gold'),
         chip(ICON.bill, ru.menu.chipLast, String(s?.last_score ?? 0), 1, 'green'),
         chip(ICON.floor, ru.menu.chipTier, ru.tiers[tier] ?? ru.tiers[0], 2, 'blue'),
       ].join('');
