@@ -168,41 +168,74 @@ export function menuView(d: MenuData): string {
   </div>`;
 }
 
-export function wardrobeView(s: Stats | null, mask: number): string {
+const STAT_ICONS: Record<string, string> = {
+  best: '<svg viewBox="0 0 24 24"><path d="M7 4h10v4a5 5 0 01-10 0zM7 6H4v1a3 3 0 003 3M17 6h3v1a3 3 0 01-3 3M12 13v4M8 20h8M10 17h4" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  week: '<svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="15" rx="3" fill="none" stroke="currentColor" stroke-width="1.9"/><path d="M4 10h16M9 3v4M15 3v4" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></svg>',
+  all: '<svg viewBox="0 0 24 24"><path d="M3 18L2 7l5.5 4L12 4l4.5 7L22 7l-1 11zM4 21h16" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round" stroke-linecap="round"/></svg>',
+  runs: '<svg viewBox="0 0 24 24"><path d="M5 12a7 7 0 0112-5l2-2v6h-6l2.2-2.2A4.5 4.5 0 007.5 12M19 12a7 7 0 01-12 5l-2 2v-6h6l-2.2 2.2A4.5 4.5 0 0016.5 12" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  combo: '<svg viewBox="0 0 24 24"><path d="M12 3c1 4 5 5.5 5 10a5 5 0 01-10 0c0-2 1-3 2-4 .3 1.5 1 2.3 2 2.5C10.5 8.5 11 5.5 12 3z" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"/></svg>',
+  captures: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" stroke-width="1.9"/><circle cx="12" cy="12" r="4" fill="none" stroke="currentColor" stroke-width="1.9"/><circle cx="12" cy="12" r="1" fill="currentColor"/></svg>',
+};
+
+const LOCK_ICON =
+  '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="10" width="14" height="10" rx="3" fill="currentColor"/><path d="M8 10V8a4 4 0 018 0v2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
+const CHECK_ICON =
+  '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+export function wardrobeView(s: Stats | null, mask: number, who?: { name: string | null; crown: boolean }): string {
   const v = (n: number | null | undefined): string => (n === null || n === undefined || n === 0 ? ru.wardrobe.none : String(n));
   let owned = 0;
   for (let i = 0; i < 13; i++) if (mask & (1 << i)) owned++;
-  const stats: [string, string][] = [
-    [ru.wardrobe.best, v(s?.best_all)],
-    [ru.wardrobe.rankWeek, v(s?.rank_week)],
-    [ru.wardrobe.rankAll, v(s?.rank_all)],
-    [ru.wardrobe.runs, v(s?.total_runs)],
-    [ru.wardrobe.combo, v(s?.best_combo)],
-    [ru.wardrobe.captures, v(s?.total_captures)],
+  const stats: [string, string, string, string][] = [
+    ['best', ru.wardrobe.best, v(s?.best_all), 'gold'],
+    ['week', ru.wardrobe.rankWeek, v(s?.rank_week), 'blue'],
+    ['all', ru.wardrobe.rankAll, v(s?.rank_all), 'violet'],
+    ['runs', ru.wardrobe.runs, v(s?.total_runs), 'green'],
+    ['combo', ru.wardrobe.combo, v(s?.best_combo), 'orange'],
+    ['captures', ru.wardrobe.captures, v(s?.total_captures), 'pink'],
   ];
   const itemNames = [
     'cap', 'slippers', 'sweats', 'shirt', 'trousers', 'jacket', 'watch', 'newTorch', 'tie', 'shoes', 'phone', 'glasses', 'helmet',
   ];
+  const name = who?.name || ru.leaders.player;
+  const bonus = owned * 5;
   return `${header(ru.wardrobe.title)}<div class="scroll wardrobe">
-    <div class="ward-top">
-      <div class="ward-stage"><span class="stage-glow"></span><canvas id="wardHero" aria-hidden="true"></canvas></div>
-      <div class="ward-info">
-        <p class="ward-look">${esc(ru.wardrobe.collected(owned))}</p>
-        <div class="bonus-bar" aria-hidden="true"><i style="transform:scaleX(${(owned / 13).toFixed(3)})"></i></div>
-        <p class="muted">${esc(ru.wardrobe.bonus())}</p>
-        <dl class="ward-stats stagger">${stats.map(([k, val]) => `<div><dt>${k}</dt><dd>${val}</dd></div>`).join('')}</dl>
+    <section class="ward-hero">
+      <div class="ward-stage"><canvas id="wardHero" aria-hidden="true"></canvas></div>
+      <div class="ward-ring" style="--p:${(owned / 13).toFixed(3)}" aria-label="${esc(ru.wardrobe.collected(owned))}">
+        <span><b>${owned}</b><small>${ru.wardrobe.of13}</small></span>
       </div>
-    </div>
-    <h3>${ru.wardrobe.collection}</h3>
-    <p class="muted">${ru.wardrobe.how}</p>
+      <div class="ward-bonus${bonus ? '' : ' zero'}"><b>+${bonus}%</b><small>${ru.wardrobe.toMult}</small></div>
+      <div class="ward-plate">${who?.crown ? `<span class="wp-crown">${CROWN}</span>` : ''}<b>${esc(name)}</b>${
+        who?.crown ? `<small>${ru.wardrobe.leader}</small>` : ''
+      }</div>
+    </section>
+
+    <section class="ward-card">
+      <div class="ward-prog-head"><b>${esc(ru.wardrobe.collected(owned))}</b><span>${Math.round((owned / 13) * 100)}%</span></div>
+      <div class="bonus-bar" aria-hidden="true"><i style="transform:scaleX(${(owned / 13).toFixed(3)})"></i></div>
+      <p class="muted">${esc(ru.wardrobe.bonus())}</p>
+    </section>
+
+    <div class="ward-sec"><h3>${ru.wardrobe.statsTitle}</h3></div>
+    <dl class="ward-stats stagger">${stats
+      .map(
+        ([ico, k, val, tone]) =>
+          `<div class="ws ${tone}"><i aria-hidden="true">${STAT_ICONS[ico]}</i><dd>${val}</dd><dt>${k}</dt></div>`,
+      )
+      .join('')}</dl>
+
+    <div class="ward-sec"><h3>${ru.wardrobe.collection}</h3><span class="pill">${owned}/13</span></div>
+    <p class="muted ward-how">${ru.wardrobe.how}</p>
     <div class="looks items stagger">
       ${itemNames
-        .map((name, i) => {
+        .map((name2, i) => {
           const has = (mask & (1 << i)) !== 0;
           return `<div class="look ${has ? 'owned' : 'locked'}">
+              <em class="look-n">${String(i + 1).padStart(2, '0')}</em>
+              <span class="look-state" aria-hidden="true">${has ? CHECK_ICON : LOCK_ICON}</span>
               <canvas data-item="${i}" aria-hidden="true"></canvas>
-              <span>${esc(has ? ru.items[name] : ru.wardrobe.lockedAt(ru.tiers[i]))}</span>
-              
+              <span class="look-name">${esc(has ? ru.items[name2] : ru.wardrobe.lockedAt(ru.tiers[i]))}</span>
             </div>`;
         })
         .join('')}

@@ -1027,7 +1027,11 @@ router.register('declined', { html: () => V.declinedView(), cls: 'solid' });
 router.register('doc', { html: () => V.docView(docKind), cls: 'solid' });
 router.register('rules', { html: () => V.docView('rules'), cls: 'solid' });
 router.register('wardrobe', {
-  html: () => V.wardrobeView(session.data?.stats ?? localStats(), ownedMask()),
+  html: () =>
+    V.wardrobeView(session.data?.stats ?? localStats(), ownedMask(), {
+      name: session.data?.profile.name ?? null,
+      crown: hasCrown(),
+    }),
   cls: 'solid',
   mount: (root) => requestAnimationFrame(() => drawCollection(root)),
 });
