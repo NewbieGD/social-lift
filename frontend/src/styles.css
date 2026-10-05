@@ -3515,3 +3515,14 @@ body.is-fs .fs-btn .fs-in {
 body.is-fs .fs-btn .fs-out {
   display: block;
 }
+
+/* Tapping the scenery does nothing, so it gives no press feedback (only the hero's own button reacts). */
+.hero-stage:active canvas {
+  transform: none;
+}
+.hero-stage,
+.hero-stage * {
+  -webkit-tap-highlight-color: transparent;
+  -webkit-user-select: none;
+  user-select: none;
+}

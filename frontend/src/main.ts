@@ -19,7 +19,7 @@ import { DuelClient, type ChatMsg, type ChatUser, type DuelMsg, type DuelPlayer 
 import { scenes } from './render/palette';
 import { drawItem, ITEM_BY_TIER, itemCount, outfitFromMask, type Item } from './render/hero';
 import { fullscreenSupported, onFullscreenChange, toggleFullscreen } from './platform/fullscreen';
-import { drawStageBackdrop, stageLayout } from './render/ground';
+import { drawStageBackdrop, StageWind, stageLayout } from './render/ground';
 import { CROWN_LIFT_FRONT, crownBob, drawCrown } from './render/crown';
 import { drawHeroFront } from './render/heroFront';
 import { Renderer } from './render/renderer';
@@ -843,6 +843,8 @@ function sizeCanvas(c: HTMLCanvasElement): CanvasRenderingContext2D | null {
   return g;
 }
 
+const stageWinds = new Map<string, { wind: StageWind; last: number }>();
+
 /** The hero facing the player on a small podium: breathing, blinking, waving now and then. */
 function drawStageHero(c: HTMLCanvasElement, _tier: number, t: number, _silhouette = false, still = false, mask = ownedMask()): void {
   const g = sizeCanvas(c);
@@ -855,6 +857,21 @@ function drawStageHero(c: HTMLCanvasElement, _tier: number, t: number, _silhouet
   const scale = Math.min(w / 58, (L.feet - 6) / (hasCrown() ? 124 : 96));
   const base = L.feet;
   drawStageBackdrop(g, w, h, L, scale);
+  // Light wind: leaves and scraps of paper blow along the street (not with "less effects").
+  const windOn = !settingsStore.get().reducedFx && !still;
+  let wind: StageWind | null = null;
+  if (windOn) {
+    let st = stageWinds.get(c.id);
+    if (!st) {
+      st = { wind: new StageWind(), last: t };
+      stageWinds.set(c.id, st);
+    }
+    const dt = Math.max(0, Math.min(0.1, t - st.last));
+    st.last = t;
+    st.wind.update(dt, w, h, L, scale);
+    wind = st.wind;
+    wind.draw(g, 0, scale);
+  }
   // On the main screen the stats panel stands at the right: the hero is centered in the free part.
   const side = c.id === 'menuHero' ? (document.querySelector('.menu2 .chips') as HTMLElement | null)?.offsetWidth ?? 0 : 0;
   const cx = side ? (w - side - 8) / 2 : w / 2;
@@ -889,6 +906,7 @@ function drawStageHero(c: HTMLCanvasElement, _tier: number, t: number, _silhouet
     drawCrown(g, t, settingsStore.get().reducedFx);
   }
   g.restore();
+  wind?.draw(g, 1, scale);
 }
 
 /** The player holds the crown of the weekly leader. */
