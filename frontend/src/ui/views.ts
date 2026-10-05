@@ -115,6 +115,9 @@ const ICON = {
   floor: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="2" width="16" height="20" rx="2" fill="#8D96A6"/><rect x="6" y="4" width="5.5" height="16" fill="#C7CCD6"/><rect x="12.5" y="4" width="5.5" height="16" fill="#C7CCD6"/><path d="M12 6.5l-2.4 3h4.8z" fill="#FFB547"/></svg>',
 };
 
+const FS_ICON =
+  '<svg class="fs-in" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg><svg class="fs-out" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
 const HAND_ICON =
   '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 11V5.5a1.5 1.5 0 013 0V10l.5-.1V8.5a1.5 1.5 0 013 0v2l.5-.1a1.5 1.5 0 013 .3V15c0 3.3-2.7 6-6 6h-1.2c-1.8 0-3.4-.8-4.5-2.2L4.6 15a1.5 1.5 0 012.3-1.9L9 15z" fill="currentColor"/></svg>';
 
@@ -141,11 +144,13 @@ export function menuView(d: MenuData): string {
   }
   return `<div class="menu2">
     <div class="showcase">
-      <button class="hero-stage" data-action="open" data-arg="wardrobe" aria-label="${ru.wardrobe.title}">
+      <button class="fs-btn" data-action="fullscreen" aria-label="${ru.menu.fullscreen}" title="${ru.menu.fullscreen}">${FS_ICON}</button>
+      <div class="hero-stage">
         <span class="stage-glow" aria-hidden="true"></span>
         <canvas id="menuHero" aria-hidden="true"></canvas>
+        <button class="hero-hit" id="menuHeroHit" data-action="open" data-arg="wardrobe" aria-label="${ru.wardrobe.title}"></button>
         <span class="tap-hint">${HAND_ICON}${ru.wardrobe.hint}</span>
-      </button>
+      </div>
       <div class="chips">${chips}</div>
     </div>
     <div class="menu-actions">

@@ -18,6 +18,7 @@ import { askNotifications, initVk } from './platform/vk';
 import { DuelClient, type ChatMsg, type ChatUser, type DuelMsg, type DuelPlayer } from './net/duel';
 import { scenes } from './render/palette';
 import { drawItem, ITEM_BY_TIER, itemCount, outfitFromMask, type Item } from './render/hero';
+import { fullscreenSupported, onFullscreenChange, toggleFullscreen } from './platform/fullscreen';
 import { drawStageBackdrop, stageLayout } from './render/ground';
 import { CROWN_LIFT_FRONT, crownBob, drawCrown } from './render/crown';
 import { drawHeroFront } from './render/heroFront';
@@ -772,6 +773,11 @@ function lastTier(): number {
   return session.data?.stats.last_tier ?? localStats()?.last_tier ?? 0;
 }
 
+onFullscreenChange((on) => {
+  document.body.classList.toggle('is-fs', on);
+  window.dispatchEvent(new Event('resize'));
+});
+
 // ---------- Weekly crown ----------
 
 let crownNotice: CrownNotice | null = null;
@@ -860,6 +866,15 @@ function drawStageHero(c: HTMLCanvasElement, _tier: number, t: number, _silhouet
       // Just above the crown (or the head), with a small gap so they never touch.
       const topY = base - (hasCrown() ? 100 : 72) * scale;
       hint.style.top = `${Math.max(0, topY - hint.offsetHeight - 6)}px`;
+    }
+    // Only the hero himself opens the wardrobe: an invisible button exactly over his figure.
+    const hit = c.parentElement?.querySelector<HTMLElement>('.hero-hit');
+    if (hit) {
+      const top = base - (hasCrown() ? 100 : 72) * scale;
+      hit.style.left = `${cx - 24 * scale}px`;
+      hit.style.top = `${top}px`;
+      hit.style.width = `${48 * scale}px`;
+      hit.style.height = `${base - top + 2 * scale}px`;
     }
   }
   g.save();
@@ -1218,6 +1233,11 @@ window.addEventListener(
 
 const actions: Record<string, (arg: string, el: HTMLElement) => void> = {
   back: () => router.back(),
+  fullscreen: () => {
+    void toggleFullscreen().then((ok) => {
+      if (!ok && !fullscreenSupported()) toast(ru.menu.fullscreenNo, 3600);
+    });
+  },
   crownOk: () => {
     crownNotice = null;
     router.back();

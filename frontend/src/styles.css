@@ -3463,3 +3463,55 @@ body.reduced .crown-card .crown-big {
 .showcase > .hero-stage .stage-glow {
   display: none;
 }
+
+/* Only the hero's figure is clickable (an invisible button over him); the rest of the scene is not. */
+.showcase > .hero-stage {
+  cursor: default;
+}
+.hero-stage .hero-hit {
+  position: absolute;
+  z-index: 1;
+  border: 0;
+  padding: 0;
+  background: none;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.hero-stage .tap-hint {
+  pointer-events: none;
+}
+
+/* Full screen button in the corner of the main screen */
+.fs-btn {
+  position: absolute;
+  left: 8px;
+  top: 8px;
+  z-index: 3;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 0;
+  border-radius: 12px;
+  color: #fff;
+  background: rgba(12, 16, 26, 0.55);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.14);
+  -webkit-tap-highlight-color: transparent;
+}
+.fs-btn svg {
+  width: 19px;
+  height: 19px;
+}
+.fs-btn:active {
+  transform: scale(0.92);
+}
+.fs-btn .fs-out,
+body.is-fs .fs-btn .fs-in {
+  display: none;
+}
+body.is-fs .fs-btn .fs-out {
+  display: block;
+}
