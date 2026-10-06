@@ -81,25 +81,7 @@ export function declinedView(): string {
   </div>`;
 }
 
-function rulesView(): string {
-  const r = ru.rules;
-  const list = r.sections
-    .map(
-      (sec, i) =>
-        `<details class="rule-sec" style="--i:${i}"${i < 2 ? ' open' : ''}><summary><span class="rs-ico">${r.sectionIcons[i] ?? '📌'}</span><span class="rs-num">${i + 1}</span><span class="rs-title">${esc(sec.h ?? '')}</span><span class="rs-chev" aria-hidden="true"></span></summary><div class="rs-body">${sec.p.map((p) => `<p>${esc(p)}</p>`).join('')}</div></details>`,
-    )
-    .join('');
-  return `${header(r.title)}<div class="scroll doc rules-page">
-    <div class="rules-hero"><i class="rh-orb o1"></i><i class="rh-orb o2"></i><i class="rh-orb o3"></i><div class="rh-ico">🛗</div><p>${esc(r.lead)}</p></div>
-    <div class="quick-grid">${r.quick.map(([i, h, t], n) => `<div class="quick" style="--i:${n}"><span class="q-ico">${i}</span><b>${esc(h)}</b><span>${esc(t)}</span></div>`).join('')}</div>
-    <div class="color-legend">${r.colors.map(([c, n, v]) => `<span class="cl" style="--c:${c}"><i></i>${esc(n)}<b>${esc(v)}</b></span>`).join('')}</div>
-    <p class="rules-tap">${esc(r.tapHint)}</p>
-    <div class="rule-list">${list}</div>
-  </div>`;
-}
-
 export function docView(kind: 'terms' | 'privacy' | 'rules'): string {
-  if (kind === 'rules') return rulesView();
   const doc = kind === 'rules' ? { title: ru.rules.title, sections: ru.rules.sections } : legal[kind];
   return `${header(doc.title)}<div class="scroll doc">${sections(doc.sections)}</div>`;
 }
@@ -133,9 +115,6 @@ const ICON = {
   floor: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="2" width="16" height="20" rx="2" fill="#8D96A6"/><rect x="6" y="4" width="5.5" height="16" fill="#C7CCD6"/><rect x="12.5" y="4" width="5.5" height="16" fill="#C7CCD6"/><path d="M12 6.5l-2.4 3h4.8z" fill="#FFB547"/></svg>',
 };
 
-const FS_ICON =
-  '<svg class="fs-in" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg><svg class="fs-out" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-
 const HAND_ICON =
   '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 11V5.5a1.5 1.5 0 013 0V10l.5-.1V8.5a1.5 1.5 0 013 0v2l.5-.1a1.5 1.5 0 013 .3V15c0 3.3-2.7 6-6 6h-1.2c-1.8 0-3.4-.8-4.5-2.2L4.6 15a1.5 1.5 0 012.3-1.9L9 15z" fill="currentColor"/></svg>';
 
@@ -162,13 +141,11 @@ export function menuView(d: MenuData): string {
   }
   return `<div class="menu2">
     <div class="showcase">
-      <button class="fs-btn" data-action="fullscreen" aria-label="${ru.menu.fullscreen}" title="${ru.menu.fullscreen}">${FS_ICON}</button>
-      <div class="hero-stage">
+      <button class="hero-stage" data-action="open" data-arg="wardrobe" aria-label="${ru.wardrobe.title}">
         <span class="stage-glow" aria-hidden="true"></span>
         <canvas id="menuHero" aria-hidden="true"></canvas>
-        <button class="hero-hit" id="menuHeroHit" data-action="open" data-arg="wardrobe" aria-label="${ru.wardrobe.title}"></button>
         <span class="tap-hint">${HAND_ICON}${ru.wardrobe.hint}</span>
-      </div>
+      </button>
       <div class="chips">${chips}</div>
     </div>
     <div class="menu-actions">
@@ -186,74 +163,41 @@ export function menuView(d: MenuData): string {
   </div>`;
 }
 
-const STAT_ICONS: Record<string, string> = {
-  best: '<svg viewBox="0 0 24 24"><path d="M7 4h10v4a5 5 0 01-10 0zM7 6H4v1a3 3 0 003 3M17 6h3v1a3 3 0 01-3 3M12 13v4M8 20h8M10 17h4" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg>',
-  week: '<svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="15" rx="3" fill="none" stroke="currentColor" stroke-width="1.9"/><path d="M4 10h16M9 3v4M15 3v4" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></svg>',
-  all: '<svg viewBox="0 0 24 24"><path d="M3 18L2 7l5.5 4L12 4l4.5 7L22 7l-1 11zM4 21h16" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round" stroke-linecap="round"/></svg>',
-  runs: '<svg viewBox="0 0 24 24"><path d="M5 12a7 7 0 0112-5l2-2v6h-6l2.2-2.2A4.5 4.5 0 007.5 12M19 12a7 7 0 01-12 5l-2 2v-6h6l-2.2 2.2A4.5 4.5 0 0016.5 12" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg>',
-  combo: '<svg viewBox="0 0 24 24"><path d="M12 3c1 4 5 5.5 5 10a5 5 0 01-10 0c0-2 1-3 2-4 .3 1.5 1 2.3 2 2.5C10.5 8.5 11 5.5 12 3z" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"/></svg>',
-  captures: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" stroke-width="1.9"/><circle cx="12" cy="12" r="4" fill="none" stroke="currentColor" stroke-width="1.9"/><circle cx="12" cy="12" r="1" fill="currentColor"/></svg>',
-};
-
-const LOCK_ICON =
-  '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="10" width="14" height="10" rx="3" fill="currentColor"/><path d="M8 10V8a4 4 0 018 0v2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
-const CHECK_ICON =
-  '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-
-export function wardrobeView(s: Stats | null, mask: number, who?: { name: string | null; crown: boolean }): string {
+export function wardrobeView(s: Stats | null, mask: number): string {
   const v = (n: number | null | undefined): string => (n === null || n === undefined || n === 0 ? ru.wardrobe.none : String(n));
   let owned = 0;
   for (let i = 0; i < 13; i++) if (mask & (1 << i)) owned++;
-  const stats: [string, string, string, string][] = [
-    ['best', ru.wardrobe.best, v(s?.best_all), 'gold'],
-    ['week', ru.wardrobe.rankWeek, v(s?.rank_week), 'blue'],
-    ['all', ru.wardrobe.rankAll, v(s?.rank_all), 'violet'],
-    ['runs', ru.wardrobe.runs, v(s?.total_runs), 'green'],
-    ['combo', ru.wardrobe.combo, v(s?.best_combo), 'orange'],
-    ['captures', ru.wardrobe.captures, v(s?.total_captures), 'pink'],
+  const stats: [string, string][] = [
+    [ru.wardrobe.best, v(s?.best_all)],
+    [ru.wardrobe.rankWeek, v(s?.rank_week)],
+    [ru.wardrobe.rankAll, v(s?.rank_all)],
+    [ru.wardrobe.runs, v(s?.total_runs)],
+    [ru.wardrobe.combo, v(s?.best_combo)],
+    [ru.wardrobe.captures, v(s?.total_captures)],
   ];
   const itemNames = [
     'cap', 'slippers', 'sweats', 'shirt', 'trousers', 'jacket', 'watch', 'newTorch', 'tie', 'shoes', 'phone', 'glasses', 'helmet',
   ];
-  const name = who?.name || ru.leaders.player;
-  const bonus = owned * 5;
   return `${header(ru.wardrobe.title)}<div class="scroll wardrobe">
-    <section class="ward-hero">
-      <div class="ward-stage"><canvas id="wardHero" aria-hidden="true"></canvas></div>
-      <div class="ward-ring" style="--p:${(owned / 13).toFixed(3)}" aria-label="${esc(ru.wardrobe.collected(owned))}">
-        <span><b>${owned}</b><small>${ru.wardrobe.of13}</small></span>
+    <div class="ward-top">
+      <div class="ward-stage"><span class="stage-glow"></span><canvas id="wardHero" aria-hidden="true"></canvas></div>
+      <div class="ward-info">
+        <p class="ward-look">${esc(ru.wardrobe.collected(owned))}</p>
+        <div class="bonus-bar" aria-hidden="true"><i style="transform:scaleX(${(owned / 13).toFixed(3)})"></i></div>
+        <p class="muted">${esc(ru.wardrobe.bonus())}</p>
+        <dl class="ward-stats stagger">${stats.map(([k, val]) => `<div><dt>${k}</dt><dd>${val}</dd></div>`).join('')}</dl>
       </div>
-      <div class="ward-bonus${bonus ? '' : ' zero'}"><b>+${bonus}%</b><small>${ru.wardrobe.toMult}</small></div>
-      <div class="ward-plate">${who?.crown ? `<span class="wp-crown">${CROWN}</span>` : ''}<b>${esc(name)}</b>${
-        who?.crown ? `<small>${ru.wardrobe.leader}</small>` : ''
-      }</div>
-    </section>
-
-    <section class="ward-card">
-      <div class="ward-prog-head"><b>${esc(ru.wardrobe.collected(owned))}</b><span>${Math.round((owned / 13) * 100)}%</span></div>
-      <div class="bonus-bar" aria-hidden="true"><i style="transform:scaleX(${(owned / 13).toFixed(3)})"></i></div>
-      <p class="muted">${esc(ru.wardrobe.bonus())}</p>
-    </section>
-
-    <div class="ward-sec"><h3>${ru.wardrobe.statsTitle}</h3></div>
-    <dl class="ward-stats stagger">${stats
-      .map(
-        ([ico, k, val, tone]) =>
-          `<div class="ws ${tone}"><i aria-hidden="true">${STAT_ICONS[ico]}</i><dd>${val}</dd><dt>${k}</dt></div>`,
-      )
-      .join('')}</dl>
-
-    <div class="ward-sec"><h3>${ru.wardrobe.collection}</h3><span class="pill">${owned}/13</span></div>
-    <p class="muted ward-how">${ru.wardrobe.how}</p>
+    </div>
+    <h3>${ru.wardrobe.collection}</h3>
+    <p class="muted">${ru.wardrobe.how}</p>
     <div class="looks items stagger">
       ${itemNames
-        .map((name2, i) => {
+        .map((name, i) => {
           const has = (mask & (1 << i)) !== 0;
           return `<div class="look ${has ? 'owned' : 'locked'}">
-              <em class="look-n">${String(i + 1).padStart(2, '0')}</em>
-              <span class="look-state" aria-hidden="true">${has ? CHECK_ICON : LOCK_ICON}</span>
               <canvas data-item="${i}" aria-hidden="true"></canvas>
-              <span class="look-name">${esc(has ? ru.items[name2] : ru.wardrobe.lockedAt(ru.tiers[i]))}</span>
+              <span>${esc(has ? ru.items[name] : ru.wardrobe.lockedAt(ru.tiers[i]))}</span>
+              
             </div>`;
         })
         .join('')}
@@ -397,14 +341,9 @@ export function confirmDeleteView(error: string | null): string {
 
 // ---------- Leaders ----------
 
-const TAB_ICONS = {
-  week: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="16" height="15" rx="3" fill="none" stroke="currentColor" stroke-width="2.2"/><path d="M4 10h16M9 3v4M15 3v4" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>',
-  all: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4h10v4a5 5 0 01-10 0zM7 6H4v1a3 3 0 003 3M17 6h3v1a3 3 0 01-3 3M12 13v4M8 20h8M10 17h4" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"/></svg>',
-};
-
 export function leadersShell(scope: 'week' | 'all'): string {
   const tab = (id: 'week' | 'all', label: string): string =>
-    `<button role="tab" class="${scope === id ? 'on' : ''}" aria-selected="${scope === id}" data-action="lbScope" data-arg="${id}">${TAB_ICONS[id]}<span>${label}</span></button>`;
+    `<button role="tab" class="${scope === id ? 'on' : ''}" aria-selected="${scope === id}" data-action="lbScope" data-arg="${id}">${label}</button>`;
   return `${header(ru.leaders.title)}
     <div class="tabs" role="tablist">
       ${tab('week', ru.leaders.week)}${tab('all', ru.leaders.all)}
@@ -446,38 +385,6 @@ export function leadersRows(lb: Leaderboard, myId: number | null, clickable: boo
     })
     .join('')}</div>`;
 }
-
-function podAvatar(row: LeaderRow): string {
-  const initial = esc((row.name || ru.leaders.player).slice(0, 1));
-  const img = row.photo ? `<img src="${esc(row.photo)}" alt="" loading="lazy" referrerpolicy="no-referrer" />` : '';
-  return `<span class="pod-ava"><span class="ava-inner">${img || `<b>${initial}</b>`}</span></span>`;
-}
-
-/** Top three on a podium (2 - 1 - 3), everyone else in the list below. */
-export function leadersBoard(lb: Leaderboard, myId: number | null, clickable: boolean): string {
-  if (!lb.rows.length) return leadersRows(lb, myId, clickable);
-  const byRank = (n: number): LeaderRow | undefined => lb.rows.find((r) => r.rank === n);
-  const pod = (n: 1 | 2 | 3): string => {
-    const r = byRank(n);
-    if (!r) return `<div class="pod p${n} ghost"><div class="pod-step"><b>${n}</b></div></div>`;
-    const name = r.deactivated ? ru.leaders.deleted : r.name || ru.leaders.player;
-    const canOpen = clickable && !r.deactivated;
-    const tag = canOpen ? 'button' : 'div';
-    const attrs = canOpen ? ` data-action="profile" data-arg="${r.user_id}"` : '';
-    return `<${tag} class="pod p${n}${r.user_id === myId ? ' mine' : ''}"${attrs}>
-      ${n === 1 ? `<span class="pod-crown" aria-hidden="true">${CROWN}</span>` : ''}
-      ${podAvatar(r)}
-      <span class="pod-name">${esc(name)}</span>
-      <span class="pod-score">${r.score}${lb.scope === 'duels' ? `<small>${ru.leaders.winsWord}</small>` : ''}</span>
-      <span class="pod-step"><b>${n}</b></span>
-    </${tag}>`;
-  };
-  const rest: Leaderboard = { ...lb, rows: lb.rows.filter((r) => r.rank > 3) };
-  return `<div class="podium${lb.scope === 'duels' ? ' duel-pod' : ''}">${pod(2)}${pod(1)}${pod(3)}</div>${
-    rest.rows.length ? `<div class="lb-rest">${leadersRows(rest, myId, clickable)}</div>` : ''
-  }`;
-}
-
 
 export function leadersMe(lb: Leaderboard): string {
   const me = lb.me;
@@ -522,7 +429,7 @@ export function duelsView(d: DuelView): string {
   else if (d.status === 'declined') status = ru.duel.declined;
   const canFind = d.status === 'idle' || d.status === 'none' || d.status === 'declined';
   return `${header(ru.duel.title)}<div class="scroll duel-scroll"><div class="panel flat duel-panel">
-    <div class="duel-hero" aria-hidden="true"><i class="spark s1"></i><i class="spark s2"></i><i class="spark s3"></i><i class="spark s4"></i>${ICON.swords}</div>
+    <div class="duel-hero" aria-hidden="true">${ICON.swords}</div>
     <p>${ru.duel.lead}</p>
     <p class="muted">${ru.duel.rulesNote}</p>
     ${d.status !== 'offline' && d.status !== 'connecting' ? `<p class="duel-online"><span class="dot"></span>${ru.duel.online(d.online)}</p>` : ''}
@@ -532,7 +439,7 @@ export function duelsView(d: DuelView): string {
         ? `<button class="secondary" data-action="duelCancel">${ru.duel.cancel}</button>`
         : `<button class="primary" data-action="duelFind" ${canFind ? '' : 'disabled'}>${ru.duel.find}</button>`
     }
-    <h3 class="duel-lb-title"><span>${ru.duel.leaders}</span></h3>
+    <h3 class="duel-lb-title">${ru.duel.leaders}</h3>
     <div class="duel-lb" id="duelLbList">${d.leadersHtml?.rows ?? '<div class="lb-row skeleton"><span></span><span></span><span></span></div>'}</div>
     <div class="me-card" id="duelLbMe">${d.leadersHtml?.me ?? ''}</div>
   </div></div>`;

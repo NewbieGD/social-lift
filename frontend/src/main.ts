@@ -18,8 +18,7 @@ import { askNotifications, initVk } from './platform/vk';
 import { DuelClient, type ChatMsg, type ChatUser, type DuelMsg, type DuelPlayer } from './net/duel';
 import { scenes } from './render/palette';
 import { drawItem, ITEM_BY_TIER, itemCount, outfitFromMask, type Item } from './render/hero';
-import { fullscreenSupported, onFullscreenChange, toggleFullscreen } from './platform/fullscreen';
-import { drawStageBackdrop, StageWind, stageLayout } from './render/ground';
+import { drawStageBackdrop, stageLayout } from './render/ground';
 import { CROWN_LIFT_FRONT, crownBob, drawCrown } from './render/crown';
 import { drawHeroFront } from './render/heroFront';
 import { Renderer } from './render/renderer';
@@ -773,11 +772,6 @@ function lastTier(): number {
   return session.data?.stats.last_tier ?? localStats()?.last_tier ?? 0;
 }
 
-onFullscreenChange((on) => {
-  document.body.classList.toggle('is-fs', on);
-  window.dispatchEvent(new Event('resize'));
-});
-
 // ---------- Weekly crown ----------
 
 let crownNotice: CrownNotice | null = null;
@@ -843,8 +837,6 @@ function sizeCanvas(c: HTMLCanvasElement): CanvasRenderingContext2D | null {
   return g;
 }
 
-const stageWinds = new Map<string, { wind: StageWind; last: number }>();
-
 /** The hero facing the player on a small podium: breathing, blinking, waving now and then. */
 function drawStageHero(c: HTMLCanvasElement, _tier: number, t: number, _silhouette = false, still = false, mask = ownedMask()): void {
   const g = sizeCanvas(c);
@@ -857,21 +849,6 @@ function drawStageHero(c: HTMLCanvasElement, _tier: number, t: number, _silhouet
   const scale = Math.min(w / 58, (L.feet - 6) / (hasCrown() ? 124 : 96));
   const base = L.feet;
   drawStageBackdrop(g, w, h, L, scale);
-  // Light wind: leaves and scraps of paper blow along the street (not with "less effects").
-  const windOn = !settingsStore.get().reducedFx && !still;
-  let wind: StageWind | null = null;
-  if (windOn) {
-    let st = stageWinds.get(c.id);
-    if (!st) {
-      st = { wind: new StageWind(), last: t };
-      stageWinds.set(c.id, st);
-    }
-    const dt = Math.max(0, Math.min(0.1, t - st.last));
-    st.last = t;
-    st.wind.update(dt, w, h, L, scale);
-    wind = st.wind;
-    wind.draw(g, 0, scale);
-  }
   // On the main screen the stats panel stands at the right: the hero is centered in the free part.
   const side = c.id === 'menuHero' ? (document.querySelector('.menu2 .chips') as HTMLElement | null)?.offsetWidth ?? 0 : 0;
   const cx = side ? (w - side - 8) / 2 : w / 2;
@@ -883,15 +860,6 @@ function drawStageHero(c: HTMLCanvasElement, _tier: number, t: number, _silhouet
       // Just above the crown (or the head), with a small gap so they never touch.
       const topY = base - (hasCrown() ? 100 : 72) * scale;
       hint.style.top = `${Math.max(0, topY - hint.offsetHeight - 6)}px`;
-    }
-    // Only the hero himself opens the wardrobe: an invisible button exactly over his figure.
-    const hit = c.parentElement?.querySelector<HTMLElement>('.hero-hit');
-    if (hit) {
-      const top = base - (hasCrown() ? 100 : 72) * scale;
-      hit.style.left = `${cx - 24 * scale}px`;
-      hit.style.top = `${top}px`;
-      hit.style.width = `${48 * scale}px`;
-      hit.style.height = `${base - top + 2 * scale}px`;
     }
   }
   g.save();
@@ -906,7 +874,6 @@ function drawStageHero(c: HTMLCanvasElement, _tier: number, t: number, _silhouet
     drawCrown(g, t, settingsStore.get().reducedFx);
   }
   g.restore();
-  wind?.draw(g, 1, scale);
 }
 
 /** The player holds the crown of the weekly leader. */
@@ -1027,11 +994,7 @@ router.register('declined', { html: () => V.declinedView(), cls: 'solid' });
 router.register('doc', { html: () => V.docView(docKind), cls: 'solid' });
 router.register('rules', { html: () => V.docView('rules'), cls: 'solid' });
 router.register('wardrobe', {
-  html: () =>
-    V.wardrobeView(session.data?.stats ?? localStats(), ownedMask(), {
-      name: session.data?.profile.name ?? null,
-      crown: hasCrown(),
-    }),
+  html: () => V.wardrobeView(session.data?.stats ?? localStats(), ownedMask()),
   cls: 'solid',
   mount: (root) => requestAnimationFrame(() => drawCollection(root)),
 });
@@ -1164,11 +1127,11 @@ async function loadDuelLeaders(): Promise<void> {
   if (!list || !me || session.mode !== 'online') return;
   try {
     const lb = await session.leaderboard('duels', false);
-    duelLbHtml = { rows: V.leadersBoard(lb, session.data?.profile.id ?? null, true), me: V.leadersMe(lb) };
+    duelLbHtml = { rows: V.leadersRows(lb, session.data?.profile.id ?? null, true), me: V.leadersMe(lb) };
     if (router.top !== 'duels') return;
     list.innerHTML = duelLbHtml.rows;
     me.innerHTML = duelLbHtml.me;
-    list.querySelectorAll<HTMLElement>('.stagger > *, .podium > *, .lb-rest .stagger > *').forEach((c, i) => c.style.setProperty('--i', String(i)));
+    list.querySelectorAll<HTMLElement>('.stagger > *').forEach((c, i) => c.style.setProperty('--i', String(i)));
     list.querySelectorAll<HTMLImageElement>('img').forEach((img) =>
       img.addEventListener('error', () => img.remove(), { once: true }),
     );
@@ -1192,10 +1155,10 @@ async function loadLeaders(force: boolean): Promise<void> {
     const lb = await session.leaderboard(scope, force);
     if (router.top !== 'leaders' || scope !== lbScope) return;
     const offset = lb.server_time - Date.now();
-    list.innerHTML = V.leadersBoard(lb, session.data?.profile.id ?? null, true);
+    list.innerHTML = V.leadersRows(lb, session.data?.profile.id ?? null, true);
     me.innerHTML = V.leadersMe(lb);
     reset.textContent = V.resetLine(lb, offset);
-    list.querySelectorAll<HTMLElement>('.stagger > *, .podium > *').forEach((c, i) => c.style.setProperty('--i', String(i)));
+    list.querySelectorAll<HTMLElement>('.stagger > *').forEach((c, i) => c.style.setProperty('--i', String(i)));
     list.querySelectorAll<HTMLImageElement>('img').forEach((img) =>
       img.addEventListener('error', () => img.remove(), { once: true }),
     );
@@ -1255,11 +1218,6 @@ window.addEventListener(
 
 const actions: Record<string, (arg: string, el: HTMLElement) => void> = {
   back: () => router.back(),
-  fullscreen: () => {
-    void toggleFullscreen().then((ok) => {
-      if (!ok && !fullscreenSupported()) toast(ru.menu.fullscreenNo, 3600);
-    });
-  },
   crownOk: () => {
     crownNotice = null;
     router.back();
