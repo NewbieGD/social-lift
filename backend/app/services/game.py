@@ -27,9 +27,9 @@ from ..core import (
     week_reset_at,
 )
 from ..deps import ApiError, Caller
-from ..models import Event, Run, User, WeekBest
+from ..models import CoinTx, Event, OwnedCosmetic, Run, User, WeekBest
 from ..schemas import RunFinishIn
-from . import crown
+from . import crown, shop
 
 # ---------- Users ----------
 
@@ -215,8 +215,20 @@ async def finish_run(session: AsyncSession, caller: Caller, body: RunFinishIn) -
     if run.status in ("finished", "rejected"):
         # Idempotent retry: report the stored outcome.
         stats = await player_stats(session, user)
+        paid = await shop.run_payout(session, user.id, run.id)
         await session.commit()
-        return _finish_response(run, user, {"is_record": False, "is_week_record": False, **_ranks(stats, stats)})
+        return _finish_response(
+            run,
+            user,
+            {
+                "is_record": False,
+                "is_week_record": False,
+                "coins": user.coins or 0,
+                "coins_earned": paid,
+                "new_items": [],
+                **_ranks(stats, stats),
+            },
+        )
 
     before = await player_stats(session, user)
     server_elapsed_ms = int((now - aware(run.started_at)).total_seconds() * 1000)
@@ -243,6 +255,8 @@ async def finish_run(session: AsyncSession, caller: Caller, body: RunFinishIn) -
 
     is_record = False
     is_week_record = False
+    coins_earned = 0
+    new_items: list[str] = []
     if not verdict.ok:
         run.status = "rejected"
         run.flags = verdict.reason
@@ -269,6 +283,9 @@ async def finish_run(session: AsyncSession, caller: Caller, body: RunFinishIn) -
             wb.best_score = body.score
             wb.achieved_at = now
             is_week_record = True
+        # Coins: 1 point = 1 coin, paid once per counted run; a new record may open cosmetics.
+        coins_earned = await shop.credit_run(session, user, run.id, body.score)
+        new_items = await shop.sync_unlocks(session, user)
     await session.commit()
 
     await _cleanup_weeks(session)
@@ -280,7 +297,15 @@ async def finish_run(session: AsyncSession, caller: Caller, body: RunFinishIn) -
     return _finish_response(
         run,
         user,
-        {"is_record": is_record, "is_week_record": is_week_record, "duel": duel, **_ranks(before, after)},
+        {
+            "is_record": is_record,
+            "is_week_record": is_week_record,
+            "duel": duel,
+            "coins": user.coins or 0,
+            "coins_earned": coins_earned,
+            "new_items": new_items,
+            **_ranks(before, after),
+        },
     )
 
 
@@ -522,6 +547,8 @@ async def _next_above_week(session: AsyncSession, wid: str, score: int, at: date
 
 async def delete_player(session: AsyncSession, caller: Caller) -> None:
     # Explicit deletes so SQLite (tests) and PostgreSQL behave the same.
+    await session.execute(delete(CoinTx).where(CoinTx.user_id == caller.user_id))
+    await session.execute(delete(OwnedCosmetic).where(OwnedCosmetic.user_id == caller.user_id))
     await session.execute(delete(Run).where(Run.user_id == caller.user_id))
     await session.execute(delete(WeekBest).where(WeekBest.user_id == caller.user_id))
     await session.execute(delete(User).where(User.id == caller.user_id))

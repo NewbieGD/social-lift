@@ -14,6 +14,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    UniqueConstraint,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -53,6 +54,10 @@ class User(Base):
     item_misses: Mapped[str] = mapped_column(String(64), default="")
     duel_wins: Mapped[int] = mapped_column(Integer, default=0)
     duel_wins_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Coins: 1 point of a counted run = 1 coin. Only the server changes this number.
+    coins: Mapped[int] = mapped_column(Integer, default=0)
+    # Worn cosmetics: {slot: item_id}.
+    loadout: Mapped[dict] = mapped_column(JsonType, default=dict)
 
     runs: Mapped[list[Run]] = relationship(back_populates="user", cascade="all, delete-orphan", passive_deletes=True)
     weeks: Mapped[list[WeekBest]] = relationship(cascade="all, delete-orphan", passive_deletes=True)
@@ -127,3 +132,30 @@ class CrownNotice(Base):
     kind: Mapped[str] = mapped_column(String(8))  # won | lost | expired
     other_name: Mapped[str | None] = mapped_column(String(64))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class CoinTx(Base):
+    """Every change of a player's coins. A run pays once and an item is bought once (unique)."""
+
+    __tablename__ = "coin_tx"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    delta: Mapped[int] = mapped_column(Integer)
+    reason: Mapped[str] = mapped_column(String(8))  # run | buy
+    ref: Mapped[str] = mapped_column(String(40))  # run id or item id
+    balance_after: Mapped[int] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+    __table_args__ = (UniqueConstraint("user_id", "reason", "ref", name="uq_coin_tx_once"),)
+
+
+class OwnedCosmetic(Base):
+    """A cosmetic the player has earned or bought. Kept for good."""
+
+    __tablename__ = "owned_cosmetics"
+
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    item_id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    source: Mapped[str] = mapped_column(String(8))  # record | drop | duel | buy
+    acquired_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))

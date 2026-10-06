@@ -241,3 +241,107 @@ async def test_weekly_crown_moves_and_notifies(client):
     assert [n["kind"] for n in mine["notices"]] == ["lost"]
     boot = (await client.post("/api/session/bootstrap", headers=headers(32))).json()
     assert boot["stats"]["crown"] is True
+
+
+async def _big_run(client, uid, score=600):
+    start = (await client.post("/api/runs/start", headers=headers(uid))).json()
+    await age_run(start["run_id"], 120)
+    return await finish(client, uid, start, score=score, duration_ms=60_000, tier=2, captures=80)
+
+
+async def test_coins_paid_once_per_run(client):
+    await ready_player(client, 80)
+    start = (await client.post("/api/runs/start", headers=headers(80))).json()
+    r1 = (await finish(client, 80, start, score=12)).json()
+    assert r1["coins_earned"] == 12 and r1["coins"] == 12
+    # Sending the same finish again (a retry) must not pay twice.
+    r2 = (await finish(client, 80, start, score=12)).json()
+    assert r2["coins_earned"] == 12 and r2["coins"] == 12
+    start = (await client.post("/api/runs/start", headers=headers(80))).json()
+    r3 = (await finish(client, 80, start, score=30)).json()
+    assert r3["coins"] == 42
+    boot = (await client.post("/api/session/bootstrap", headers=headers(80))).json()
+    assert boot["shop"]["coins"] == 42
+
+
+async def test_rejected_run_pays_nothing(client):
+    await ready_player(client, 81)
+    start = (await client.post("/api/runs/start", headers=headers(81))).json()
+    r = (await finish(client, 81, start, score=99999, duration_ms=1000)).json()
+    assert r["status"] == "rejected" and r["coins_earned"] == 0 and r["coins"] == 0
+
+
+async def test_record_opens_starter_items_and_loadout(client):
+    await ready_player(client, 82)
+    # Below the threshold nothing opens.
+    start = (await client.post("/api/runs/start", headers=headers(82))).json()
+    r = (await finish(client, 82, start, score=12)).json()
+    assert r["new_items"] == []
+    boot = (await client.post("/api/session/bootstrap", headers=headers(82))).json()
+    assert boot["shop"]["owned"] == [] and len(boot["shop"]["catalog"]) >= 4
+    # A single run of 500+ opens all four starter items.
+    r = (await _big_run(client, 82)).json()
+    assert sorted(r["new_items"]) == ["starter_feet", "starter_head", "starter_legs", "starter_torso"]
+    # A second record does not grant them again.
+    r = (await _big_run(client, 82, score=620)).json()
+    assert r["new_items"] == []
+    resp = await client.put("/api/loadout", json={"loadout": {"head": "starter_head", "feet": "starter_feet"}}, headers=headers(82))
+    assert resp.status_code == 200 and resp.json()["loadout"] == {"head": "starter_head", "feet": "starter_feet"}
+    # Taking a slot off keeps the others.
+    resp = await client.put("/api/loadout", json={"loadout": {"head": None}}, headers=headers(82))
+    assert resp.json()["loadout"] == {"feet": "starter_feet"}
+    boot = (await client.post("/api/session/bootstrap", headers=headers(82))).json()
+    assert boot["shop"]["loadout"] == {"feet": "starter_feet"}
+
+
+async def test_loadout_rejects_foreign_and_wrong_slot(client):
+    await ready_player(client, 83)
+    bad = await client.put("/api/loadout", json={"loadout": {"head": "starter_head"}}, headers=headers(83))
+    assert bad.status_code == 400 and bad.json()["error"]["code"] == "not_owned"
+    await _big_run(client, 83)
+    wrong = await client.put("/api/loadout", json={"loadout": {"head": "starter_feet"}}, headers=headers(83))
+    assert wrong.status_code == 400 and wrong.json()["error"]["code"] == "wrong_slot"
+    unknown = await client.put("/api/loadout", json={"loadout": {"head": "nope"}}, headers=headers(83))
+    assert unknown.json()["error"]["code"] == "unknown_item"
+    slot = await client.put("/api/loadout", json={"loadout": {"tail": "starter_head"}}, headers=headers(83))
+    assert slot.json()["error"]["code"] == "unknown_slot"
+
+
+async def test_existing_player_gets_items_on_next_start(client):
+    await ready_player(client, 84)
+    async with SessionLocal() as s:
+        user = await s.get(User, 84)
+        user.best_all = 900  # a player who passed the threshold before the shop existed
+        await s.commit()
+    boot = (await client.post("/api/session/bootstrap", headers=headers(84))).json()
+    assert len(boot["shop"]["owned"]) == 4
+
+
+async def test_buy_with_coins(client, monkeypatch):
+    from app import cosmetics
+
+    monkeypatch.setitem(cosmetics.ITEMS, "shop_test", cosmetics.Item("shop_test", "head", price=30))
+    await ready_player(client, 85)
+    # Not for sale / unknown / not enough coins.
+    assert (await client.post("/api/shop/buy", json={"item_id": "starter_head"}, headers=headers(85))).json()["error"]["code"] == "not_for_sale"
+    assert (await client.post("/api/shop/buy", json={"item_id": "zzz"}, headers=headers(85))).status_code == 404
+    poor = await client.post("/api/shop/buy", json={"item_id": "shop_test"}, headers=headers(85))
+    assert poor.status_code == 402 and poor.json()["error"]["code"] == "not_enough_coins"
+    start = (await client.post("/api/runs/start", headers=headers(85))).json()
+    await finish(client, 85, start, score=50)
+    ok = await client.post("/api/shop/buy", json={"item_id": "shop_test"}, headers=headers(85))
+    assert ok.status_code == 200 and ok.json()["coins"] == 20 and "shop_test" in ok.json()["owned"]
+    again = await client.post("/api/shop/buy", json={"item_id": "shop_test"}, headers=headers(85))
+    assert again.status_code == 409 and again.json()["error"]["code"] == "already_owned"
+    assert (await client.get("/api/shop", headers=headers(85))).json()["coins"] == 20
+
+
+async def test_delete_removes_coins_and_cosmetics(client):
+    from app.models import CoinTx, OwnedCosmetic
+
+    await ready_player(client, 86)
+    await _big_run(client, 86)
+    assert (await client.delete("/api/me", headers=headers(86))).status_code == 200
+    async with SessionLocal() as s:
+        assert (await s.execute(select(func.count()).select_from(CoinTx))).scalar() == 0
+        assert (await s.execute(select(func.count()).select_from(OwnedCosmetic))).scalar() == 0

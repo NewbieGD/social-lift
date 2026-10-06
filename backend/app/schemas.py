@@ -55,6 +55,15 @@ class RunFinishIn(Strict):
         return v
 
 
+class LoadoutIn(Strict):
+    # {slot: item_id | null}; the slot names and the items are checked against the catalog.
+    loadout: dict[str, str | None] = Field(default_factory=dict, max_length=8)
+
+
+class BuyIn(Strict):
+    item_id: str = Field(min_length=1, max_length=40)
+
+
 class EventIn(Strict):
     type: Literal[
         "tutorial_start",
