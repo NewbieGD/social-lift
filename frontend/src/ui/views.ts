@@ -1,7 +1,7 @@
 // HTML for every screen. Buttons use data-action/data-arg; main.ts handles them.
 import { AGE_LABEL } from '../config';
 import { legal, ru, type DocSection } from '../i18n/ru';
-import type { BlockedUser, ChatMsg, ChatUser, ReportReason } from '../net/duel';
+import type { ChatMsg, ChatUser } from '../net/duel';
 import type { FinishResult, Leaderboard, LeaderRow, Stats } from '../net/session';
 import { esc } from './dom';
 import { keyLabel } from '../input/input';
@@ -81,7 +81,25 @@ export function declinedView(): string {
   </div>`;
 }
 
+function rulesView(): string {
+  const r = ru.rules;
+  const list = r.sections
+    .map(
+      (sec, i) =>
+        `<details class="rule-sec" style="--i:${i}"${i < 2 ? ' open' : ''}><summary><span class="rs-ico">${r.sectionIcons[i] ?? '📌'}</span><span class="rs-num">${i + 1}</span><span class="rs-title">${esc(sec.h ?? '')}</span><span class="rs-chev" aria-hidden="true"></span></summary><div class="rs-body">${sec.p.map((p) => `<p>${esc(p)}</p>`).join('')}</div></details>`,
+    )
+    .join('');
+  return `${header(r.title)}<div class="scroll doc rules-page">
+    <div class="rules-hero"><i class="rh-orb o1"></i><i class="rh-orb o2"></i><i class="rh-orb o3"></i><div class="rh-ico">🛗</div><p>${esc(r.lead)}</p></div>
+    <div class="quick-grid">${r.quick.map(([i, h, t], n) => `<div class="quick" style="--i:${n}"><span class="q-ico">${i}</span><b>${esc(h)}</b><span>${esc(t)}</span></div>`).join('')}</div>
+    <div class="color-legend">${r.colors.map(([c, n, v]) => `<span class="cl" style="--c:${c}"><i></i>${esc(n)}<b>${esc(v)}</b></span>`).join('')}</div>
+    <p class="rules-tap">${esc(r.tapHint)}</p>
+    <div class="rule-list">${list}</div>
+  </div>`;
+}
+
 export function docView(kind: 'terms' | 'privacy' | 'rules'): string {
+  if (kind === 'rules') return rulesView();
   const doc = kind === 'rules' ? { title: ru.rules.title, sections: ru.rules.sections } : legal[kind];
   return `${header(doc.title)}<div class="scroll doc">${sections(doc.sections)}</div>`;
 }
@@ -168,41 +186,74 @@ export function menuView(d: MenuData): string {
   </div>`;
 }
 
-export function wardrobeView(s: Stats | null, mask: number): string {
+const STAT_ICONS: Record<string, string> = {
+  best: '<svg viewBox="0 0 24 24"><path d="M7 4h10v4a5 5 0 01-10 0zM7 6H4v1a3 3 0 003 3M17 6h3v1a3 3 0 01-3 3M12 13v4M8 20h8M10 17h4" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  week: '<svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="15" rx="3" fill="none" stroke="currentColor" stroke-width="1.9"/><path d="M4 10h16M9 3v4M15 3v4" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></svg>',
+  all: '<svg viewBox="0 0 24 24"><path d="M3 18L2 7l5.5 4L12 4l4.5 7L22 7l-1 11zM4 21h16" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round" stroke-linecap="round"/></svg>',
+  runs: '<svg viewBox="0 0 24 24"><path d="M5 12a7 7 0 0112-5l2-2v6h-6l2.2-2.2A4.5 4.5 0 007.5 12M19 12a7 7 0 01-12 5l-2 2v-6h6l-2.2 2.2A4.5 4.5 0 0016.5 12" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  combo: '<svg viewBox="0 0 24 24"><path d="M12 3c1 4 5 5.5 5 10a5 5 0 01-10 0c0-2 1-3 2-4 .3 1.5 1 2.3 2 2.5C10.5 8.5 11 5.5 12 3z" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"/></svg>',
+  captures: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" stroke-width="1.9"/><circle cx="12" cy="12" r="4" fill="none" stroke="currentColor" stroke-width="1.9"/><circle cx="12" cy="12" r="1" fill="currentColor"/></svg>',
+};
+
+const LOCK_ICON =
+  '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="10" width="14" height="10" rx="3" fill="currentColor"/><path d="M8 10V8a4 4 0 018 0v2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
+const CHECK_ICON =
+  '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+export function wardrobeView(s: Stats | null, mask: number, who?: { name: string | null; crown: boolean }): string {
   const v = (n: number | null | undefined): string => (n === null || n === undefined || n === 0 ? ru.wardrobe.none : String(n));
   let owned = 0;
   for (let i = 0; i < 13; i++) if (mask & (1 << i)) owned++;
-  const stats: [string, string][] = [
-    [ru.wardrobe.best, v(s?.best_all)],
-    [ru.wardrobe.rankWeek, v(s?.rank_week)],
-    [ru.wardrobe.rankAll, v(s?.rank_all)],
-    [ru.wardrobe.runs, v(s?.total_runs)],
-    [ru.wardrobe.combo, v(s?.best_combo)],
-    [ru.wardrobe.captures, v(s?.total_captures)],
+  const stats: [string, string, string, string][] = [
+    ['best', ru.wardrobe.best, v(s?.best_all), 'gold'],
+    ['week', ru.wardrobe.rankWeek, v(s?.rank_week), 'blue'],
+    ['all', ru.wardrobe.rankAll, v(s?.rank_all), 'violet'],
+    ['runs', ru.wardrobe.runs, v(s?.total_runs), 'green'],
+    ['combo', ru.wardrobe.combo, v(s?.best_combo), 'orange'],
+    ['captures', ru.wardrobe.captures, v(s?.total_captures), 'pink'],
   ];
   const itemNames = [
     'cap', 'slippers', 'sweats', 'shirt', 'trousers', 'jacket', 'watch', 'newTorch', 'tie', 'shoes', 'phone', 'glasses', 'helmet',
   ];
+  const name = who?.name || ru.leaders.player;
+  const bonus = owned * 5;
   return `${header(ru.wardrobe.title)}<div class="scroll wardrobe">
-    <div class="ward-top">
-      <div class="ward-stage"><span class="stage-glow"></span><canvas id="wardHero" aria-hidden="true"></canvas></div>
-      <div class="ward-info">
-        <p class="ward-look">${esc(ru.wardrobe.collected(owned))}</p>
-        <div class="bonus-bar" aria-hidden="true"><i style="transform:scaleX(${(owned / 13).toFixed(3)})"></i></div>
-        <p class="muted">${esc(ru.wardrobe.bonus())}</p>
-        <dl class="ward-stats stagger">${stats.map(([k, val]) => `<div><dt>${k}</dt><dd>${val}</dd></div>`).join('')}</dl>
+    <section class="ward-hero">
+      <div class="ward-stage"><canvas id="wardHero" aria-hidden="true"></canvas></div>
+      <div class="ward-ring" style="--p:${(owned / 13).toFixed(3)}" aria-label="${esc(ru.wardrobe.collected(owned))}">
+        <span><b>${owned}</b><small>${ru.wardrobe.of13}</small></span>
       </div>
-    </div>
-    <h3>${ru.wardrobe.collection}</h3>
-    <p class="muted">${ru.wardrobe.how}</p>
+      <div class="ward-bonus${bonus ? '' : ' zero'}"><b>+${bonus}%</b><small>${ru.wardrobe.toMult}</small></div>
+      <div class="ward-plate">${who?.crown ? `<span class="wp-crown">${CROWN}</span>` : ''}<b>${esc(name)}</b>${
+        who?.crown ? `<small>${ru.wardrobe.leader}</small>` : ''
+      }</div>
+    </section>
+
+    <section class="ward-card">
+      <div class="ward-prog-head"><b>${esc(ru.wardrobe.collected(owned))}</b><span>${Math.round((owned / 13) * 100)}%</span></div>
+      <div class="bonus-bar" aria-hidden="true"><i style="transform:scaleX(${(owned / 13).toFixed(3)})"></i></div>
+      <p class="muted">${esc(ru.wardrobe.bonus())}</p>
+    </section>
+
+    <div class="ward-sec"><h3>${ru.wardrobe.statsTitle}</h3></div>
+    <dl class="ward-stats stagger">${stats
+      .map(
+        ([ico, k, val, tone]) =>
+          `<div class="ws ${tone}"><i aria-hidden="true">${STAT_ICONS[ico]}</i><dd>${val}</dd><dt>${k}</dt></div>`,
+      )
+      .join('')}</dl>
+
+    <div class="ward-sec"><h3>${ru.wardrobe.collection}</h3><span class="pill">${owned}/13</span></div>
+    <p class="muted ward-how">${ru.wardrobe.how}</p>
     <div class="looks items stagger">
       ${itemNames
-        .map((name, i) => {
+        .map((name2, i) => {
           const has = (mask & (1 << i)) !== 0;
           return `<div class="look ${has ? 'owned' : 'locked'}">
+              <em class="look-n">${String(i + 1).padStart(2, '0')}</em>
+              <span class="look-state" aria-hidden="true">${has ? CHECK_ICON : LOCK_ICON}</span>
               <canvas data-item="${i}" aria-hidden="true"></canvas>
-              <span>${esc(has ? ru.items[name] : ru.wardrobe.lockedAt(ru.tiers[i]))}</span>
-              
+              <span class="look-name">${esc(has ? ru.items[name2] : ru.wardrobe.lockedAt(ru.tiers[i]))}</span>
             </div>`;
         })
         .join('')}
@@ -346,9 +397,14 @@ export function confirmDeleteView(error: string | null): string {
 
 // ---------- Leaders ----------
 
+const TAB_ICONS = {
+  week: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="16" height="15" rx="3" fill="none" stroke="currentColor" stroke-width="2.2"/><path d="M4 10h16M9 3v4M15 3v4" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>',
+  all: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4h10v4a5 5 0 01-10 0zM7 6H4v1a3 3 0 003 3M17 6h3v1a3 3 0 01-3 3M12 13v4M8 20h8M10 17h4" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+};
+
 export function leadersShell(scope: 'week' | 'all'): string {
   const tab = (id: 'week' | 'all', label: string): string =>
-    `<button role="tab" class="${scope === id ? 'on' : ''}" aria-selected="${scope === id}" data-action="lbScope" data-arg="${id}">${label}</button>`;
+    `<button role="tab" class="${scope === id ? 'on' : ''}" aria-selected="${scope === id}" data-action="lbScope" data-arg="${id}">${TAB_ICONS[id]}<span>${label}</span></button>`;
   return `${header(ru.leaders.title)}
     <div class="tabs" role="tablist">
       ${tab('week', ru.leaders.week)}${tab('all', ru.leaders.all)}
@@ -390,6 +446,38 @@ export function leadersRows(lb: Leaderboard, myId: number | null, clickable: boo
     })
     .join('')}</div>`;
 }
+
+function podAvatar(row: LeaderRow): string {
+  const initial = esc((row.name || ru.leaders.player).slice(0, 1));
+  const img = row.photo ? `<img src="${esc(row.photo)}" alt="" loading="lazy" referrerpolicy="no-referrer" />` : '';
+  return `<span class="pod-ava"><span class="ava-inner">${img || `<b>${initial}</b>`}</span></span>`;
+}
+
+/** Top three on a podium (2 - 1 - 3), everyone else in the list below. */
+export function leadersBoard(lb: Leaderboard, myId: number | null, clickable: boolean): string {
+  if (!lb.rows.length) return leadersRows(lb, myId, clickable);
+  const byRank = (n: number): LeaderRow | undefined => lb.rows.find((r) => r.rank === n);
+  const pod = (n: 1 | 2 | 3): string => {
+    const r = byRank(n);
+    if (!r) return `<div class="pod p${n} ghost"><div class="pod-step"><b>${n}</b></div></div>`;
+    const name = r.deactivated ? ru.leaders.deleted : r.name || ru.leaders.player;
+    const canOpen = clickable && !r.deactivated;
+    const tag = canOpen ? 'button' : 'div';
+    const attrs = canOpen ? ` data-action="profile" data-arg="${r.user_id}"` : '';
+    return `<${tag} class="pod p${n}${r.user_id === myId ? ' mine' : ''}"${attrs}>
+      ${n === 1 ? `<span class="pod-crown" aria-hidden="true">${CROWN}</span>` : ''}
+      ${podAvatar(r)}
+      <span class="pod-name">${esc(name)}</span>
+      <span class="pod-score">${r.score}${lb.scope === 'duels' ? `<small>${ru.leaders.winsWord}</small>` : ''}</span>
+      <span class="pod-step"><b>${n}</b></span>
+    </${tag}>`;
+  };
+  const rest: Leaderboard = { ...lb, rows: lb.rows.filter((r) => r.rank > 3) };
+  return `<div class="podium${lb.scope === 'duels' ? ' duel-pod' : ''}">${pod(2)}${pod(1)}${pod(3)}</div>${
+    rest.rows.length ? `<div class="lb-rest">${leadersRows(rest, myId, clickable)}</div>` : ''
+  }`;
+}
+
 
 export function leadersMe(lb: Leaderboard): string {
   const me = lb.me;
@@ -434,7 +522,7 @@ export function duelsView(d: DuelView): string {
   else if (d.status === 'declined') status = ru.duel.declined;
   const canFind = d.status === 'idle' || d.status === 'none' || d.status === 'declined';
   return `${header(ru.duel.title)}<div class="scroll duel-scroll"><div class="panel flat duel-panel">
-    <div class="duel-hero" aria-hidden="true">${ICON.swords}</div>
+    <div class="duel-hero" aria-hidden="true"><i class="spark s1"></i><i class="spark s2"></i><i class="spark s3"></i><i class="spark s4"></i>${ICON.swords}</div>
     <p>${ru.duel.lead}</p>
     <p class="muted">${ru.duel.rulesNote}</p>
     ${d.status !== 'offline' && d.status !== 'connecting' ? `<p class="duel-online"><span class="dot"></span>${ru.duel.online(d.online)}</p>` : ''}
@@ -444,7 +532,7 @@ export function duelsView(d: DuelView): string {
         ? `<button class="secondary" data-action="duelCancel">${ru.duel.cancel}</button>`
         : `<button class="primary" data-action="duelFind" ${canFind ? '' : 'disabled'}>${ru.duel.find}</button>`
     }
-    <h3 class="duel-lb-title">${ru.duel.leaders}</h3>
+    <h3 class="duel-lb-title"><span>${ru.duel.leaders}</span></h3>
     <div class="duel-lb" id="duelLbList">${d.leadersHtml?.rows ?? '<div class="lb-row skeleton"><span></span><span></span><span></span></div>'}</div>
     <div class="me-card" id="duelLbMe">${d.leadersHtml?.me ?? ''}</div>
   </div></div>`;
@@ -622,26 +710,9 @@ function chatAva(u: ChatUser, size = ''): string {
   return `<button type="button" class="chat-ava ${size}" data-action="player" data-arg="${u.id}" aria-label="${esc(name)}">${inner}</button>`;
 }
 
-const INFO_ICON =
-  '<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><circle cx="12" cy="12" r="9.5" fill="none" stroke="currentColor" stroke-width="2.4"/><path d="M12 7v6.2" stroke="currentColor" stroke-width="2.8" stroke-linecap="round"/><circle cx="12" cy="17" r="1.6" fill="currentColor"/></svg>';
-const BLOCK_ICON =
-  '<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2.4"/><path d="M5.7 5.7l12.6 12.6" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>';
-const UP_ICON =
-  '<svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true"><path d="M2 10h4v11H2zM8 21V10l4-8c1.6 0 2.6 1.2 2.4 2.7L14 9h6a2 2 0 0 1 2 2.4l-1.6 8A2 2 0 0 1 18.4 21z" fill="currentColor"/></svg>';
-const DOWN_ICON =
-  '<svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true" style="transform:rotate(180deg)"><path d="M2 10h4v11H2zM8 21V10l4-8c1.6 0 2.6 1.2 2.4 2.7L14 9h6a2 2 0 0 1 2 2.4l-1.6 8A2 2 0 0 1 18.4 21z" fill="currentColor"/></svg>';
-const FLAG_ICON =
-  '<svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true"><path d="M5 21V3M5 4h13l-2.5 4.5L18 13H5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-
-export function chatView(blocked: number): string {
-  return `<header class="screen-head">
-      <button class="icon-btn back" data-action="back" aria-label="${ru.common.back}">${BACK_ICON}</button>
-      <h2>${esc(ru.chat.title)}</h2>
-      <button class="icon-btn chat-info" data-action="chatRules" aria-label="${esc(ru.chat.rulesBtn)}" title="${esc(ru.chat.rulesBtn)}">${INFO_ICON}</button>
-    </header>
-    <div class="chat-top"><span class="chat-count" id="chatCount"></span><div class="chat-who" id="chatWho"></div>
-      <button type="button" class="chat-blocked-btn" id="chatBlockedBtn" data-action="chatBlocked">${BLOCK_ICON}<span>${esc(ru.chat.blockedBtn(blocked))}</span></button>
-    </div>
+export function chatView(): string {
+  return `${header(ru.chat.title)}
+    <div class="chat-top"><span class="chat-count" id="chatCount"></span><div class="chat-who" id="chatWho"></div></div>
     <p class="chat-rules">${ru.chat.rules}</p>
     <div class="scroll chat-list" id="chatList"></div>
     <p class="chat-status" id="chatStatus"></p>
@@ -650,33 +721,23 @@ export function chatView(blocked: number): string {
       <button type="submit" class="primary" id="chatSend">${ru.chat.send}</button>
     </form>`;
 }
-export function chatReactionsHtml(m: ChatMsg, mine: boolean): string {
-  const up = m.up ?? 0;
-  const down = m.down ?? 0;
-  const btn = (kind: 'up' | 'down', icon: string, n: number, label: string): string =>
-    `<button type="button" class="chat-react${m.mine === kind ? ' on' : ''}${mine ? ' static' : ''}" data-action="react" data-arg="${m.id}:${kind}" aria-label="${esc(label)}" aria-pressed="${m.mine === kind}"${mine ? ' disabled' : ''}>${icon}<span>${n || ''}</span></button>`;
-  const report = mine
-    ? ''
-    : `<button type="button" class="chat-react flag" data-action="reportMsg" data-arg="${m.id}" aria-label="${esc(ru.chat.report)}" title="${esc(ru.chat.report)}">${FLAG_ICON}</button>`;
-  return `${btn('up', UP_ICON, up, ru.chat.like)}${btn('down', DOWN_ICON, down, ru.chat.dislike)}${report}`;
+
+export function chatWhoHtml(users: ChatUser[]): string {
+  return users.map((u) => chatAva(u, 'small')).join('');
 }
+
 export function chatMsgHtml(m: ChatMsg, myId: number | null): string {
-  if (m.sys) return `<p class="chat-sys" data-ts="${m.ts}">${esc(m.text)}</p>`;
+  if (m.sys) return `<p class="chat-sys">${esc(m.text)}</p>`;
   const t = new Date(m.ts);
   const time = `${String(t.getHours()).padStart(2, '0')}:${String(t.getMinutes()).padStart(2, '0')}`;
   const name = m.user.name || ru.leaders.player;
-  const mine = m.user.id === myId;
-  return `<div class="chat-msg${mine ? ' mine' : ''}" data-mid="${m.id}" data-ts="${m.ts}">
+  return `<div class="chat-msg${m.user.id === myId ? ' mine' : ''}">
     ${chatAva(m.user)}
     <div class="chat-body">
       <div class="chat-meta"><button type="button" class="chat-name" data-action="player" data-arg="${m.user.id}">${esc(name)}</button>${m.user.rank ? `<span class="chat-rank">#${m.user.rank}</span>` : ''}<time>${time}</time></div>
       <p>${esc(m.text)}</p>
-      <div class="chat-actions">${chatReactionsHtml(m, mine)}</div>
     </div>
   </div>`;
-}
-export function chatWhoHtml(users: ChatUser[]): string {
-  return users.map((u) => chatAva(u, 'small')).join('');
 }
 
 export function playerCardView(u: ChatUser, mine: boolean): string {
@@ -689,42 +750,5 @@ export function playerCardView(u: ChatUser, mine: boolean): string {
     <p>${mine ? ru.chat.you : ru.chat.rank(u.rank)}</p>
     ${mine ? '' : `<button class="primary" data-action="challenge" data-arg="${u.id}">${ru.chat.duelBtn}</button>`}
     <button class="secondary" data-action="profile" data-arg="${u.id}">${ru.chat.profileBtn}</button>
-    ${
-      mine
-        ? ''
-        : `<div class="card-moderation">
-      <button class="secondary" data-action="reportUser" data-arg="${u.id}">${FLAG_ICON}<span>${ru.chat.report}</span></button>
-      <button class="secondary" data-action="blockUser" data-arg="${u.id}">${BLOCK_ICON}<span>${ru.chat.blockBtn}</span></button>
-    </div>`
-    }
   </div>`;
-}
-
-export function chatReportView(u: ChatUser): string {
-  const name = u.name || ru.leaders.player;
-  const reason = (id: ReportReason, label: string): string => `<button class="secondary reason" data-action="sendReport" data-arg="${id}">${esc(label)}</button>`;
-  return `<div class="panel">
-    <button class="icon-btn close" data-action="back" aria-label="${ru.chat.close}">${CLOSE_ICON}</button>
-    <h2>${ru.chat.reportTitle}</h2>
-    <p>${esc(ru.chat.reportLead(name))}</p>
-    ${reason('words', ru.chat.reasonWords)}${reason('spam', ru.chat.reasonSpam)}${reason('other', ru.chat.reasonOther)}
-    <p class="report-note">${ru.chat.reportNote}</p>
-  </div>`;
-}
-
-export function chatRulesView(): string {
-  return `${header(ru.chat.rulesTitle)}<div class="scroll doc">${sections(ru.chat.rulesFull)}</div>`;
-}
-
-export function chatBlockedView(users: BlockedUser[] | null): string {
-  const row = (u: BlockedUser): string => {
-    const name = u.name || ru.leaders.player;
-    const ava = u.photo
-      ? `<img src="${esc(u.photo)}" alt="" loading="lazy" referrerpolicy="no-referrer" />`
-      : `<b>${esc(name.slice(0, 1))}</b>`;
-    return `<div class="blocked-row"><span class="chat-ava static">${ava}</span><span class="blocked-name">${esc(name)}</span>
-      <button class="secondary" data-action="unblock" data-arg="${u.id}">${ru.chat.unblockBtn}</button></div>`;
-  };
-  const body = users === null ? `<p class="empty">${ru.chat.blockedLoading}</p>` : users.length ? users.map(row).join('') : `<p class="empty">${ru.chat.blockedEmpty}</p>`;
-  return `${header(ru.chat.blockedTitle)}<p class="chat-rules">${ru.chat.blockedLead}</p><div class="scroll blocked-list">${body}</div>`;
 }

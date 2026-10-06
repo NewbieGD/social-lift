@@ -21,50 +21,16 @@ export interface ChatMsg {
   ts: number;
   user: ChatUser;
   text: string;
-  /** Likes and dislikes, and this player's own reaction. */
-  up?: number;
-  down?: number;
-  mine?: Reaction | null;
   /** Local system line ("X joined"), never sent by the server. */
   sys?: boolean;
 }
 
-export type Reaction = 'up' | 'down';
-export type ReportReason = 'words' | 'spam' | 'other';
-
-export interface BlockedUser {
-  id: number;
-  name: string | null;
-  photo: string | null;
-}
-
 export type DuelMsg =
-  | { t: 'chat_hist'; msgs: ChatMsg[]; users: ChatUser[]; wait: number; muted: number; blocked: number[] }
+  | { t: 'chat_hist'; msgs: ChatMsg[]; users: ChatUser[]; wait: number }
   | { t: 'chat'; msg: ChatMsg }
   | { t: 'chat_users'; users: ChatUser[] }
   | { t: 'chat_user'; action: 'join'; user: ChatUser }
-  | { t: 'chat_react'; id: number; up: number; down: number; by: number; r: Reaction | null }
-  | { t: 'chat_purge'; before: number }
-  | { t: 'chat_report_ok' }
-  | { t: 'chat_blocked'; id: number | null; blocked: number[] }
-  | { t: 'chat_blocks'; users: BlockedUser[] }
-  | {
-      t: 'chat_err';
-      code:
-        | 'empty'
-        | 'link'
-        | 'words'
-        | 'cooldown'
-        | 'muted'
-        | 'report_dup'
-        | 'report_limit'
-        | 'report_bad'
-        | 'report_self'
-        | 'block_limit'
-        | 'block_self'
-        | 'block_unknown';
-      wait?: number;
-    }
+  | { t: 'chat_err'; code: 'empty' | 'link' | 'words' | 'cooldown'; wait?: number }
   | { t: 'chat_cd'; wait: number }
   | { t: 'busy'; who: 'me' | 'them'; name?: string | null }
   | { t: 'online'; n: number }
