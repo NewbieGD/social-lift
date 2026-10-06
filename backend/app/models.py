@@ -53,8 +53,6 @@ class User(Base):
     item_misses: Mapped[str] = mapped_column(String(64), default="")
     duel_wins: Mapped[int] = mapped_column(Integer, default=0)
     duel_wins_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    # Set automatically when several different players complain about the player's chat messages.
-    chat_muted_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     runs: Mapped[list[Run]] = relationship(back_populates="user", cascade="all, delete-orphan", passive_deletes=True)
     weeks: Mapped[list[WeekBest]] = relationship(cascade="all, delete-orphan", passive_deletes=True)
@@ -129,29 +127,3 @@ class CrownNotice(Base):
     kind: Mapped[str] = mapped_column(String(8))  # won | lost | expired
     other_name: Mapped[str | None] = mapped_column(String(64))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
-
-
-class ChatBlock(Base):
-    """A player hides another player's chat messages (and duel challenges)."""
-
-    __tablename__ = "chat_blocks"
-
-    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
-    blocked_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
-
-
-class ChatReport(Base):
-    """A complaint about a chat player. The text of the reported message is kept for review
-    and deleted after REPORT_KEEP_DAYS."""
-
-    __tablename__ = "chat_reports"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
-    reporter_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"), index=True)
-    target_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"), index=True)
-    reason: Mapped[str] = mapped_column(String(16))  # words | spam | other
-    msg_id: Mapped[int | None] = mapped_column(Integer)
-    text: Mapped[str | None] = mapped_column(String(200))
-    status: Mapped[str] = mapped_column(String(12), default="new")  # new | reviewed

@@ -13,7 +13,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from . import game_config as gc
 from .api.routes import router
-from .duel_ws import router as duel_router, start_maintenance, stop_maintenance
+from .duel_ws import router as duel_router
 from .config import settings
 from .core import limiter
 from .db import Base, engine
@@ -32,10 +32,8 @@ async def lifespan(_: FastAPI):
         # Local convenience; production uses Alembic migrations.
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
-    start_maintenance()  # chat housekeeping: messages live for an hour
     log.info("started env=%s app_id=%s", settings.app_env, settings.vk_app_id)
     yield
-    await stop_maintenance()
     await engine.dispose()
 
 
