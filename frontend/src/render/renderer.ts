@@ -2,6 +2,7 @@ import { gameConfig, type ColorId, type LightId } from '../core/gameConfig';
 import type { Sim } from '../core/sim';
 import type { Platform, SimEvent } from '../core/types';
 import { ru } from '../i18n/ru';
+import { isBuffOnly, type Slot } from './slots';
 import { drawHeroBody, drawItem, heroRig, ITEM_ANCHOR, ITEM_BY_TIER, outfitFromMask, type AttachPoint, type Face, type Gesture, type HeroPose, type Item, type Rig } from './hero';
 import { palette } from './palette';
 import { CROWN_LIFT_SIDE, crownBob, drawCrown } from './crown';
@@ -215,6 +216,10 @@ export class Renderer {
   }));
   /** Collected items shown on the hero (bitmask, bit = tier). */
   ownedMask = 0;
+  /** Slots taken by worn styles: bonus items for them become buff icons instead of being worn. */
+  occupied: ReadonlySet<Slot> = new Set();
+  /** A bonus item was collected into a slot held by a style (it counts, but is not drawn). */
+  onBuff: (tier: number) => void = () => undefined;
   /** Freeze-frame suit-up movie; when off, clothes change instantly with a glow. */
   cinematic = true;
   /** Menu background: draw the scene only, no platforms or hero. */
@@ -336,7 +341,15 @@ export class Renderer {
         this.prewarm(Math.min(e.tier + 1, 12), H);
         this.startStage(e.tier);
       } else if (e.type === 'pickup') {
-        this.startItemFlight(e.item, e.x, e.y, sim);
+        if (isBuffOnly(e.item, this.occupied)) {
+          // The slot is held by a style: the +5% still counts, only the picture changes.
+          this.onBuff(e.item);
+          if (!this.reducedEffects) {
+            for (let i = 0; i < 8; i++) this.sparkles.push({ x: e.x + (Math.random() - 0.5) * 40, y: toScreenY(e.y) + (Math.random() - 0.5) * 16, t: Math.random() * 0.2 });
+          }
+        } else {
+          this.startItemFlight(e.item, e.x, e.y, sim);
+        }
       } else if (e.type === 'death' && !this.reducedEffects) {
         for (let i = 0; i < 16; i++) {
           const a = Math.random() * Math.PI * 2;

@@ -117,6 +117,8 @@ export function preparingView(): string {
 
 export interface MenuData {
   stats: Stats | null;
+  /** Coin balance; null when there is no server (offline, outside VK). */
+  coins: number | null;
   mode: 'loading' | 'online' | 'offline' | 'outside';
 }
 
@@ -138,6 +140,9 @@ const FS_ICON =
 
 const HAND_ICON =
   '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 11V5.5a1.5 1.5 0 013 0V10l.5-.1V8.5a1.5 1.5 0 013 0v2l.5-.1a1.5 1.5 0 013 .3V15c0 3.3-2.7 6-6 6h-1.2c-1.8 0-3.4-.8-4.5-2.2L4.6 15a1.5 1.5 0 012.3-1.9L9 15z" fill="currentColor"/></svg>';
+
+export const COIN_ICON =
+  '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10" fill="#C99A2E"/><circle cx="12" cy="12" r="8" fill="#FFD640"/><path d="M12 7v10M9.4 9.4c.8-.9 2-1.2 3-.9 1.3.4 1.3 1.9 0 2.2l-1.6.4c-1.3.3-1.3 1.9 0 2.3 1 .3 2.2 0 3-.9" fill="none" stroke="#8A5A00" stroke-width="1.5" stroke-linecap="round"/><ellipse cx="9" cy="8.4" rx="2.4" ry="1.2" fill="#fff" opacity=".45" transform="rotate(-30 9 8.4)"/></svg>';
 
 function chip(icon: string, label: string, value: string, i: number, kind = ''): string {
   return `<div class="chip ${kind}" style="--i:${i}"><span class="chip-ico">${icon}</span><span class="chip-text"><span class="chip-label">${esc(label)}</span><b>${esc(value)}</b></span></div>`;
@@ -162,6 +167,7 @@ export function menuView(d: MenuData): string {
   }
   return `<div class="menu2">
     <div class="showcase">
+      ${d.coins === null ? '' : `<div class="coin-pill" title="${ru.menu.coins}" aria-label="${ru.menu.coins}: ${d.coins}">${COIN_ICON}<b>${d.coins}</b></div>`}
       <button class="fs-btn" data-action="fullscreen" aria-label="${ru.menu.fullscreen}" title="${ru.menu.fullscreen}">${FS_ICON}</button>
       <div class="hero-stage">
         <span class="stage-glow" aria-hidden="true"></span>
@@ -622,6 +628,7 @@ export function resultView(d: ResultData): string {
     <div class="big-score" id="resultScore" data-target="${d.score}">0</div>
     <div class="record ${d.record && d.score > 0 ? '' : 'hidden'}" id="resultRecord">${ru.result.record}</div>
     <p class="rank" id="resultRank"></p>
+    <p class="coins-line" id="coinsLine"></p>
     ${
       d.duel
         ? `<div class="duel-score" id="duelScore">

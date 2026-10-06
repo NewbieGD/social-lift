@@ -53,6 +53,7 @@ export const ru = {
     combo: (m: number) => `×${m.toString().replace('.', ',')}`,
     newColor: 'Новый цвет!',
     unranked: 'Без рейтинга',
+    buffs: 'Бонусные вещи забега (+5% каждая)',
     close: 'Впритык!',
     floor: 'Этаж',
   },
@@ -87,6 +88,7 @@ export const ru = {
     duels: 'Дуэли',
     chat: 'Чат',
     firstRun: 'Сыграйте первый забег',
+    coins: 'Монеты',
     fullscreen: 'На весь экран',
     fullscreenNo: 'На этом устройстве полноэкранный режим недоступен. В приложении ВК его задаёт само приложение.',
     chipRank: 'Место',
@@ -341,6 +343,7 @@ export const ru = {
     rankWeek: 'Место за неделю',
     rankAll: 'Место за всё время',
     unranked: 'Забег без рейтинга',
+    coinsEarned: (n: number) => `+${n} ${plural(n, ['монета', 'монеты', 'монет'])}`,
     reasons2: {
       outside: 'игра открыта вне ВКонтакте',
       offline: 'нет связи с сервером',

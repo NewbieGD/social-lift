@@ -22,6 +22,28 @@ export interface Stats {
   crown?: boolean;
 }
 
+export type Slot = 'head' | 'torso' | 'arms' | 'legs' | 'feet';
+export type Loadout = Partial<Record<Slot, string>>;
+
+export interface CatalogItem {
+  id: string;
+  slot: Slot;
+  set: string;
+  /** Best single-run score that opens it, or null. */
+  record: number | null;
+  /** Price in coins, or null when it is not for sale. */
+  price: number | null;
+  drop: boolean;
+}
+
+/** Coins, owned cosmetics, what is worn, and the catalog of rules (all from the server). */
+export interface ShopState {
+  coins: number;
+  owned: string[];
+  loadout: Loadout;
+  catalog: CatalogItem[];
+}
+
 export interface CrownNotice {
   kind: 'won' | 'lost' | 'expired';
   name: string | null;
@@ -40,6 +62,7 @@ export interface Bootstrap {
   settings: Record<string, string | number | boolean>;
   settings_updated_at: number;
   stats: Stats;
+  shop?: ShopState;
   server_time: number;
   ads: Record<string, number | boolean>;
   crown?: CrownInfo;
@@ -81,6 +104,10 @@ export interface FinishResult {
   prev_rank_all: number | null;
   prev_rank_week: number | null;
   duel?: { status: 'pending' | 'done'; outcome?: Record<string, 'win' | 'loss' | 'draw'> } | null;
+  /** Coins paid for this run, the new balance, and cosmetics this run opened. */
+  coins?: number;
+  coins_earned?: number;
+  new_items?: string[];
 }
 
 export interface LeaderRow {
@@ -298,6 +325,35 @@ export class Session {
     s.total_captures = (s.total_captures ?? 0) + (this.lastReport?.captures ?? 0);
     if (this.lastReport) {
       s.items_mask = (s.items_mask ?? 0) | this.lastReport.items;
+    }
+    const shop = this.data.shop;
+    if (shop) {
+      if (typeof r.coins === 'number') shop.coins = r.coins;
+      for (const id of r.new_items ?? []) if (!shop.owned.includes(id)) shop.owned.push(id);
+    }
+  }
+
+  /** Wears or takes off cosmetics ({slot: id | null}). Returns the loadout the server saved. */
+  async setLoadout(change: Partial<Record<Slot, string | null>>): Promise<Loadout | null> {
+    if (!this.data?.shop) return null;
+    try {
+      const res = await api<{ loadout: Loadout }>('PUT', '/loadout', { loadout: change });
+      this.data.shop.loadout = res.loadout;
+      return res.loadout;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Buys an item for coins. Returns the new state, or the error code. */
+  async buy(itemId: string): Promise<{ ok: true; shop: ShopState } | { ok: false; code: string }> {
+    if (!this.data) return { ok: false, code: 'offline' };
+    try {
+      const shop = await api<ShopState>('POST', '/shop/buy', { item_id: itemId });
+      this.data.shop = shop;
+      return { ok: true, shop };
+    } catch (e) {
+      return { ok: false, code: e instanceof ApiError ? e.code : 'network' };
     }
   }
 

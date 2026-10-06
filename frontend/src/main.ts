@@ -21,6 +21,7 @@ import { drawItem, ITEM_BY_TIER, itemCount, outfitFromMask, type Item } from './
 import { fullscreenSupported, onFullscreenChange, toggleFullscreen } from './platform/fullscreen';
 import { drawStageBackdrop, StageWind, stageLayout } from './render/ground';
 import { CROWN_LIFT_FRONT, crownBob, drawCrown } from './render/crown';
+import { occupiedSlots } from './render/slots';
 import { drawHeroFront } from './render/heroFront';
 import { Renderer } from './render/renderer';
 import { applyControls } from './ui/controlsLayout';
@@ -51,6 +52,7 @@ const shatterEl = $('shatter');
 const edgeGlow = $('edgeGlow');
 const walletIcon = $('walletIcon');
 const bonusEl = $('bonus');
+const buffsEl = $('buffs');
 const tutCardEl = $('tutCard');
 
 const renderer = new Renderer(canvas);
@@ -205,6 +207,46 @@ let prevLight: LightId | null = null;
 let lastMult = 1;
 let lastWallSound = 0;
 let captionTimer = 0;
+// ---------- Buff icons: bonus items that count but are not drawn (their slot holds a style) ----------
+
+let buffMask = 0;
+
+function buffIcon(tier: number): HTMLCanvasElement {
+  const c = document.createElement('canvas');
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  c.width = Math.round(30 * dpr);
+  c.height = Math.round(30 * dpr);
+  const g = c.getContext('2d')!;
+  g.scale(dpr, dpr);
+  g.translate(15, 15);
+  g.scale(1.05, 1.05);
+  drawItem(g, ITEM_BY_TIER[tier] as Item);
+  return c;
+}
+
+function renderBuffs(): void {
+  buffsEl.replaceChildren();
+  buffsEl.setAttribute('aria-label', ru.hud.buffs);
+  for (let t = 0; t < ITEM_BY_TIER.length; t++) {
+    if (!(buffMask & (1 << t))) continue;
+    const chip = document.createElement('span');
+    chip.className = 'buff';
+    chip.setAttribute('role', 'listitem');
+    chip.title = `${ru.items[ITEM_BY_TIER[t]]}: +5%`;
+    chip.appendChild(buffIcon(t));
+    buffsEl.appendChild(chip);
+  }
+}
+
+renderer.onBuff = (tier) => {
+  buffMask |= 1 << tier;
+  renderBuffs();
+  const last = buffsEl.lastElementChild;
+  last?.classList.add('pop');
+  audio.play('snap', { item: ITEM_BY_TIER[tier] });
+  renderer.onCaption('item', tier);
+};
+
 renderer.onCaption = (kind, value) => {
   const el = document.getElementById('caption');
   if (!el) return;
@@ -444,6 +486,10 @@ function newSim(seed: number, tutorial = false, items = false): void {
   // Every run starts with nothing worn; items found along the way count for this run only.
   sim = new Sim(seed, sim.viewH, { tutorial, items });
   renderer.ownedMask = 0;
+  // Worn styles keep their slots: bonus items for those slots become buff icons.
+  renderer.occupied = occupiedSlots(session.data?.shop?.loadout);
+  buffMask = 0;
+  renderBuffs();
   input.heroXProvider = () => sim.hero.x;
   input.reset();
   layout();
@@ -650,6 +696,10 @@ function finishRun(): void {
           const bestEl = document.getElementById('resultBest');
           if (bestEl) bestEl.textContent = String(res.best_all);
         }
+      }
+      if (res && res.status === 'finished' && (res.coins_earned ?? 0) > 0) {
+        const line = document.getElementById('coinsLine');
+        if (line) line.innerHTML = `${V.COIN_ICON}<span>${ru.result.coinsEarned(res.coins_earned ?? 0)}</span>`;
       }
       if (res?.duel && finishedDuel) {
         const myId = String(session.data?.profile.id ?? '');
@@ -1036,7 +1086,12 @@ router.register('wardrobe', {
   mount: (root) => requestAnimationFrame(() => drawCollection(root)),
 });
 router.register('menu', {
-  html: () => V.menuView({ stats: session.data?.stats ?? localStats(), mode: session.mode }),
+  html: () =>
+    V.menuView({
+      stats: session.data?.stats ?? localStats(),
+      coins: session.mode === 'online' && session.data?.shop ? session.data.shop.coins : null,
+      mode: session.mode,
+    }),
   cls: 'menu-screen',
 });
 router.register('preparing', { html: () => V.preparingView(), cls: 'solid preparing' });
