@@ -15,7 +15,7 @@ import { ads, DEFAULT_ADS, type AdsConfig } from './platform/ads';
 import { canShare, initShare, shareStory, shareWall } from './platform/share';
 import { lockGestures } from './platform/gestures';
 import { askNotifications, initVk } from './platform/vk';
-import { DuelClient, type ChatMsg, type ChatUser, type DuelMsg, type DuelPlayer } from './net/duel';
+import { DuelClient, type BlockedUser, type ChatMsg, type ChatUser, type DuelMsg, type DuelPlayer, type ReportReason } from './net/duel';
 import { scenes } from './render/palette';
 import { drawItem, ITEM_BY_TIER, itemCount, outfitFromMask, type Item } from './render/hero';
 import { fullscreenSupported, onFullscreenChange, toggleFullscreen } from './platform/fullscreen';
@@ -1027,11 +1027,7 @@ router.register('declined', { html: () => V.declinedView(), cls: 'solid' });
 router.register('doc', { html: () => V.docView(docKind), cls: 'solid' });
 router.register('rules', { html: () => V.docView('rules'), cls: 'solid' });
 router.register('wardrobe', {
-  html: () =>
-    V.wardrobeView(session.data?.stats ?? localStats(), ownedMask(), {
-      name: session.data?.profile.name ?? null,
-      crown: hasCrown(),
-    }),
+  html: () => V.wardrobeView(session.data?.stats ?? localStats(), ownedMask()),
   cls: 'solid',
   mount: (root) => requestAnimationFrame(() => drawCollection(root)),
 });
@@ -1085,9 +1081,18 @@ router.register('invite', {
   modal: true,
 });
 router.register('chat', {
-  html: () => V.chatView(),
+  html: () => V.chatView(chat.blocked.size),
   cls: 'solid',
   mount: () => mountChat(),
+});
+router.register('chatRules', { html: () => V.chatRulesView(), cls: 'solid' });
+router.register('chatBlocked', { html: () => V.chatBlockedView(chat.blockedList), cls: 'solid' });
+router.register('report', {
+  html: () => {
+    const u = chat.report ? chat.known.get(chat.report.user) : undefined;
+    return u ? V.chatReportView(u) : '';
+  },
+  modal: true,
 });
 router.register('player', {
   html: () => {
@@ -1299,6 +1304,52 @@ const actions: Record<string, (arg: string, el: HTMLElement) => void> = {
     if (!chat.known.has(id)) return;
     chat.cardId = id;
     router.open('player');
+  },
+  chatRules: () => router.open('chatRules'),
+  chatBlocked: () => {
+    chat.blockedList = null;
+    router.open('chatBlocked');
+    duelClient.send({ t: 'chat_blocks' });
+  },
+  react: (arg) => {
+    const [id, kind] = arg.split(':');
+    const msg = chat.msgs.find((x) => x.id === Number(id));
+    if (!msg || msg.user.id === myId() || (kind !== 'up' && kind !== 'down')) return;
+    duelClient.send({ t: 'chat_react', id: msg.id, r: kind });
+  },
+  reportMsg: (arg) => {
+    const msg = chat.msgs.find((x) => x.id === Number(arg));
+    if (!msg || msg.user.id === myId()) return;
+    chat.report = { user: msg.user.id, msgId: msg.id };
+    router.open('report');
+  },
+  reportUser: (arg) => {
+    const id = Number(arg);
+    if (!chat.known.has(id) || id === myId()) return;
+    const last = [...chat.msgs].reverse().find((x) => !x.sys && x.user.id === id);
+    chat.report = { user: id, msgId: last ? last.id : null };
+    router.open('report');
+  },
+  sendReport: (arg) => {
+    const rep = chat.report;
+    if (!rep || !['words', 'spam', 'other'].includes(arg)) return;
+    duelClient.send({ t: 'chat_report', user: rep.user, id: rep.msgId, reason: arg as ReportReason });
+    chat.report = null;
+    router.back();
+    if (router.top === 'player') router.back();
+  },
+  blockUser: (arg) => {
+    const id = Number(arg);
+    if (!chat.known.has(id) || id === myId()) return;
+    duelClient.send({ t: 'chat_block', id });
+    router.back();
+  },
+  unblock: (arg) => {
+    const id = Number(arg);
+    if (!Number.isInteger(id)) return;
+    chat.blockedList = chat.blockedList?.filter((u) => u.id !== id) ?? null;
+    router.refresh();
+    duelClient.send({ t: 'chat_unblock', id });
   },
   challenge: (arg) => {
     askNotificationsOnce();
@@ -1536,7 +1587,15 @@ const chat = {
   joined: false,
   lastText: '',
   statusTimer: 0,
+  /** Players this player has blocked (the server filters their messages; this drives the UI). */
+  blocked: new Set<number>(),
+  blockedList: null as BlockedUser[] | null,
+  report: null as { user: number; msgId: number | null } | null,
+  mutedUntil: 0,
 };
+
+/** Chat messages live for an hour on the server; the client drops them at the same age. */
+const CHAT_TTL_MS = 3_600_000;
 
 function myId(): number | null {
   return session.data?.profile.id ?? null;
@@ -1566,10 +1625,11 @@ function tryJoinChat(): void {
   }
 }
 
-function chatStatus(text: string, ms = 4000): void {
+function chatStatus(text: string, ms = 4000, good = false): void {
   const el = document.getElementById('chatStatus');
   if (!el) return;
   el.textContent = text;
+  el.classList.toggle('ok', good);
   clearTimeout(chat.statusTimer);
   if (text && ms > 0) chat.statusTimer = window.setTimeout(() => (el.textContent = ''), ms);
 }
@@ -1593,6 +1653,36 @@ function renderChatList(): void {
   list.scrollTop = list.scrollHeight;
 }
 
+function renderBlockedBtn(): void {
+  const btn = document.querySelector<HTMLElement>('#chatBlockedBtn span');
+  if (btn) btn.textContent = ru.chat.blockedBtn(chat.blocked.size);
+}
+
+/** Removes messages older than `before` (ms) from the data and from the screen. */
+function pruneChat(before: number): void {
+  const keep = (x: ChatMsg): boolean => (x.sys ? x.ts >= Date.now() - CHAT_TTL_MS : x.ts >= before);
+  if (chat.msgs.every(keep)) return;
+  chat.msgs = chat.msgs.filter(keep);
+  const list = document.getElementById('chatList');
+  if (!list) return;
+  list.querySelectorAll<HTMLElement>('.chat-msg').forEach((el) => {
+    if (Number(el.dataset.ts) < before) el.remove();
+  });
+  list.querySelectorAll<HTMLElement>('.chat-sys').forEach((el) => {
+    if (Number(el.dataset.ts) < Date.now() - CHAT_TTL_MS) el.remove();
+  });
+  if (!chat.msgs.length) list.innerHTML = `<div class="empty"><p>${ru.chat.empty}</p></div>`;
+}
+
+function updateReactions(m: ChatMsg): void {
+  const row = document.querySelector<HTMLElement>(`.chat-msg[data-mid="${m.id}"] .chat-actions`);
+  if (row) row.innerHTML = V.chatReactionsHtml(m, m.user.id === myId());
+}
+
+function mutedLeft(): number {
+  return Math.max(0, Math.ceil((chat.mutedUntil - Date.now()) / 1000));
+}
+
 function appendChat(m: ChatMsg): void {
   chat.msgs.push(m);
   if (chat.msgs.length > 100) chat.msgs.shift();
@@ -1609,8 +1699,9 @@ function updateChatSend(): void {
   const btn = document.getElementById('chatSend') as HTMLButtonElement | null;
   if (!btn) return;
   const left = Math.ceil((chat.cdUntil - Date.now()) / 1000);
-  btn.disabled = left > 0 || !chat.joined;
-  btn.textContent = left > 0 ? ru.chat.wait(left) : ru.chat.send;
+  const muted = mutedLeft() > 0;
+  btn.disabled = left > 0 || !chat.joined || muted;
+  btn.textContent = muted ? ru.chat.mutedBtn : left > 0 ? ru.chat.wait(left) : ru.chat.send;
 }
 
 function mountChat(): void {
@@ -1632,9 +1723,14 @@ function mountChat(): void {
     duelClient.send({ t: 'chat', text });
     input.value = '';
   });
+  let swept = 0;
   const tick = window.setInterval(() => {
     if (!document.getElementById('chatSend')) return clearInterval(tick);
     updateChatSend();
+    if (Date.now() - swept > 30_000) {
+      swept = Date.now();
+      pruneChat(Date.now() - CHAT_TTL_MS);
+    }
   }, 400);
   updateChatSend();
 }
@@ -1644,13 +1740,48 @@ function onChatMessage(m: DuelMsg): void {
     case 'chat_hist':
       chat.msgs = m.msgs;
       chat.online = m.users;
+      chat.blocked = new Set(m.blocked);
+      chat.mutedUntil = m.muted > 0 ? Date.now() + m.muted * 1000 : 0;
       for (const x of m.msgs) remember(x.user);
       for (const u of m.users) remember(u);
       chat.cdUntil = Date.now() + m.wait * 1000;
-      chatStatus('');
+      chatStatus(m.muted > 0 ? ru.chat.muted(Math.ceil(m.muted / 60)) : '', 0);
       renderChatList();
       renderChatWho();
+      renderBlockedBtn();
       updateChatSend();
+      break;
+    case 'chat_react': {
+      const msg = chat.msgs.find((x) => x.id === m.id);
+      if (!msg) break;
+      msg.up = m.up;
+      msg.down = m.down;
+      if (m.by === myId()) msg.mine = m.r;
+      updateReactions(msg);
+      break;
+    }
+    case 'chat_purge':
+      pruneChat(m.before);
+      break;
+    case 'chat_report_ok':
+      chatStatus(ru.chat.reportSent, 5000, true);
+      break;
+    case 'chat_blocked': {
+      chat.blocked = new Set(m.blocked);
+      renderBlockedBtn();
+      if (m.id !== null) {
+        const who = chat.known.get(m.id);
+        chat.msgs = chat.msgs.filter((x) => x.user.id !== m.id);
+        chat.online = chat.online.filter((u) => u.id !== m.id);
+        renderChatList();
+        renderChatWho();
+        chatStatus(ru.chat.blockedOk(who?.name || ru.leaders.player), 5000, true);
+      }
+      break;
+    }
+    case 'chat_blocks':
+      chat.blockedList = m.users;
+      if (router.top === 'chatBlocked') router.refresh();
       break;
     case 'chat':
       remember(m.msg.user);
@@ -1673,11 +1804,24 @@ function onChatMessage(m: DuelMsg): void {
       break;
     case 'chat_err': {
       const input = document.getElementById('chatInput') as HTMLInputElement | null;
-      if (input && !input.value) input.value = chat.lastText;
+      // A rejected message goes back into the input so it is not lost.
+      if (input && !input.value && !m.code.startsWith('report_') && !m.code.startsWith('block_')) input.value = chat.lastText;
       if (m.code === 'cooldown') {
         chat.cdUntil = Date.now() + (m.wait ?? 30) * 1000;
         chatStatus(ru.chat.errWait(m.wait ?? 30));
-      } else chatStatus(m.code === 'words' ? ru.chat.errWords : m.code === 'link' ? ru.chat.errLink : ru.chat.errEmpty, 5000);
+      } else if (m.code === 'muted') {
+        chat.mutedUntil = Date.now() + (m.wait ?? 3600) * 1000;
+        chatStatus(ru.chat.muted(Math.ceil((m.wait ?? 3600) / 60)), 0);
+      } else if (m.code.startsWith('report_') || m.code.startsWith('block_')) {
+        const text: Record<string, string> = {
+          report_dup: ru.chat.errReportDup,
+          report_limit: ru.chat.errReportLimit,
+          block_limit: ru.chat.errBlockLimit,
+        };
+        chatStatus(text[m.code] ?? (m.code.startsWith('report_') ? ru.chat.errReportBad : ru.chat.errBlockBad), 5000);
+      } else {
+        chatStatus(m.code === 'words' ? ru.chat.errWords : m.code === 'link' ? ru.chat.errLink : ru.chat.errEmpty, 5000);
+      }
       updateChatSend();
       break;
     }

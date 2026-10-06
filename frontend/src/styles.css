@@ -3462,6 +3462,147 @@ body.reduced .crown-card .crown-big {
 }
 .showcase > .hero-stage .stage-glow {
   display: none;
+
+/* ===== Chat: rules, reactions, complaints, blocked players ===== */
+.screen-head .chat-info {
+  margin-left: auto;
+  background: rgba(255, 255, 255, 0.1);
+  color: #ffd640;
+}
+.chat-blocked-btn {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  height: 32px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--ink);
+  font: 700 12px/1 var(--font);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.chat-blocked-btn:active {
+  transform: scale(0.97);
+}
+.chat-top {
+  flex-wrap: wrap;
+}
+.chat-top .chat-who {
+  flex: 1 1 120px;
+}
+.chat-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+}
+.chat-react {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 40px;
+  height: 30px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--ink-dim);
+  font: 700 13px/1 var(--font);
+  cursor: pointer;
+}
+.chat-react:active:not(:disabled) {
+  transform: scale(0.94);
+}
+.chat-react.on {
+  background: rgba(255, 214, 64, 0.22);
+  color: var(--accent);
+}
+.chat-react.static {
+  cursor: default;
+  opacity: 0.85;
+}
+.chat-react.flag {
+  margin-left: auto;
+  min-width: 34px;
+  padding: 0 8px;
+  background: transparent;
+  opacity: 0.7;
+}
+.chat-react span:empty {
+  display: none;
+}
+.chat-status.ok {
+  color: #6ee79a;
+}
+.card-moderation {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+.panel .card-moderation .secondary {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+  margin-top: 0;
+  height: 44px;
+  padding: 0 6px;
+  font-size: 14px;
+  color: #ffb4bb;
+}
+.panel > button.reason {
+  margin-top: 8px;
+  font-size: 16px;
+}
+.panel .report-note {
+  margin: 14px 0 0;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--ink-dim);
+}
+.blocked-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 2px 0 8px;
+}
+.blocked-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.06);
+}
+.blocked-row .chat-ava {
+  cursor: default;
+}
+.blocked-name {
+  flex: 1;
+  min-width: 0;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.blocked-row button.secondary {
+  flex: none;
+  width: auto;
+  height: 38px;
+  margin: 0;
+  padding: 0 12px;
+  font-size: 14px;
+}
+.blocked-list .empty {
+  margin: 24px 0;
+  text-align: center;
+  color: var(--ink-dim);
 }
 
 /* Only the hero's figure is clickable (an invisible button over him); the rest of the scene is not. */
@@ -3525,381 +3666,4 @@ body.is-fs .fs-btn .fs-out {
   -webkit-tap-highlight-color: transparent;
   -webkit-user-select: none;
   user-select: none;
-}
-
-/* ===================== Wardrobe v2 ===================== */
-.wardrobe {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding-bottom: 24px;
-}
-
-/* Hero in his alley, framed like a display window */
-.ward-hero {
-  position: relative;
-  flex: none;
-  border-radius: 20px;
-  overflow: hidden;
-  background: #151a24;
-  box-shadow:
-    0 0 0 1.5px rgba(255, 214, 64, 0.55),
-    0 0 0 4px rgba(255, 214, 64, 0.12),
-    0 14px 30px rgba(0, 0, 0, 0.45);
-}
-.ward-hero .ward-stage {
-  height: min(52vh, 330px);
-  min-height: 250px;
-}
-.ward-hero::after {
-  /* soft vignette and a glass reflection */
-  content: '';
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  background:
-    linear-gradient(115deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0) 32%),
-    radial-gradient(ellipse at center, rgba(0, 0, 0, 0) 55%, rgba(0, 0, 0, 0.4));
-}
-
-.ward-ring {
-  --p: 0;
-  position: absolute;
-  left: 10px;
-  top: 10px;
-  z-index: 2;
-  display: grid;
-  place-items: center;
-  width: 62px;
-  height: 62px;
-  border-radius: 50%;
-  background:
-    conic-gradient(#ffd640 calc(var(--p) * 360deg), rgba(255, 255, 255, 0.16) 0);
-  box-shadow: 0 0 14px rgba(255, 200, 60, 0.35);
-}
-.ward-ring::before {
-  content: '';
-  position: absolute;
-  inset: 5px;
-  border-radius: 50%;
-  background: rgba(12, 16, 26, 0.9);
-}
-.ward-ring span {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  line-height: 1;
-}
-.ward-ring b {
-  font-size: 20px;
-  font-weight: 800;
-  color: #ffd640;
-}
-.ward-ring small {
-  margin-top: 2px;
-  font-size: 9px;
-  color: rgba(255, 255, 255, 0.7);
-}
-
-.ward-bonus {
-  position: absolute;
-  right: 10px;
-  top: 12px;
-  z-index: 2;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  padding: 7px 12px 6px;
-  border-radius: 14px;
-  line-height: 1.1;
-  background: linear-gradient(160deg, rgba(255, 214, 64, 0.95), rgba(242, 160, 40, 0.95));
-  color: #2a1c00;
-  box-shadow: 0 4px 0 rgba(0, 0, 0, 0.28);
-}
-.ward-bonus b {
-  font-size: 19px;
-  font-weight: 800;
-}
-.ward-bonus small {
-  font-size: 9.5px;
-  font-weight: 700;
-  opacity: 0.8;
-}
-.ward-bonus.zero {
-  background: rgba(14, 18, 26, 0.7);
-  color: rgba(255, 255, 255, 0.75);
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.14);
-}
-
-.ward-plate {
-  position: absolute;
-  left: 50%;
-  bottom: 10px;
-  z-index: 2;
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  max-width: calc(100% - 28px);
-  padding: 6px 14px;
-  border-radius: 999px;
-  transform: translateX(-50%);
-  background: rgba(10, 13, 22, 0.72);
-  -webkit-backdrop-filter: blur(6px);
-  backdrop-filter: blur(6px);
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.16);
-  white-space: nowrap;
-}
-.ward-plate b {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  font-size: 15px;
-}
-.ward-plate small {
-  padding: 2px 7px;
-  border-radius: 999px;
-  font-size: 10px;
-  font-weight: 800;
-  color: #2a1c00;
-  background: #ffd640;
-}
-.ward-plate .wp-crown {
-  display: block;
-  width: 22px;
-  height: 16px;
-  filter: drop-shadow(0 0 5px rgba(255, 200, 60, 0.9));
-}
-.ward-plate .wp-crown svg {
-  position: static;
-  display: block;
-  width: 100%;
-  height: 100%;
-  margin: 0;
-  animation: none;
-}
-
-/* Collection progress */
-.ward-card {
-  flex: none;
-  padding: 11px 13px 12px;
-  border-radius: 16px;
-  background:
-    linear-gradient(135deg, rgba(255, 214, 64, 0.14), rgba(255, 214, 64, 0.03) 70%),
-    rgba(22, 28, 40, 0.9);
-  box-shadow: inset 0 0 0 1px rgba(255, 214, 64, 0.28);
-}
-.ward-prog-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  font-size: 16px;
-}
-.ward-prog-head span {
-  font-size: 14px;
-  font-weight: 800;
-  color: #ffd640;
-}
-.ward-card .bonus-bar {
-  height: 10px;
-  margin: 8px 0;
-  border-radius: 5px;
-  background: rgba(255, 255, 255, 0.1);
-  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.4);
-}
-.ward-card .bonus-bar i {
-  border-radius: 5px;
-  background: linear-gradient(90deg, #f2a62d, #ffd640 60%, #fff0a0);
-  box-shadow: 0 0 10px rgba(255, 200, 60, 0.6);
-}
-.ward-card .muted {
-  margin: 0;
-  font-size: 12px;
-  line-height: 1.35;
-}
-
-/* Section titles */
-.ward-sec {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 6px;
-}
-.ward-sec::after {
-  content: '';
-  flex: 1;
-  order: 1;
-  height: 1px;
-  background: linear-gradient(90deg, rgba(255, 255, 255, 0.22), rgba(255, 255, 255, 0));
-}
-.ward-sec .pill {
-  order: 2;
-}
-.wardrobe .ward-sec h3 {
-  margin: 0;
-  font-size: 16px;
-  font-weight: 800;
-}
-.pill {
-  padding: 3px 9px;
-  border-radius: 999px;
-  font-size: 12px;
-  font-weight: 800;
-  color: #2a1c00;
-  background: #ffd640;
-}
-.ward-how {
-  margin: -4px 0 0;
-  font-size: 12px;
-  line-height: 1.35;
-}
-
-/* Stats: six colored tiles, three per row */
-.ward-stats {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 8px;
-  margin: 0;
-}
-.ward-stats .ws {
-  --c: #ffd640;
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 1px;
-  padding: 9px 9px 8px;
-  border-radius: 14px;
-  overflow: hidden;
-  background:
-    linear-gradient(160deg, color-mix(in srgb, var(--c) 24%, transparent), rgba(255, 255, 255, 0.02) 75%),
-    rgba(20, 26, 38, 0.92);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--c) 40%, transparent);
-}
-.ws.gold { --c: #ffd640; }
-.ws.blue { --c: #5aa8ff; }
-.ws.violet { --c: #b58bff; }
-.ws.green { --c: #45d58a; }
-.ws.orange { --c: #ff9a3d; }
-.ws.pink { --c: #ff6f96; }
-.ws i {
-  display: grid;
-  place-items: center;
-  width: 24px;
-  height: 24px;
-  margin-bottom: 4px;
-  border-radius: 8px;
-  color: var(--c);
-  background: color-mix(in srgb, var(--c) 18%, rgba(0, 0, 0, 0.3));
-}
-.ws i svg {
-  width: 15px;
-  height: 15px;
-}
-.ward-stats .ws dd {
-  order: 1;
-  margin: 0;
-  font-size: 20px;
-  font-weight: 800;
-  line-height: 1.05;
-  font-variant-numeric: tabular-nums;
-}
-.ward-stats .ws dt {
-  order: 2;
-  font-size: 10.5px;
-  line-height: 1.2;
-  color: rgba(255, 255, 255, 0.62);
-}
-
-/* Collection: item cards with a number, a lock or a check */
-.wardrobe .looks {
-  grid-template-columns: repeat(3, 1fr);
-  gap: 8px;
-  padding-bottom: 6px;
-}
-.wardrobe .look {
-  position: relative;
-  overflow: hidden;
-  padding: 18px 6px 9px;
-  border-radius: 15px;
-  background: rgba(22, 28, 40, 0.9);
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
-}
-.wardrobe .look.owned {
-  background:
-    radial-gradient(circle at 50% 38%, rgba(255, 214, 64, 0.26), rgba(255, 214, 64, 0) 70%),
-    rgba(26, 31, 44, 0.95);
-  box-shadow:
-    inset 0 0 0 1.5px rgba(255, 214, 64, 0.65),
-    0 0 14px rgba(255, 200, 60, 0.18);
-}
-.wardrobe .look.owned::after {
-  /* a shine that passes now and then */
-  content: '';
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  width: 40%;
-  left: -60%;
-  background: linear-gradient(100deg, transparent, rgba(255, 255, 255, 0.22), transparent);
-  animation: lookShine 5s ease-in-out infinite;
-}
-@keyframes lookShine {
-  0%,
-  70% {
-    left: -60%;
-  }
-  100% {
-    left: 130%;
-  }
-}
-body.reduced .wardrobe .look.owned::after {
-  animation: none;
-  display: none;
-}
-.wardrobe .looks.items canvas {
-  height: 64px;
-}
-.look .look-n {
-  position: absolute;
-  left: 8px;
-  top: 6px;
-  font-size: 10px;
-  font-style: normal;
-  font-weight: 800;
-  letter-spacing: 0.04em;
-  color: rgba(255, 255, 255, 0.4);
-}
-.look .look-state {
-  position: absolute;
-  right: 6px;
-  top: 5px;
-  display: grid;
-  place-items: center;
-  width: 17px;
-  height: 17px;
-  margin: 0;
-  border-radius: 50%;
-}
-.look .look-state svg {
-  width: 11px;
-  height: 11px;
-}
-.look.owned .look-state {
-  color: #2a1c00;
-  background: #ffd640;
-}
-.look.locked .look-state {
-  color: rgba(255, 255, 255, 0.6);
-  background: rgba(255, 255, 255, 0.1);
-}
-.look .look-name {
-  display: block;
-  margin-top: 6px;
-  font-size: 11px;
-  font-weight: 700;
-  line-height: 1.25;
-}
-.look.locked .look-name {
-  font-weight: 500;
-  color: rgba(255, 255, 255, 0.5);
 }
