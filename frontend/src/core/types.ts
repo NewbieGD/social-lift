@@ -23,6 +23,8 @@ export interface Platform {
   whiteAge: number;
   /** Collectible item (tier index) lying on this platform, or -1. */
   item: number;
+  /** A cosmetic offered by the server for this run lies on the platform. */
+  drop?: boolean;
 }
 
 export interface Hero {
@@ -61,6 +63,7 @@ export type SimEvent =
   | { type: 'close'; x: number; y: number }
   | { type: 'pickup'; item: number; x: number; y: number }
   | { type: 'itemSpawn'; item: number }
+  | { type: 'dropPickup'; x: number; y: number }
   | { type: 'wall'; x: number; y: number; side: number }
   /** Tutorial only: a mistake was forgiven (the hero was put back, or the shield switched on). */
   | { type: 'rescue'; reason: 'fall' | 'red' };

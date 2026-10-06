@@ -3,6 +3,8 @@
 // No filters or shadowBlur: shading is done with gradients.
 
 import { bodyGradient, edge, fist3d, hand3d, limb3d, spec, tone, torch3d } from './shade3d';
+import { armColor, armScale, drawStyleArm, drawStyleBack, drawStyleFoot, drawStyleHead, drawStyleLeg, drawStyleTorso, handColor, legColors as styleLegColors, skinFor, torsoColor } from './styleArt';
+import { wornStyles, type StyleLoadout, type WornStyles } from './styles';
 
 export type Face = 'normal' | 'grin' | 'scared' | 'squint';
 export type Gesture = 'none' | 'scratch' | 'pocket' | 'tie' | 'wave';
@@ -41,6 +43,8 @@ export interface HeroPose {
   vx?: number;
   /** Dead: limbs flail, scared face. */
   dead?: boolean;
+  /** Worn cosmetic styles {slot: styleId}. They take priority over bonus items in their slots. */
+  styles?: StyleLoadout;
 }
 
 export function outfitFor(tier: number): Outfit {
@@ -418,10 +422,15 @@ function torsoShape(ctx: CanvasRenderingContext2D, len: number): void {
   ctx.closePath();
 }
 
-function drawFoot(ctx: CanvasRenderingContext2D, at: P, r: number, o: Outfit, back: boolean): void {
+function drawFoot(ctx: CanvasRenderingContext2D, at: P, r: number, o: Outfit, back: boolean, w?: WornStyles): void {
   ctx.save();
   ctx.translate(at.x, at.y + 1.2);
   ctx.rotate(r);
+  if (w?.boots) {
+    drawStyleFoot(ctx, w.boots, 'side', back);
+    ctx.restore();
+    return;
+  }
   const dark = back ? 0.12 : 0;
   if (o.suit) {
     ctx.fillStyle = shade('#C9D2DD', dark);
@@ -498,18 +507,24 @@ function drawTorch(ctx: CanvasRenderingContext2D, o: Outfit, light: string): num
 }
 
 /** Draws the head, hair, face and head-worn items in the head frame. */
-function drawHead(ctx: CanvasRenderingContext2D, rig: Rig, o: Outfit, tier: number): void {
+function drawHead(ctx: CanvasRenderingContext2D, rig: Rig, o: Outfit, tier: number, w?: WornStyles, t = 0): void {
+  const sk = skinFor(w?.head, SKIN, SKIN_SHADE);
+  const SKIN_H = sk.skin;
+  const SKIN_SHADE_H = sk.shade;
   ctx.save();
   ctx.translate(rig.head.x, rig.head.y);
   ctx.rotate(rig.headTilt);
   const face = rig.face;
 
+  const coversHair = !!w?.head && ['helmet', 'cowl', 'mask', 'brute'].includes(w.head.kind);
   // Back hair mass behind the head.
-  ctx.fillStyle = HAIR;
-  ctx.beginPath();
-  ctx.ellipse(-2.4, -1.5, 9.6, 9.8, 0, 0, Math.PI * 2);
-  ctx.fill();
-  stroke(ctx);
+  if (!coversHair) {
+    ctx.fillStyle = HAIR;
+    ctx.beginPath();
+    ctx.ellipse(-2.4, -1.5, 9.6, 9.8, 0, 0, Math.PI * 2);
+    ctx.fill();
+    stroke(ctx);
+  }
 
   // Head (3/4 view facing right)
   ctx.beginPath();
@@ -520,9 +535,9 @@ function drawHead(ctx: CanvasRenderingContext2D, rig: Rig, o: Outfit, tier: numb
   ctx.bezierCurveTo(-8, 6.8, -8.8, 2.4, -8.6, -2);
   ctx.closePath();
   const headG = ctx.createRadialGradient(3, -5, 1, 1, 0, 13);
-  headG.addColorStop(0, tone(SKIN, 0.38));
-  headG.addColorStop(0.5, SKIN);
-  headG.addColorStop(1, tone(SKIN, -0.2));
+  headG.addColorStop(0, tone(SKIN_H, 0.38));
+  headG.addColorStop(0.5, SKIN_H);
+  headG.addColorStop(1, tone(SKIN_H, -0.2));
   ctx.fillStyle = headG;
   ctx.fill();
   ctx.save();
@@ -540,18 +555,19 @@ function drawHead(ctx: CanvasRenderingContext2D, rig: Rig, o: Outfit, tier: numb
   stroke(ctx);
 
   // Ear
-  ctx.fillStyle = SKIN;
+  ctx.fillStyle = SKIN_H;
   ctx.beginPath();
   ctx.ellipse(-5.6, 1.4, 2.1, 2.8, 0.1, 0, Math.PI * 2);
   ctx.fill();
   stroke(ctx);
-  ctx.strokeStyle = SKIN_SHADE;
+  ctx.strokeStyle = SKIN_SHADE_H;
   ctx.lineWidth = 0.9;
   ctx.beginPath();
   ctx.arc(-5.4, 1.5, 1.1, -1.2, 1.3);
   ctx.stroke();
 
   // Fringe with a tuft that lags behind the motion.
+  if (!coversHair) {
   ctx.fillStyle = HAIR;
   ctx.beginPath();
   ctx.moveTo(-8.8, -1);
@@ -564,8 +580,9 @@ function drawHead(ctx: CanvasRenderingContext2D, rig: Rig, o: Outfit, tier: numb
   ctx.closePath();
   ctx.fill();
   stroke(ctx);
+  }
   const tuft = -rig.look.y * 1.4;
-  if (!(o.cap || o.suit)) {
+  if (!(o.cap || o.suit || w?.head)) {
   ctx.beginPath();
   ctx.moveTo(-1.5, -10.6);
   ctx.quadraticCurveTo(-2.4, -15.4 + tuft, 3.4, -14.6 + tuft);
@@ -602,7 +619,7 @@ function drawHead(ctx: CanvasRenderingContext2D, rig: Rig, o: Outfit, tier: numb
     ctx.arc(cx + rig.look.x * rx * 0.45 + pr * 0.35, -1 + rig.look.y * ry * 0.35 - pr * 0.4, pr * 0.32, 0, Math.PI * 2);
     ctx.fill();
     if (lid > 0) {
-      ctx.fillStyle = SKIN;
+      ctx.fillStyle = SKIN_H;
       ctx.fillRect(cx - rx - 1, -1 - ry - 1, rx * 2 + 2, (ry * 2 + 1) * lid + 0.5);
       ctx.strokeStyle = LINE;
       ctx.lineWidth = 1;
@@ -649,7 +666,7 @@ function drawHead(ctx: CanvasRenderingContext2D, rig: Rig, o: Outfit, tier: numb
   ctx.stroke();
 
   // Nose: a small rounded bump on the profile edge.
-  ctx.fillStyle = SKIN;
+  ctx.fillStyle = SKIN_H;
   ctx.beginPath();
   ctx.ellipse(10.4, 1.9, 1.7, 1.4, 0, 0, Math.PI * 2);
   ctx.fill();
@@ -691,7 +708,7 @@ function drawHead(ctx: CanvasRenderingContext2D, rig: Rig, o: Outfit, tier: numb
   }
 
   // Head-worn items follow the head transform.
-  if (o.luxury && !o.suit && !scared) {
+  if (!w?.head && o.luxury && !o.suit && !scared) {
     ctx.fillStyle = '#121214';
     rr(ctx, 0, -3.4, 4.8, 3.6, 1.6);
     ctx.fill();
@@ -701,8 +718,9 @@ function drawHead(ctx: CanvasRenderingContext2D, rig: Rig, o: Outfit, tier: numb
     ctx.fillStyle = 'rgba(255,255,255,0.4)';
     ctx.fillRect(6, -3, 2.2, 0.8);
   }
-  if (o.cap && !o.suit) drawCapShape(ctx);
-  if (o.suit) {
+  if (!w?.head && o.cap && !o.suit) drawCapShape(ctx);
+  if (w?.head) drawStyleHead(ctx, w.head, 'side', t);
+  if (!w?.head && o.suit) {
     ctx.strokeStyle = 'rgba(220,235,255,0.95)';
     ctx.lineWidth = 2;
     ctx.fillStyle = 'rgba(160,210,255,0.16)';
@@ -773,8 +791,31 @@ function drawCapShape(ctx: CanvasRenderingContext2D): void {
 }
 
 /** Draws the torso with its clothing in the torso frame. */
-function drawTorso(ctx: CanvasRenderingContext2D, rig: Rig, o: Outfit, t: number): void {
+function drawTorso(ctx: CanvasRenderingContext2D, rig: Rig, o: Outfit, t: number, w?: WornStyles): void {
   const len = rig.torsoLen;
+  if (w?.torso) {
+    // A worn top replaces the base shirt, jacket, tie and the rest of this slot.
+    ctx.save();
+    ctx.translate(rig.hip.x, rig.hip.y);
+    ctx.rotate(rig.lean);
+    const col = torsoColor(w.torso);
+    torsoShape(ctx, len);
+    ctx.fillStyle = bodyGradient(ctx, col, -9, 9);
+    ctx.fill();
+    ctx.save();
+    ctx.clip();
+    ctx.fillStyle = 'rgba(0,0,0,0.12)';
+    ctx.beginPath();
+    ctx.ellipse(-8.5, -len / 2, 4.5, len, 0, 0, Math.PI * 2);
+    ctx.fill();
+    drawStyleTorso(ctx, w.torso, len, 8.5, 'side');
+    ctx.restore();
+    torsoShape(ctx, len);
+    edge(ctx, col);
+    ctx.restore();
+    void t;
+    return;
+  }
   const jacket = o.top === 'jacket' && !o.suit;
   const jacketC = o.luxury ? '#1B1D27' : '#24315C';
   ctx.save();
@@ -902,7 +943,14 @@ function legColors(o: Outfit): { thigh: string; shin: string } {
   return { thigh: pants, shin: o.legs === 'shorts' && !o.suit ? SKIN : pants };
 }
 
-function drawLeg(ctx: CanvasRenderingContext2D, l: Limb3, o: Outfit, back: boolean): void {
+function drawLeg(ctx: CanvasRenderingContext2D, l: Limb3, o: Outfit, back: boolean, w?: WornStyles): void {
+  if (w?.legs) {
+    const c = styleLegColors(w.legs);
+    const kk = back ? 0.12 : 0;
+    drawLimb(ctx, l, [7.6, 6.2, 5.2], shade(c.thigh, kk), shade(c.shin, kk));
+    drawStyleLeg(ctx, w.legs, l, back);
+    return;
+  }
   const { thigh, shin } = legColors(o);
   const k = back ? 0.12 : 0;
   drawLimb(ctx, l, [7.6, 6.2, 5.2], shade(thigh, k), shade(shin, k));
@@ -933,7 +981,22 @@ function drawLeg(ctx: CanvasRenderingContext2D, l: Limb3, o: Outfit, back: boole
   }
 }
 
-function drawArm(ctx: CanvasRenderingContext2D, l: Limb3, o: Outfit, back: boolean): void {
+function drawArm(ctx: CanvasRenderingContext2D, l: Limb3, o: Outfit, back: boolean, w?: WornStyles): void {
+  if (w?.arms) {
+    const sc = armScale(w.arms);
+    const kk = back ? 0.14 : 0;
+    const col = shade(armColor(w.arms), kk);
+    drawLimb(ctx, l, [5.8 * sc, 4.8 * sc, 4.1 * sc], col, col);
+    drawStyleArm(ctx, w.arms, l, back);
+    return;
+  }
+  if (w?.torso && ['hoodie', 'tunic', 'suit', 'wraps', 'web'].includes(w.torso.kind)) {
+    // Sleeves of the worn top, when the arms have no style of their own.
+    const kk = back ? 0.14 : 0;
+    const col = shade(torsoColor(w.torso), kk);
+    drawLimb(ctx, l, [5.8, 4.8, 4.1], col, col);
+    return;
+  }
   const jacket = o.top === 'jacket' && !o.suit;
   const sleeve = o.suit ? '#E9EEF5' : jacket ? (o.luxury ? '#1B1D27' : '#24315C') : o.top === 'shirt' ? '#BCD5EE' : SKIN;
   const k = back ? 0.14 : 0;
@@ -957,7 +1020,9 @@ function drawArm(ctx: CanvasRenderingContext2D, l: Limb3, o: Outfit, back: boole
 export function drawHeroBody(ctx: CanvasRenderingContext2D, pose: HeroPose, given?: Rig): Rig {
   const o: Outfit = { ...(pose.outfit ?? outfitFor(pose.tier)), ...(pose.extra ?? {}) };
   const rig = given ?? heroRig(pose);
-  const skin = o.suit ? '#E9EEF5' : SKIN;
+  const w = wornStyles(pose.styles);
+  const skin = o.suit && !w.arms ? '#E9EEF5' : SKIN;
+  const handSkin = handColor(w.arms, skin);
   const t = pose.time;
 
   if (!pose.noBeam) {
@@ -979,9 +1044,18 @@ export function drawHeroBody(ctx: CanvasRenderingContext2D, pose: HeroPose, give
     ctx.restore();
   }
 
+  if (w.torso && (w.torso.kind === 'tunic' || w.torso.kind === 'suit' || w.torso.kind === 'wraps')) {
+    // Capes and the shell hang behind the whole body.
+    ctx.save();
+    ctx.translate(rig.hip.x, rig.hip.y);
+    ctx.rotate(rig.lean);
+    drawStyleBack(ctx, w.torso, rig.torsoLen, 8.5, 'side', t + (pose.vx ?? 0) * 0.002);
+    ctx.restore();
+  }
+
   const otherLayer = rig.gesture === 'scratch' ? 'head' : rig.gesture === 'tie' ? 'chest' : 'behind';
   const drawBackArm = (): void => {
-    drawArm(ctx, rig.backArm, o, otherLayer === 'behind');
+    drawArm(ctx, rig.backArm, o, otherLayer === 'behind', w);
     if (rig.gesture === 'pocket') return;
     if (o.phone && rig.gesture === 'none') {
       ctx.save();
@@ -997,27 +1071,28 @@ export function drawHeroBody(ctx: CanvasRenderingContext2D, pose: HeroPose, give
       ctx.save();
       ctx.translate(rig.backHeld.x, rig.backHeld.y);
       ctx.rotate(rig.backHeld.rot);
-      drawGrip(ctx, shade(skin, 0.1));
+      drawGrip(ctx, shade(handSkin, 0.1));
       ctx.restore();
     } else {
-      drawOpenHand(ctx, rig.backArm, otherLayer === 'behind' ? shade(skin, 0.1) : skin);
+      drawOpenHand(ctx, rig.backArm, otherLayer === 'behind' ? shade(handSkin, 0.1) : handSkin);
     }
   };
 
   if (otherLayer === 'behind') drawBackArm();
-  drawLeg(ctx, rig.backLeg, o, true);
-  drawFoot(ctx, rig.backLeg[2], rig.backFootRot, o, true);
-  drawTorso(ctx, rig, o, t);
-  drawLeg(ctx, rig.frontLeg, o, false);
-  drawFoot(ctx, rig.frontLeg[2], rig.frontFootRot, o, false);
+  drawLeg(ctx, rig.backLeg, o, true, w);
+  drawFoot(ctx, rig.backLeg[2], rig.backFootRot, o, true, w);
+  drawTorso(ctx, rig, o, t, w);
+  drawLeg(ctx, rig.frontLeg, o, false, w);
+  drawFoot(ctx, rig.frontLeg[2], rig.frontFootRot, o, false, w);
 
   // Waistband over both hip joints.
   {
-    const { thigh } = legColors(o);
+    const { thigh } = w.legs ? styleLegColors(w.legs) : legColors(o);
     ctx.save();
     ctx.translate(rig.hip.x, rig.hip.y);
     ctx.rotate(rig.lean);
-    ctx.fillStyle = o.suit ? '#E9EEF5' : o.top === 'jacket' ? (o.luxury ? '#1B1D27' : '#24315C') : thigh;
+    const styledBand = w.legs ? thigh : w.torso ? tone(torsoColor(w.torso), -0.2) : undefined;
+    ctx.fillStyle = styledBand ?? (o.suit ? '#E9EEF5' : o.top === 'jacket' ? (o.luxury ? '#1B1D27' : '#24315C') : thigh);
     ctx.beginPath();
     ctx.moveTo(-6.8, -3.2);
     ctx.quadraticCurveTo(0, -4.4, 7, -3.2);
@@ -1026,7 +1101,7 @@ export function drawHeroBody(ctx: CanvasRenderingContext2D, pose: HeroPose, give
     ctx.closePath();
     ctx.fill();
     stroke(ctx);
-    if (o.legs === 'trousers' && o.top !== 'jacket' && !o.suit) {
+    if (!styledBand && o.legs === 'trousers' && o.top !== 'jacket' && !o.suit) {
       ctx.fillStyle = '#5A3E2A';
       ctx.fillRect(-6.6, -3, 13.6, 1.6);
     }
@@ -1036,18 +1111,18 @@ export function drawHeroBody(ctx: CanvasRenderingContext2D, pose: HeroPose, give
   if (otherLayer === 'chest') drawBackArm();
 
   // Neck
-  ctx.fillStyle = skin;
+  ctx.fillStyle = skinFor(w.head, skin, skin).skin;
   const nk = rig.points.neck;
   capsule(ctx, { x: nk.x - 0.4, y: nk.y + 3 }, { x: rig.head.x - 1.4, y: rig.head.y + 7 }, 5.2, 4.8);
   ctx.fill();
   stroke(ctx, 1);
 
-  drawHead(ctx, rig, o, pose.tier);
+  drawHead(ctx, rig, o, pose.tier, w, t);
   if (otherLayer === 'head') drawBackArm();
 
   // Front arm, then the flashlight in the hand, then the fingers over it.
-  drawArm(ctx, rig.frontArm, o, false);
-  if (o.watch) {
+  drawArm(ctx, rig.frontArm, o, false, w);
+  if (o.watch && !w.arms) {
     const w = rig.points.wrist;
     const a = Math.atan2(rig.frontArm[2].y - rig.frontArm[1].y, rig.frontArm[2].x - rig.frontArm[1].x);
     ctx.save();
@@ -1063,7 +1138,7 @@ export function drawHeroBody(ctx: CanvasRenderingContext2D, pose: HeroPose, give
   ctx.translate(rig.held.x, rig.held.y);
   ctx.rotate(rig.held.rot);
   drawTorch(ctx, o, pose.light);
-  drawGrip(ctx, skin);
+  drawGrip(ctx, handSkin);
   ctx.restore();
   void t;
   return rig;

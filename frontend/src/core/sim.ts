@@ -56,6 +56,13 @@ export class Sim {
   private gen: Generator;
   private phaseRng: Rng;
   private itemRng: Rng;
+  /** A cosmetic offered by the server for this run: it lies on one platform after a while. */
+  private dropEnabled: boolean;
+  private dropRng: Rng;
+  private dropAt: number;
+  private dropPlaced = false;
+  /** The offered cosmetic was picked up (reported when the run finishes). */
+  dropFound = false;
 
   /** Items worn in this run (bit = tier of the item). Every run starts from zero. */
   owned = 0;
@@ -74,12 +81,15 @@ export class Sim {
   constructor(
     seed: number,
     viewH: number,
-    opts: { tutorial?: boolean; items?: boolean } = {},
+    opts: { tutorial?: boolean; items?: boolean; drop?: boolean } = {},
   ) {
     this.seed = seed >>> 0;
     this.tutorial = !!opts.tutorial;
     this.itemsEnabled = !!opts.items && !this.tutorial;
     this.itemRng = new Rng(this.seed ^ 0x5bd1e995);
+    this.dropEnabled = !!opts.drop && !this.tutorial;
+    this.dropRng = new Rng(this.seed ^ 0x2f0e1d3c);
+    this.dropAt = 12 + this.dropRng.next() * 28;
     this.viewH = viewH;
     const W = gameConfig.world.width;
     const genRng = new Rng(this.seed);
@@ -159,6 +169,7 @@ export class Sim {
     this.checkDeath();
     this.fillPlatforms();
     this.placeItem();
+    this.placeDrop();
     this.cullPlatforms();
 
     this.time += DT;
@@ -279,6 +290,11 @@ export class Sim {
       this.picked |= 1 << item;
       this.events.push({ type: 'pickup', item, x: best.x, y: best.y });
     }
+    if (best.drop) {
+      best.drop = false;
+      this.dropFound = true;
+      this.events.push({ type: 'dropPickup', x: best.x, y: best.y });
+    }
     this.evaluateLanding(best);
   }
 
@@ -370,6 +386,21 @@ export class Sim {
     }
     if (!best) return;
     best.item = this.pendingItems.shift()!;
+  }
+
+  /** Puts the offered cosmetic on a calm colored platform just above the screen, once. */
+  private placeDrop(): void {
+    if (!this.dropEnabled || this.dropPlaced || !this.runStarted || this.runTime < this.dropAt) return;
+    const lo = this.camY + this.viewH * 0.8;
+    const hi = this.camY + this.viewH + 160;
+    let best: Platform | null = null;
+    for (const p of this.platforms) {
+      if (p.kind !== 'color' || p.phases || p.item >= 0 || p.y < lo || p.y > hi) continue;
+      if (!best || p.y < best.y) best = p;
+    }
+    if (!best) return;
+    best.drop = true;
+    this.dropPlaced = true;
   }
 
   private updateCombo(): void {

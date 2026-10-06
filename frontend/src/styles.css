@@ -4468,3 +4468,168 @@ body.reduced .rh-ico, body.reduced .rh-orb, body.reduced .quick, body.reduced .r
 body.reduced .buff.pop {
   animation: none;
 }
+
+/* ===== Styles (cosmetics) ===== */
+.grid2 .styles-tile {
+  grid-column: 1 / -1;
+  justify-content: center;
+  background: linear-gradient(90deg, rgba(88, 52, 140, 0.95), rgba(58, 60, 140, 0.95));
+}
+.new-styles {
+  margin: 0 0 6px;
+  text-align: center;
+  font-weight: 800;
+  font-size: 13px;
+  color: #d8c4ff;
+}
+.new-styles:empty {
+  display: none;
+}
+
+.styles-screen {
+  padding-bottom: 28px;
+}
+.styles-top {
+  display: grid;
+  grid-template-columns: minmax(120px, 0.9fr) 1.1fr;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+.styles-stage {
+  position: relative;
+  height: 230px;
+}
+.styles-stage canvas {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.slot-chips {
+  display: grid;
+  gap: 6px;
+}
+.slot-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 38px;
+  padding: 0 10px 0 6px;
+  border: 0;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--ink);
+  font: 700 13px/1 var(--font);
+  text-align: left;
+}
+.slot-chip.on {
+  background: rgba(181, 140, 255, 0.18);
+  box-shadow: inset 0 0 0 1.5px rgba(181, 140, 255, 0.55);
+  cursor: pointer;
+}
+.slot-chip:disabled {
+  opacity: 0.7;
+}
+.slot-chip canvas,
+.slot-empty {
+  flex: none;
+  width: 28px;
+  height: 28px;
+}
+.slot-empty {
+  border-radius: 8px;
+  border: 1.5px dashed rgba(255, 255, 255, 0.25);
+}
+.style-set {
+  margin-top: 14px;
+}
+.set-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.set-head h3 {
+  margin: 0;
+  flex: 1;
+  font-size: 15px;
+}
+.set-count {
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--ink-dim);
+}
+.mini-btn {
+  height: 28px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 9px;
+  background: rgba(181, 140, 255, 0.25);
+  color: #fff;
+  font: 700 12px/1 var(--font);
+  cursor: pointer;
+}
+.style-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(92px, 1fr));
+  gap: 8px;
+}
+.style-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  padding: 8px 6px 9px;
+  border: 0;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--ink);
+  text-align: center;
+  font-family: var(--font);
+}
+.style-card.owned {
+  cursor: pointer;
+  box-shadow: inset 0 0 0 1.5px rgba(255, 255, 255, 0.14);
+}
+.style-card.worn {
+  background: rgba(181, 140, 255, 0.2);
+  box-shadow: inset 0 0 0 2px rgba(181, 140, 255, 0.8);
+}
+.style-card canvas {
+  width: 56px;
+  height: 56px;
+}
+.style-card b {
+  font-size: 12px;
+  line-height: 1.2;
+}
+.style-card span {
+  font-size: 10.5px;
+  line-height: 1.25;
+  color: var(--ink-dim);
+}
+.style-card.locked {
+  opacity: 0.85;
+}
+.style-card .tick {
+  position: absolute;
+  top: 5px;
+  right: 6px;
+  font-style: normal;
+  font-size: 13px;
+  font-weight: 900;
+  color: #d8c4ff;
+}
+
+/* Short screens: the menu buttons get a little lower so the hero keeps room. */
+@media (max-height: 640px) {
+  .menu-actions .tile {
+    height: 40px;
+  }
+  .menu-actions .grid2 {
+    gap: 6px;
+    margin-top: 6px;
+  }
+}

@@ -3,6 +3,8 @@ import type { Sim } from '../core/sim';
 import type { Platform, SimEvent } from '../core/types';
 import { ru } from '../i18n/ru';
 import { isBuffOnly, type Slot } from './slots';
+import { tone } from './shade3d';
+import type { StyleLoadout } from './styles';
 import { drawHeroBody, drawItem, heroRig, ITEM_ANCHOR, ITEM_BY_TIER, outfitFromMask, type AttachPoint, type Face, type Gesture, type HeroPose, type Item, type Rig } from './hero';
 import { palette } from './palette';
 import { CROWN_LIFT_SIDE, crownBob, drawCrown } from './crown';
@@ -218,6 +220,12 @@ export class Renderer {
   ownedMask = 0;
   /** Slots taken by worn styles: bonus items for them become buff icons instead of being worn. */
   occupied: ReadonlySet<Slot> = new Set();
+  /** Cosmetic styles worn by the hero (drawn on it). */
+  styles: StyleLoadout = {};
+  /** Color of the cosmetic offered in this run (the box on the platform glows in it). */
+  dropColor = '#FFD640';
+  /** The offered cosmetic was picked up. */
+  onDrop: () => void = () => undefined;
   /** A bonus item was collected into a slot held by a style (it counts, but is not drawn). */
   onBuff: (tier: number) => void = () => undefined;
   /** Freeze-frame suit-up movie; when off, clothes change instantly with a glow. */
@@ -340,6 +348,11 @@ export class Renderer {
         this.moneyTier = e.tier;
         this.prewarm(Math.min(e.tier + 1, 12), H);
         this.startStage(e.tier);
+      } else if (e.type === 'dropPickup') {
+        this.onDrop();
+        if (!this.reducedEffects) {
+          for (let i = 0; i < 16; i++) this.sparkles.push({ x: e.x + (Math.random() - 0.5) * 60, y: toScreenY(e.y) + (Math.random() - 0.5) * 30, t: Math.random() * 0.25 });
+        }
       } else if (e.type === 'pickup') {
         if (isBuffOnly(e.item, this.occupied)) {
           // The slot is held by a style: the +5% still counts, only the picture changes.
@@ -572,6 +585,7 @@ export class Renderer {
     for (const p of sim.platforms) {
       this.drawPlatform(p, toY(p.y), sim.time);
       if (p.item >= 0) this.drawPickup(ITEM_BY_TIER[p.item] as Item, p.x, toY(p.y), sim.time);
+      if (p.drop) this.drawDropBox(p.x, toY(p.y), sim.time);
     }
     this.drawSpots(toY, frameDt);
 
@@ -1229,6 +1243,7 @@ export class Renderer {
       face: this.faceFor(sim),
       gesture: this.menuGesture ?? undefined,
       outfit,
+      styles: this.styles,
       noBeam: true,
     };
     const rig = heroRig(pose);
@@ -1572,6 +1587,44 @@ export class Renderer {
   }
 
   /** A clothing item hovering over a platform: touch the platform to put it on early. */
+  /** A gift box in the color of the offered set: touch the platform to take the cosmetic. */
+  private drawDropBox(x: number, sy: number, t: number): void {
+    const ctx = this.ctx;
+    const y = sy - 20 + Math.sin(t * 3.2) * 2.6;
+    const c = this.dropColor;
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    const g = ctx.createRadialGradient(x, y, 0, x, y, 26);
+    g.addColorStop(0, c);
+    g.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.globalAlpha = 0.55 + 0.2 * Math.sin(t * 4);
+    ctx.fillStyle = g;
+    ctx.fillRect(x - 26, y - 26, 52, 52);
+    ctx.restore();
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(Math.sin(t * 2.1) * 0.08);
+    ctx.beginPath();
+    ctx.roundRect(-8.5, -7, 17, 14, 3);
+    const bg = ctx.createLinearGradient(0, -7, 0, 7);
+    bg.addColorStop(0, tone(c, 0.3));
+    bg.addColorStop(1, tone(c, -0.35));
+    ctx.fillStyle = bg;
+    ctx.fill();
+    ctx.strokeStyle = tone(c, -0.6);
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.fillStyle = 'rgba(255,255,255,0.85)';
+    ctx.fillRect(-1.3, -7, 2.6, 14);
+    ctx.fillRect(-8.5, -1.3, 17, 2.6);
+    ctx.fillStyle = '#fff';
+    ctx.font = '700 9px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('?', 0, -2.6);
+    ctx.restore();
+    if (Math.random() < 0.08 && !this.reducedEffects) this.sparkles.push({ x: x + (Math.random() - 0.5) * 26, y: y + (Math.random() - 0.5) * 18, t: 0 });
+  }
+
   private drawPickup(item: Item, x: number, sy: number, t: number): void {
     const ctx = this.ctx;
     const bob = Math.sin(t * 3) * 2.5;

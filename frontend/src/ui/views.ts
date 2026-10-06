@@ -2,7 +2,8 @@
 import { AGE_LABEL } from '../config';
 import { legal, ru, type DocSection } from '../i18n/ru';
 import type { ChatMsg, ChatUser } from '../net/duel';
-import type { FinishResult, Leaderboard, LeaderRow, Stats } from '../net/session';
+import type { CatalogItem, FinishResult, Leaderboard, LeaderRow, ShopState, Stats } from '../net/session';
+import { STYLE_SETS } from '../render/styles';
 import { esc } from './dom';
 import { keyLabel } from '../input/input';
 import type { LightId } from '../core/gameConfig';
@@ -148,6 +149,9 @@ function chip(icon: string, label: string, value: string, i: number, kind = ''):
   return `<div class="chip ${kind}" style="--i:${i}"><span class="chip-ico">${icon}</span><span class="chip-text"><span class="chip-label">${esc(label)}</span><b>${esc(value)}</b></span></div>`;
 }
 
+const STYLES_ICON =
+  '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3l-5 3.5 2.2 3L7 8.4V21h10V8.4l1.8 1.1 2.2-3L16 3c-.6 1.6-2.2 2.6-4 2.6S8.6 4.6 8 3z" fill="#B58CFF"/><path d="M9.5 3.6c.7 1.1 1.5 1.7 2.5 1.7s1.8-.6 2.5-1.7" fill="none" stroke="#fff" stroke-width="1.4" stroke-linecap="round" opacity=".7"/></svg>';
+
 export function menuView(d: MenuData): string {
   const s = d.stats;
   const fresh = !s || (s.total_runs === 0 && !s.best_all);
@@ -180,6 +184,7 @@ export function menuView(d: MenuData): string {
     <div class="menu-actions">
       <button class="primary big play" data-action="play">${ICON.play}<span>${ru.common.play}</span></button>
       <div class="grid2 stagger">
+        <button class="tile accent styles-tile" data-action="open" data-arg="styles">${STYLES_ICON}<span>${ru.menu.styles}</span></button>
         <button class="tile accent duel-tile" data-action="open" data-arg="duels">${ICON.swords}<span>${ru.menu.duels}</span></button>
         <button class="tile accent chat-tile" data-action="open" data-arg="chat">${ICON.chat}<span>${ru.menu.chat}</span></button>
         <button class="tile" data-action="open" data-arg="leaders">${ICON.crown}<span>${ru.menu.leaders}</span></button>
@@ -264,6 +269,70 @@ export function wardrobeView(s: Stats | null, mask: number, who?: { name: string
         })
         .join('')}
     </div>
+  </div>`;
+}
+
+// ---------- Styles ----------
+
+function requirementText(c: CatalogItem | undefined): string {
+  if (!c) return ru.styles.requireNone;
+  if (c.record !== null) return ru.styles.requireRecord(c.record);
+  if (c.duel_streak !== null) return ru.styles.requireStreak(c.duel_streak);
+  if (c.drop) return ru.styles.requireDrop;
+  if (c.price !== null) return ru.styles.requirePrice(c.price);
+  return ru.styles.requireNone;
+}
+
+export function stylesView(shop: ShopState | null): string {
+  if (!shop) {
+    return `${header(ru.styles.title)}<div class="panel flat"><p class="status warn">${ru.duel.offline}</p></div>`;
+  }
+  const owned = new Set(shop.owned);
+  const byId = new Map(shop.catalog.map((c) => [c.id, c]));
+  const worn = (slot: string): string | undefined => (shop.loadout as Record<string, string | undefined>)[slot];
+  const slotChips = (['head', 'torso', 'arms', 'legs', 'feet'] as const)
+    .map((slot) => {
+      const id = worn(slot);
+      return `<button class="slot-chip ${id ? 'on' : ''}" ${id ? `data-action="takeOff" data-arg="${slot}"` : 'disabled'} aria-label="${ru.styles.slots[slot]}">
+        ${id ? `<canvas data-style="${id}" aria-hidden="true"></canvas>` : '<span class="slot-empty"></span>'}
+        <span>${ru.styles.slots[slot]}</span>
+      </button>`;
+    })
+    .join('');
+  const sets = STYLE_SETS.map((set) => {
+    const ids = set.parts.map((slot) => `${set.id}_${slot}`).filter((id) => byId.has(id));
+    const have = ids.filter((id) => owned.has(id));
+    const allWorn = have.length > 0 && have.every((id) => worn(byId.get(id)!.slot) === id);
+    const cards = ids
+      .map((id) => {
+        const c = byId.get(id)!;
+        const isOwned = owned.has(id);
+        const isWorn = worn(c.slot) === id;
+        const note = isOwned ? (isWorn ? ru.styles.worn : ru.styles.wear) : requirementText(c);
+        return `<button class="style-card ${isOwned ? 'owned' : 'locked'} ${isWorn ? 'worn' : ''}" ${isOwned ? `data-action="wearStyle" data-arg="${id}"` : 'disabled'} aria-label="${esc(ru.styles.parts[id])}">
+          <canvas data-style="${id}" data-locked="${isOwned ? '0' : '1'}" aria-hidden="true"></canvas>
+          <b>${esc(ru.styles.parts[id])}</b>
+          <span>${esc(isOwned ? ru.styles.slots[c.slot] + ' · ' + note : note)}</span>
+          ${isWorn ? '<i class="tick" aria-hidden="true">✓</i>' : ''}
+        </button>`;
+      })
+      .join('');
+    return `<section class="style-set">
+      <div class="set-head">
+        <h3>${esc(ru.styles.sets[set.id])}</h3>
+        <span class="set-count">${ru.styles.progress(have.length, ids.length)}</span>
+        ${have.length ? `<button class="mini-btn" data-action="${allWorn ? 'takeOffSet' : 'wearSet'}" data-arg="${set.id}">${allWorn ? ru.styles.takeOffAll : ru.styles.wearSet}</button>` : ''}
+      </div>
+      <div class="style-grid">${cards}</div>
+    </section>`;
+  }).join('');
+  return `${header(ru.styles.title)}<div class="scroll styles-screen">
+    <div class="styles-top">
+      <div class="styles-stage"><span class="stage-glow" aria-hidden="true"></span><canvas id="stylesHero" aria-hidden="true"></canvas></div>
+      <div class="slot-chips">${slotChips}</div>
+    </div>
+    <p class="muted small">${ru.styles.lead}</p>
+    ${sets}
   </div>`;
 }
 
@@ -629,6 +698,7 @@ export function resultView(d: ResultData): string {
     <div class="record ${d.record && d.score > 0 ? '' : 'hidden'}" id="resultRecord">${ru.result.record}</div>
     <p class="rank" id="resultRank"></p>
     <p class="coins-line" id="coinsLine"></p>
+    <p class="new-styles" id="stylesLine"></p>
     ${
       d.duel
         ? `<div class="duel-score" id="duelScore">

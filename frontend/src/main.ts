@@ -21,7 +21,9 @@ import { drawItem, ITEM_BY_TIER, itemCount, outfitFromMask, type Item } from './
 import { fullscreenSupported, onFullscreenChange, toggleFullscreen } from './platform/fullscreen';
 import { drawStageBackdrop, StageWind, stageLayout } from './render/ground';
 import { CROWN_LIFT_FRONT, crownBob, drawCrown } from './render/crown';
-import { occupiedSlots } from './render/slots';
+import { occupiedSlots, splitBonus, type Slot } from './render/slots';
+import { STYLE_SETS, STYLES, type StyleLoadout } from './render/styles';
+import { drawStyleIcon } from './render/styleArt';
 import { drawHeroFront } from './render/heroFront';
 import { Renderer } from './render/renderer';
 import { applyControls } from './ui/controlsLayout';
@@ -359,6 +361,12 @@ function handleUiEvents(events: SimEvent[]): void {
       if (m > lastMult && m >= 2) comboStep(m);
       lastMult = m;
       if (settingsStore.get().vibration) haptic('light');
+    } else if (e.type === 'dropPickup') {
+      // Found a cosmetic: it becomes yours when the run is counted.
+      audio.play('unlock');
+      if (settingsStore.get().vibration) haptic('light');
+      const name = runDrop ? ru.styles.parts[runDrop] : '';
+      toast(`${ru.styles.found(name)}. ${ru.styles.foundHint}`, 3200);
     } else if (e.type === 'land') {
       audio.play('jump', { tier: sim.tier });
     } else if (e.type === 'warn') {
@@ -481,10 +489,25 @@ function startTutorial(): void {
 
 // ---------- Runs ----------
 
-function newSim(seed: number, tutorial = false, items = false): void {
+/** Worn cosmetic styles (from the server; empty outside VK). */
+function heroLoadout(): StyleLoadout {
+  return (session.data?.shop?.loadout ?? {}) as StyleLoadout;
+}
+
+/** The bonus items that are drawn on the hero: those in slots without a worn style. */
+function visibleMask(mask: number): number {
+  return splitBonus(mask, occupiedSlots(heroLoadout())).worn;
+}
+
+/** The cosmetic the server offered for the current run (it may lie on a platform). */
+let runDrop: string | null = null;
+
+function newSim(seed: number, tutorial = false, items = false, drop = false): void {
   renderer.cinematic = duel ? false : settingsStore.get().cinematic;
   // Every run starts with nothing worn; items found along the way count for this run only.
-  sim = new Sim(seed, sim.viewH, { tutorial, items });
+  sim = new Sim(seed, sim.viewH, { tutorial, items, drop });
+  renderer.styles = heroLoadout();
+  renderer.dropColor = (runDrop && STYLES[runDrop]?.palette.main) || '#FFD640';
   renderer.ownedMask = 0;
   // Worn styles keep their slots: bonus items for those slots become buff icons.
   renderer.occupied = occupiedSlots(session.data?.shop?.loadout);
@@ -546,7 +569,8 @@ async function startRun(): Promise<void> {
   if (left > 0) await new Promise((r) => setTimeout(r, left));
   starting = false;
   // Items drop only in runs the server can verify, or locally when playing outside VK.
-  newSim(ticket ? ticket.seed : randomSeed(), false, !!ticket || session.mode === 'outside');
+  runDrop = ticket?.drop ?? null;
+  newSim(ticket ? ticket.seed : randomSeed(), false, !!ticket || session.mode === 'outside', !!runDrop);
   mode = 'run';
   router.clear();
   session.event('run_start');
@@ -684,6 +708,7 @@ function finishRun(): void {
       max_combo: sim.maxCombo,
       input_log: sim.inputLog,
       items: sim.picked,
+      drop_found: sim.dropFound,
     })
     .then((res) => {
       const el = document.getElementById('resultRank');
@@ -696,6 +721,10 @@ function finishRun(): void {
           const bestEl = document.getElementById('resultBest');
           if (bestEl) bestEl.textContent = String(res.best_all);
         }
+      }
+      if (res?.new_items?.length) {
+        const line = document.getElementById('stylesLine');
+        if (line) line.textContent = ru.styles.newStyles(res.new_items.map((id) => ru.styles.parts[id] ?? id).join(', '));
       }
       if (res && res.status === 'finished' && (res.coins_earned ?? 0) > 0) {
         const line = document.getElementById('coinsLine');
@@ -752,7 +781,7 @@ function buildStoryImage(score: number, tier: number, mask: number): string {
   g.save();
   g.translate(540, 1450);
   g.scale(11, 11);
-  drawHeroFront(g, outfitFromMask(mask), 1, 'wave', 'grin');
+  drawHeroFront(g, outfitFromMask(visibleMask(mask)), 1, 'wave', 'grin', heroLoadout());
   g.restore();
   // Place
   g.fillStyle = 'rgba(10,12,18,0.7)';
@@ -781,7 +810,7 @@ function drawCoverHero(c: HTMLCanvasElement, tier: number): void {
   g.scale(dpr, dpr);
   g.translate(36, 92);
   g.scale(1.3, 1.3);
-  drawHeroFront(g, outfitFromMask(renderer.ownedMask), 1, 'hips', 'grin');
+  drawHeroFront(g, outfitFromMask(visibleMask(renderer.ownedMask)), 1, 'hips', 'grin', heroLoadout());
   void tier;
 }
 
@@ -947,11 +976,11 @@ function drawStageHero(c: HTMLCanvasElement, _tier: number, t: number, _silhouet
   g.save();
   g.translate(cx, base);
   g.scale(scale, scale);
-  const outfit = outfitFromMask(mask);
-  drawHeroFront(g, outfit, t, still ? 'hips' : 'idle', !still && t % 6 < 2.2 ? 'grin' : 'normal');
+  const outfit = outfitFromMask(visibleMask(mask));
+  drawHeroFront(g, outfit, t, still ? 'hips' : 'idle', !still && t % 6 < 2.2 ? 'grin' : 'normal', heroLoadout());
   // The weekly leader's crown floats above the head (higher than a cap or a helmet).
   if (hasCrown()) {
-    g.translate(0, -(outfit.suit ? 68 : outfit.cap ? 64 : 61) - CROWN_LIFT_FRONT - crownBob(t));
+    g.translate(0, -(outfit.suit ? 68 : outfit.cap || heroLoadout().head ? 64 : 61) - CROWN_LIFT_FRONT - crownBob(t));
     g.scale(1.15, 1.15);
     drawCrown(g, t, settingsStore.get().reducedFx);
   }
@@ -962,6 +991,71 @@ function drawStageHero(c: HTMLCanvasElement, _tier: number, t: number, _silhouet
 /** The player holds the crown of the weekly leader. */
 function hasCrown(): boolean {
   return !!session.data?.stats.crown;
+}
+
+/** Paints the part icons of the styles screen (parts you do not have yet are dark silhouettes). */
+function drawStyleIcons(root: HTMLElement): void {
+  root.querySelectorAll<HTMLCanvasElement>('canvas[data-style]').forEach((c) => {
+    const d = STYLES[c.dataset.style ?? ''];
+    const g = sizeCanvas(c);
+    if (!d || !g) return;
+    const w = c.clientWidth;
+    const h = c.clientHeight;
+    g.clearRect(0, 0, w, h);
+    g.save();
+    g.translate(w / 2, h / 2);
+    const k = Math.min(w, h) / 44;
+    g.scale(k, k);
+    drawStyleIcon(g, d);
+    g.restore();
+    if (c.dataset.locked === '1') {
+      g.globalCompositeOperation = 'source-atop';
+      g.fillStyle = 'rgba(28,32,44,0.93)';
+      g.fillRect(0, 0, w, h);
+      g.globalCompositeOperation = 'source-over';
+    }
+  });
+}
+
+/** The live preview of the hero in the styles screen. */
+function drawStylesPreview(t: number): void {
+  const c = document.getElementById('stylesHero') as HTMLCanvasElement | null;
+  const g = c ? sizeCanvas(c) : null;
+  if (!c || !g) return;
+  const w = c.clientWidth;
+  const h = c.clientHeight;
+  g.clearRect(0, 0, w, h);
+  const scale = Math.min(w / 58, (h - 8) / 82);
+  g.save();
+  g.translate(w / 2, h - 6 * scale);
+  g.scale(scale, scale);
+  drawHeroFront(g, outfitFromMask(0), t, 'idle', 'normal', heroLoadout());
+  g.restore();
+}
+
+/** Wears (id) or takes off (null) pieces. The screen updates at once; the server confirms. */
+function applyLoadout(change: Partial<Record<Slot, string | null>>): void {
+  const shop = session.data?.shop;
+  if (!shop) return;
+  const next = { ...shop.loadout } as Record<string, string>;
+  for (const [slot, id] of Object.entries(change)) {
+    if (id) next[slot] = id;
+    else delete next[slot];
+  }
+  shop.loadout = next;
+  if (router.top === 'styles') router.refresh();
+  void session.setLoadout(change).then((saved) => {
+    if (saved) return;
+    // The server refused: show what it really has.
+    void session.refreshShop().then(() => router.top === 'styles' && router.refresh());
+  });
+}
+
+function setParts(setId: string): { slot: Slot; id: string }[] {
+  const owned = new Set(session.data?.shop?.owned ?? []);
+  const set = STYLE_SETS.find((s) => s.id === setId);
+  if (!set) return [];
+  return set.parts.filter((slot) => owned.has(`${setId}_${slot}`)).map((slot) => ({ slot, id: `${setId}_${slot}` }));
 }
 
 function drawShowcase(t: number): void {
@@ -1076,6 +1170,11 @@ router.register('consent', {
 router.register('declined', { html: () => V.declinedView(), cls: 'solid' });
 router.register('doc', { html: () => V.docView(docKind), cls: 'solid' });
 router.register('rules', { html: () => V.docView('rules'), cls: 'solid' });
+router.register('styles', {
+  html: () => V.stylesView(session.data?.shop ?? null),
+  cls: 'solid',
+  mount: (root) => requestAnimationFrame(() => drawStyleIcons(root)),
+});
 router.register('wardrobe', {
   html: () =>
     V.wardrobeView(session.data?.stats ?? localStats(), ownedMask(), {
@@ -1359,6 +1458,23 @@ const actions: Record<string, (arg: string, el: HTMLElement) => void> = {
     askNotificationsOnce();
     router.back();
     duelClient.send({ t: 'challenge', to: Number(arg) });
+  },
+  wearStyle: (id) => {
+    const shop = session.data?.shop;
+    const slot = STYLES[id]?.slot;
+    if (!shop || !slot) return;
+    applyLoadout({ [slot]: shop.loadout[slot] === id ? null : id });
+  },
+  takeOff: (slot) => applyLoadout({ [slot as Slot]: null }),
+  wearSet: (setId) => {
+    const change: Partial<Record<Slot, string | null>> = {};
+    for (const p of setParts(setId)) change[p.slot] = p.id;
+    applyLoadout(change);
+  },
+  takeOffSet: (setId) => {
+    const change: Partial<Record<Slot, string | null>> = {};
+    for (const p of setParts(setId)) if (session.data?.shop?.loadout[p.slot] === p.id) change[p.slot] = null;
+    applyLoadout(change);
   },
   rebind: (arg) => {
     rebinding = rebinding === arg ? null : (arg as LightId);
@@ -2020,6 +2136,14 @@ function showDuelOutcome(outcome: 'win' | 'loss' | 'draw'): void {
   setDuelLine(outcome === 'win' ? ru.duel.win : outcome === 'loss' ? ru.duel.loss : ru.duel.draw);
   if (outcome === 'win') audio.play('fanfare');
   if (session.data && outcome === 'win') session.data.stats.duel_wins = (session.data.stats.duel_wins ?? 0) + 1;
+  if (outcome === 'win') {
+    // A win streak may have opened cosmetics: ask the server what is new.
+    const before = new Set(session.data?.shop?.owned ?? []);
+    void session.refreshShop().then((shop) => {
+      const fresh = (shop?.owned ?? []).filter((id) => !before.has(id));
+      if (fresh.length) toast(ru.styles.newStyles(fresh.map((id) => ru.styles.parts[id] ?? id).join(', ')), 3600);
+    });
+  }
 }
 
 // ---------- Main loop ----------
@@ -2068,6 +2192,7 @@ function frame(now: number): void {
   renderer.draw(sim, active && !renderer.cineActive && !tutFrozenNow ? acc / DT : 1, renderDt);
   if (document.body.classList.contains('wide')) renderer.drawBackdrop(backdrop, sim);
   if (router.top === 'menu' || router.top === 'wardrobe') drawShowcase(now / 1000);
+  if (router.top === 'styles') drawStylesPreview(now / 1000);
   updateHud(realDt);
   requestAnimationFrame(frame);
 }

@@ -31,6 +31,8 @@ export interface CatalogItem {
   set: string;
   /** Best single-run score that opens it, or null. */
   record: number | null;
+  /** Duel wins in a row that open it, or null. */
+  duel_streak: number | null;
   /** Price in coins, or null when it is not for sale. */
   price: number | null;
   drop: boolean;
@@ -42,6 +44,8 @@ export interface ShopState {
   owned: string[];
   loadout: Loadout;
   catalog: CatalogItem[];
+  duel_streak?: number;
+  best_duel_streak?: number;
 }
 
 export interface CrownNotice {
@@ -75,6 +79,8 @@ export interface RunTicket {
   token: string;
   items_mask?: number;
   item_misses?: number[];
+  /** The cosmetic the server offers in this run (it may lie on a platform), or null. */
+  drop?: string | null;
 }
 
 export interface RunReport {
@@ -87,6 +93,8 @@ export interface RunReport {
   max_combo: number;
   input_log: number[][];
   items: number;
+  /** The offered cosmetic was picked up from a platform. */
+  drop_found?: boolean;
 }
 
 export interface FinishResult {
@@ -330,6 +338,18 @@ export class Session {
     if (shop) {
       if (typeof r.coins === 'number') shop.coins = r.coins;
       for (const id of r.new_items ?? []) if (!shop.owned.includes(id)) shop.owned.push(id);
+    }
+  }
+
+  /** Reloads coins, owned cosmetics and the loadout from the server. */
+  async refreshShop(): Promise<ShopState | null> {
+    if (!this.data) return null;
+    try {
+      const shop = await api<ShopState>('GET', '/shop');
+      this.data.shop = shop;
+      return shop;
+    } catch {
+      return null;
     }
   }
 

@@ -158,4 +158,31 @@ test('items: each run starts from zero, pickups add the bonus, no item repeats w
   assert.ok(!sim.platforms.some((q) => q.item === 0), 'a worn item never appears again in the same run');
 });
 
+test('a cosmetic drop appears after a while and is collected by landing on it', () => {
+  let found = false;
+  for (let seed = 1; seed < 40 && !found; seed++) {
+    const sim = new Sim(seed, 700, { items: true, drop: true });
+    let placed: Platform | undefined;
+    for (let i = 0; i < 3000 && !sim.dead; i++) {
+      sim.step({ axis: sim.platforms[1] && sim.platforms[1].x > sim.hero.x ? 1 : -1, press: null });
+      placed = sim.platforms.find((p) => p.drop);
+      if (placed) break;
+    }
+    if (!placed) continue;
+    assert.equal(sim.dropFound, false);
+    sim.hero.x = placed.x;
+    sim.hero.y = placed.y + 30;
+    sim.hero.vy = -10;
+    for (let i = 0; i < 30 && sim.hero.vy <= 0; i++) sim.step({ axis: 0, press: null });
+    assert.equal(sim.dropFound, true);
+    assert.ok(!sim.platforms.some((p) => p.drop), 'a drop is placed only once');
+    found = true;
+  }
+  assert.ok(found, 'a drop was placed in some run');
+  // Without the server offering one nothing is placed.
+  const plain = new Sim(3, 700, { items: true });
+  for (let i = 0; i < 2000 && !plain.dead; i++) plain.step({ axis: 0, press: null });
+  assert.ok(!plain.platforms.some((p) => p.drop));
+});
+
 console.log(`\n${passed} tests passed`);
