@@ -1,0 +1,23 @@
+{
+  "name": "social-lift-frontend",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview --host",
+    "test": "tsx tools/sim-tests.ts",
+    "bot": "tsx tools/bot.ts 60 0.25",
+    "docs": "tsx tools/gen-docs.ts"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3",
+    "vite": "^5.4.10",
+    "tsx": "^4.19.0"
+  },
+  "dependencies": {
+    "@vkontakte/vk-bridge": "^2.14.1",
+    "@fontsource-variable/rubik": "^5.0.0"
+  }
+}
