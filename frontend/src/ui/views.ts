@@ -81,7 +81,25 @@ export function declinedView(): string {
   </div>`;
 }
 
+function rulesView(): string {
+  const r = ru.rules;
+  const list = r.sections
+    .map(
+      (sec, i) =>
+        `<details class="rule-sec" style="--i:${i}"${i < 2 ? ' open' : ''}><summary><span class="rs-ico">${r.sectionIcons[i] ?? '📌'}</span><span class="rs-num">${i + 1}</span><span class="rs-title">${esc(sec.h ?? '')}</span><span class="rs-chev" aria-hidden="true"></span></summary><div class="rs-body">${sec.p.map((p) => `<p>${esc(p)}</p>`).join('')}</div></details>`,
+    )
+    .join('');
+  return `${header(r.title)}<div class="scroll doc rules-page">
+    <div class="rules-hero"><i class="rh-orb o1"></i><i class="rh-orb o2"></i><i class="rh-orb o3"></i><div class="rh-ico">🛗</div><p>${esc(r.lead)}</p></div>
+    <div class="quick-grid">${r.quick.map(([i, h, t], n) => `<div class="quick" style="--i:${n}"><span class="q-ico">${i}</span><b>${esc(h)}</b><span>${esc(t)}</span></div>`).join('')}</div>
+    <div class="color-legend">${r.colors.map(([c, n, v]) => `<span class="cl" style="--c:${c}"><i></i>${esc(n)}<b>${esc(v)}</b></span>`).join('')}</div>
+    <p class="rules-tap">${esc(r.tapHint)}</p>
+    <div class="rule-list">${list}</div>
+  </div>`;
+}
+
 export function docView(kind: 'terms' | 'privacy' | 'rules'): string {
+  if (kind === 'rules') return rulesView();
   const doc = kind === 'rules' ? { title: ru.rules.title, sections: ru.rules.sections } : legal[kind];
   return `${header(doc.title)}<div class="scroll doc">${sections(doc.sections)}</div>`;
 }
