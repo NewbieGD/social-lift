@@ -169,6 +169,8 @@ async def start_run(session: AsyncSession, user: User, *, seed: int | None = Non
         status="started",
         items_start=user.items_mask or 0,
         duel_id=duel_id,
+        # Cosmetics can be found in solo runs only: duels are the same for both players.
+        drop_item=None if duel_id else await shop.roll_drop(session, user),
     )
     session.add(run)
     await session.commit()
@@ -178,6 +180,7 @@ async def start_run(session: AsyncSession, user: User, *, seed: int | None = Non
         "seed": run.seed,
         "started_at": int(now.timestamp() * 1000),
         "token": make_run_token(settings.run_signing_secret, run.id, user.id, started_ts),
+        "drop": run.drop_item,
         "items_mask": run.items_start,
         "item_misses": parse_misses(user.item_misses),
     }
@@ -286,6 +289,7 @@ async def finish_run(session: AsyncSession, caller: Caller, body: RunFinishIn) -
         # Coins: 1 point = 1 coin, paid once per counted run; a new record may open cosmetics.
         coins_earned = await shop.credit_run(session, user, run.id, body.score)
         new_items = await shop.sync_unlocks(session, user)
+        new_items += await shop.claim_drop(session, user, run.drop_item, body.drop_found, body.score)
     await session.commit()
 
     await _cleanup_weeks(session)
@@ -354,11 +358,17 @@ async def resolve_duel(session: AsyncSession, duel_id: str) -> dict:
     outcome = _outcomes(runs)
     now = utcnow()
     for r in runs:
-        if outcome.get(r.user_id) == "win":
-            user = await session.get(User, r.user_id, with_for_update=True)
-            if user is not None:
-                user.duel_wins = (user.duel_wins or 0) + 1
-                user.duel_wins_at = now
+        result_ = outcome.get(r.user_id)
+        user = await session.get(User, r.user_id, with_for_update=True)
+        if user is not None and result_ == "win":
+            user.duel_wins = (user.duel_wins or 0) + 1
+            user.duel_wins_at = now
+            # Wins in a row: the best streak opens cosmetics. A loss breaks the streak, a draw keeps it.
+            user.duel_streak = (user.duel_streak or 0) + 1
+            user.best_duel_streak = max(user.best_duel_streak or 0, user.duel_streak)
+            await shop.sync_unlocks(session, user)
+        elif user is not None and result_ == "loss":
+            user.duel_streak = 0
         # Mark both runs so the duel is never counted twice (keeps the review flag readable).
         r.flags = "duel_done" if not r.flags or r.flags == "review" else f"duel_done:{r.flags}"[:64]
     await session.commit()

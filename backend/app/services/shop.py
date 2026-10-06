@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import random
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -32,9 +34,30 @@ async def grant(session: AsyncSession, user: User, item_ids: list[str], source: 
 
 
 async def sync_unlocks(session: AsyncSession, user: User) -> list[str]:
-    """Opens everything the player's best single run deserves. Safe to call any number of times."""
+    """Opens what the player's best run and best duel streak deserve. Safe to call any number of times."""
     have = await owned_ids(session, user.id)
-    return await grant(session, user, cosmetics.unlocked_by_record(user.best_all or 0, have), "record")
+    new = await grant(session, user, cosmetics.unlocked_by_record(user.best_all or 0, have), "record")
+    have |= set(new)
+    new += await grant(session, user, cosmetics.unlocked_by_streak(user.best_duel_streak or 0, have), "duel")
+    return new
+
+
+async def roll_drop(session: AsyncSession, user: User) -> str | None:
+    """Decides at the start of a run whether a cosmetic can be found in it, and which one.
+
+    The server rolls, so a player cannot claim a part the server did not offer for this run.
+    """
+    options = cosmetics.droppable(await owned_ids(session, user.id))
+    if not options or random.random() >= cosmetics.DROP_CHANCE:
+        return None
+    return random.choice(options)
+
+
+async def claim_drop(session: AsyncSession, user: User, drop_item: str | None, found: bool, score: int) -> list[str]:
+    """Grants the rolled drop when the finished run reports it was picked up (and scored enough)."""
+    if not found or not drop_item or score < cosmetics.DROP_MIN_SCORE:
+        return []
+    return await grant(session, user, [drop_item], "drop")
 
 
 async def credit_run(session: AsyncSession, user: User, run_id: str, amount: int) -> int:
@@ -62,6 +85,8 @@ async def state(session: AsyncSession, user: User) -> dict:
         "coins": user.coins or 0,
         "owned": sorted(owned),
         "loadout": cosmetics.clean_loadout(user.loadout or {}, owned),
+        "duel_streak": user.duel_streak or 0,
+        "best_duel_streak": user.best_duel_streak or 0,
         "catalog": cosmetics.catalog_public(),
     }
 

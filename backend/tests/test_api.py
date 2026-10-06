@@ -311,10 +311,10 @@ async def test_existing_player_gets_items_on_next_start(client):
     await ready_player(client, 84)
     async with SessionLocal() as s:
         user = await s.get(User, 84)
-        user.best_all = 900  # a player who passed the threshold before the shop existed
+        user.best_all = 700  # a player who passed the threshold before the shop existed
         await s.commit()
     boot = (await client.post("/api/session/bootstrap", headers=headers(84))).json()
-    assert len(boot["shop"]["owned"]) == 4
+    assert sorted(boot["shop"]["owned"]) == ["starter_feet", "starter_head", "starter_legs", "starter_torso"]
 
 
 async def test_buy_with_coins(client, monkeypatch):
@@ -345,3 +345,74 @@ async def test_delete_removes_coins_and_cosmetics(client):
     async with SessionLocal() as s:
         assert (await s.execute(select(func.count()).select_from(CoinTx))).scalar() == 0
         assert (await s.execute(select(func.count()).select_from(OwnedCosmetic))).scalar() == 0
+
+
+async def test_higher_records_open_night_parts_one_by_one(client):
+    await ready_player(client, 87)
+    async with SessionLocal() as s:
+        user = await s.get(User, 87)
+        user.best_all = 1250
+        await s.commit()
+    boot = (await client.post("/api/session/bootstrap", headers=headers(87))).json()
+    owned = set(boot["shop"]["owned"])
+    assert {"night_head", "night_torso"} <= owned and "night_arms" not in owned and "brute_head" not in owned
+
+
+async def test_run_drop_is_rolled_by_the_server_and_claimed_once(client, monkeypatch):
+    from app import cosmetics
+
+    monkeypatch.setattr(cosmetics, "DROP_CHANCE", 1.0)
+    await ready_player(client, 88)
+    start = (await client.post("/api/runs/start", headers=headers(88))).json()
+    drop = start["drop"]
+    assert drop in cosmetics.ITEMS and cosmetics.ITEMS[drop].drop
+    # Reporting a find in a run that scored too little does nothing.
+    low = (await finish(client, 88, start, score=50, drop_found=True)).json()
+    assert drop not in low["new_items"]
+    start = (await client.post("/api/runs/start", headers=headers(88))).json()
+    drop = start["drop"]
+    await age_run(start["run_id"], 120)
+    ok = (await finish(client, 88, start, score=300, duration_ms=60_000, tier=1, captures=60, drop_found=True)).json()
+    assert drop in ok["new_items"]
+    # Claiming again (a retried finish) does not grant it twice.
+    again = (await finish(client, 88, start, score=300, duration_ms=60_000, tier=1, captures=60, drop_found=True)).json()
+    assert again["new_items"] == []
+    shop = (await client.get("/api/shop", headers=headers(88))).json()
+    assert shop["owned"].count(drop) == 1
+    # A run that did not report a find grants nothing, and an owned part is not offered again.
+    start = (await client.post("/api/runs/start", headers=headers(88))).json()
+    assert start["drop"] != drop
+
+
+async def test_no_drop_without_a_roll(client, monkeypatch):
+    from app import cosmetics
+
+    monkeypatch.setattr(cosmetics, "DROP_CHANCE", 0.0)
+    await ready_player(client, 89)
+    start = (await client.post("/api/runs/start", headers=headers(89))).json()
+    assert start["drop"] is None
+    await age_run(start["run_id"], 120)
+    r = (await finish(client, 89, start, score=300, duration_ms=60_000, tier=1, captures=60, drop_found=True)).json()
+    assert r["new_items"] == []
+
+
+async def test_duel_win_streak_opens_ninja_parts(client):
+    from app.services import game as game_service
+
+    await ready_player(client, 90)
+    await ready_player(client, 91)
+    for i in range(2):
+        duel_id = f"{i}" * 36
+        async with SessionLocal() as s:
+            ta = await game_service.start_run(s, await s.get(User, 90), seed=7, duel_id=duel_id)
+            tb = await game_service.start_run(s, await s.get(User, 91), seed=7, duel_id=duel_id)
+        await age_run(ta["run_id"], 60)
+        await age_run(tb["run_id"], 60)
+        await finish(client, 90, ta, score=40, duration_ms=20_000, captures=10)
+        await finish(client, 91, tb, score=12, duration_ms=20_000, captures=6)
+    async with SessionLocal() as s:
+        winner = await s.get(User, 90)
+        loser = await s.get(User, 91)
+        assert winner.duel_streak == 2 and winner.best_duel_streak == 2 and loser.duel_streak == 0
+    shop = (await client.get("/api/shop", headers=headers(90))).json()
+    assert shop["owned"] == ["ninja_head"] and shop["duel_streak"] == 2

@@ -58,6 +58,9 @@ class User(Base):
     coins: Mapped[int] = mapped_column(Integer, default=0)
     # Worn cosmetics: {slot: item_id}.
     loadout: Mapped[dict] = mapped_column(JsonType, default=dict)
+    # Duel wins in a row now, and the best such streak ever (it opens cosmetics).
+    duel_streak: Mapped[int] = mapped_column(Integer, default=0)
+    best_duel_streak: Mapped[int] = mapped_column(Integer, default=0)
 
     runs: Mapped[list[Run]] = relationship(back_populates="user", cascade="all, delete-orphan", passive_deletes=True)
     weeks: Mapped[list[WeekBest]] = relationship(cascade="all, delete-orphan", passive_deletes=True)
@@ -84,6 +87,8 @@ class Run(Base):
     items_start: Mapped[int] = mapped_column(Integer, default=0)
     items: Mapped[int | None] = mapped_column(Integer)
     duel_id: Mapped[str | None] = mapped_column(String(36), index=True)
+    # The cosmetic the server rolled for this run (it can be claimed once, when the run finishes).
+    drop_item: Mapped[str | None] = mapped_column(String(40))
 
     user: Mapped[User] = relationship(back_populates="runs")
 

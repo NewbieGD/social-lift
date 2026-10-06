@@ -44,6 +44,8 @@ class RunFinishIn(Strict):
     max_combo: int = Field(ge=0, le=1_000_000)
     # Items picked up in this run (bit N = item of tier N). Older clients send nothing.
     items: int = Field(default=0, ge=0, lt=1 << gc.ITEM_COUNT)
+    # The cosmetic offered for this run (if any) was picked up from a platform.
+    drop_found: bool = False
     input_log: list[list[int]] = Field(default_factory=list, max_length=gc.MAX_INPUT_LOG)
 
     @field_validator("input_log")
