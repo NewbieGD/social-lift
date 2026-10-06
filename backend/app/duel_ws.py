@@ -15,7 +15,7 @@ import random
 import secrets
 import time
 import uuid
-from collections import deque
+from datetime import datetime, timezone
 from dataclasses import dataclass, field
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
@@ -24,6 +24,8 @@ from .config import settings
 from .db import SessionLocal
 from .models import User
 from . import chat_filter
+from .chat_room import MUTE_SEC, REACTIONS, ChatRoom, ReportGuard
+from .services import chat as chat_svc
 from .services import game, notify
 from .vk_sign import verify_launch_params
 
@@ -34,7 +36,7 @@ INVITE_TIMEOUT_SEC = 15
 START_DELAY_MS = 3500
 MAX_MESSAGE_BYTES = 16_000
 CHAT_COOLDOWN_SEC = 30
-CHAT_HISTORY = 60
+PURGE_EVERY_SEC = 30
 
 
 @dataclass
@@ -51,6 +53,8 @@ class Conn:
     in_chat: bool = False
     chat_rank: int | None = None
     last_chat: float = -1e9
+    blocked: set[int] = field(default_factory=set)  # players whose chat messages and challenges this player does not get
+    muted_until: float = 0.0  # epoch seconds; set automatically after several complaints
 
 
 @dataclass
@@ -61,8 +65,8 @@ class Duel:
     done: set[int] = field(default_factory=set)
 
 
-chat_history: deque[dict] = deque(maxlen=CHAT_HISTORY)
-chat_seq = 0
+room = ChatRoom()
+guard = ReportGuard()
 conns: dict[int, Conn] = {}
 duels: dict[str, Duel] = {}
 invites: dict[int, tuple[int, float]] = {}  # target -> (from, time)
@@ -94,17 +98,33 @@ def chat_members() -> list[Conn]:
     return [c for c in conns.values() if c.in_chat]
 
 
-async def chat_broadcast(msg: dict) -> None:
+def now_ms() -> int:
+    return int(time.time() * 1000)
+
+
+async def chat_broadcast(msg: dict, sender: int | None = None) -> None:
+    """Sends to everyone in the chat except players who blocked `sender`."""
     for c in chat_members():
+        if sender is not None and sender in c.blocked and c.user_id != sender:
+            continue
         await send(c, msg)
 
 
+def visible_users(viewer: Conn) -> list[dict]:
+    return [chat_user(c) for c in chat_members() if c.user_id == viewer.user_id or c.user_id not in viewer.blocked]
+
+
 async def chat_send_users() -> None:
-    await chat_broadcast({"t": "chat_users", "users": [chat_user(c) for c in chat_members()]})
+    for c in chat_members():
+        await send(c, {"t": "chat_users", "users": visible_users(c)})
 
 
 def chat_wait(c: Conn) -> int:
     return max(0, int(CHAT_COOLDOWN_SEC - (time.monotonic() - c.last_chat) + 0.999))
+
+
+def mute_wait(c: Conn) -> int:
+    return max(0, int(c.muted_until - time.time() + 0.999))
 
 
 async def chat_join(me: Conn) -> None:
@@ -116,11 +136,18 @@ async def chat_join(me: Conn) -> None:
         me.in_chat = True
     await send(
         me,
-        {"t": "chat_hist", "msgs": list(chat_history), "users": [chat_user(c) for c in chat_members()], "wait": chat_wait(me)},
+        {
+            "t": "chat_hist",
+            "msgs": room.history_for(me.user_id, me.blocked, now_ms()),
+            "users": visible_users(me),
+            "wait": chat_wait(me),
+            "muted": mute_wait(me),
+            "blocked": sorted(me.blocked),
+        },
     )
     if fresh:
         for c in chat_members():
-            if c is not me:
+            if c is not me and me.user_id not in c.blocked:
                 await send(c, {"t": "chat_user", "action": "join", "user": chat_user(me)})
         await chat_send_users()
 
@@ -133,8 +160,11 @@ async def chat_leave(me: Conn) -> None:
 
 
 async def chat_say(me: Conn, raw: object) -> None:
-    global chat_seq
     if not me.in_chat:
+        return
+    muted = mute_wait(me)
+    if muted > 0:
+        await send(me, {"t": "chat_err", "code": "muted", "wait": muted})
         return
     text = chat_filter.clean(raw)
     problem = chat_filter.check(text)
@@ -146,11 +176,125 @@ async def chat_say(me: Conn, raw: object) -> None:
         await send(me, {"t": "chat_err", "code": "cooldown", "wait": wait})
         return
     me.last_chat = time.monotonic()
-    chat_seq += 1
-    msg = {"id": chat_seq, "ts": int(time.time() * 1000), "user": chat_user(me), "text": text}
-    chat_history.append(msg)
-    await chat_broadcast({"t": "chat", "msg": msg})
+    msg = room.add(chat_user(me), text, now_ms())
+    for c in chat_members():
+        if me.user_id in c.blocked:
+            continue
+        await send(c, {"t": "chat", "msg": room.public(msg, c.user_id)})
     await send(me, {"t": "chat_cd", "wait": CHAT_COOLDOWN_SEC})
+
+
+async def chat_react(me: Conn, msg_id: object, kind: object) -> None:
+    """Like or dislike (the same button again takes it back). Not on your own messages."""
+    if not me.in_chat or kind not in REACTIONS:
+        return
+    m = room.get(msg_id)
+    if m is None or m.author == me.user_id or m.author in me.blocked:
+        return
+    mine = room.react(m, me.user_id, kind)
+    note = {"t": "chat_react", "id": m.id, "up": len(m.up), "down": len(m.down), "by": me.user_id, "r": mine}
+    await chat_broadcast(note, sender=m.author)
+
+
+async def chat_report(me: Conn, target: object, msg_id: object, reason: object) -> None:
+    if not me.in_chat:
+        return
+    now = time.time()
+    problem = guard.check(me.user_id, target, reason, now)
+    if problem:
+        await send(me, {"t": "chat_err", "code": "report_" + problem})
+        return
+    assert isinstance(target, int) and isinstance(reason, str)
+    m = room.get(msg_id)
+    text = m.text if m is not None and m.author == target else None
+    async with SessionLocal() as session:
+        stored = await chat_svc.add_report(session, me.user_id, target, reason, m.id if text else None, text)
+    if not stored:
+        await send(me, {"t": "chat_err", "code": "report_bad"})
+        return
+    await send(me, {"t": "chat_report_ok"})
+    if guard.record(me.user_id, target, now):
+        until = now + MUTE_SEC
+        async with SessionLocal() as session:
+            await chat_svc.set_mute(session, target, datetime.fromtimestamp(until, tz=timezone.utc))
+        tc = conns.get(target)
+        if tc is not None:
+            tc.muted_until = until
+            await send(tc, {"t": "chat_err", "code": "muted", "wait": MUTE_SEC})
+        log.info("chat mute: player %s after complaints", target)
+
+
+async def chat_block(me: Conn, target: object) -> None:
+    if not isinstance(target, int) or isinstance(target, bool):
+        return
+    async with SessionLocal() as session:
+        res = await chat_svc.block(session, me.user_id, target)
+    if res != "ok":
+        await send(me, {"t": "chat_err", "code": "block_" + res})
+        return
+    me.blocked.add(target)
+    await send(me, {"t": "chat_blocked", "id": target, "blocked": sorted(me.blocked)})
+    if me.in_chat:
+        await send(me, {"t": "chat_users", "users": visible_users(me)})
+
+
+async def chat_unblock(me: Conn, target: object) -> None:
+    if not isinstance(target, int) or isinstance(target, bool):
+        return
+    async with SessionLocal() as session:
+        await chat_svc.unblock(session, me.user_id, target)
+    me.blocked.discard(target)
+    await send(me, {"t": "chat_blocked", "id": None, "blocked": sorted(me.blocked)})
+    await chat_blocks_list(me)
+    if me.in_chat:
+        await chat_join(me)  # sends the history again, now with that player's messages
+
+
+async def chat_blocks_list(me: Conn) -> None:
+    async with SessionLocal() as session:
+        users = await chat_svc.list_blocked(session, me.user_id)
+    await send(me, {"t": "chat_blocks", "users": users})
+
+
+async def chat_maintenance() -> None:
+    """Every half minute: drop chat messages older than an hour; once an hour: old complaints."""
+    last_reports = 0.0
+    while True:
+        await asyncio.sleep(PURGE_EVERY_SEC)
+        try:
+            cut = room.purge(now_ms())
+            if cut is not None:
+                await chat_broadcast({"t": "chat_purge", "before": cut})
+            now = time.time()
+            guard.sweep(now)
+            if now - last_reports > 3600:
+                last_reports = now
+                async with SessionLocal() as session:
+                    await chat_svc.purge_old_reports(session)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - housekeeping must never stop
+            log.warning("chat maintenance failed: %s", type(exc).__name__)
+
+
+_maintenance: asyncio.Task | None = None
+
+
+def start_maintenance() -> None:
+    global _maintenance
+    if _maintenance is None or _maintenance.done():
+        _maintenance = asyncio.get_running_loop().create_task(chat_maintenance())
+
+
+async def stop_maintenance() -> None:
+    global _maintenance
+    if _maintenance is not None:
+        _maintenance.cancel()
+        try:
+            await _maintenance
+        except (asyncio.CancelledError, Exception):  # noqa: BLE001
+            pass
+        _maintenance = None
 
 
 async def challenge(me: Conn, target_id: object) -> None:
@@ -161,7 +305,8 @@ async def challenge(me: Conn, target_id: object) -> None:
     if me.state != "idle":
         await send(me, {"t": "busy", "who": "me"})
         return
-    if target is None or target.state != "idle" or target.user_id in invites:
+    if target is None or target.state != "idle" or target.user_id in invites or me.user_id in target.blocked:
+        # A player who blocked you looks just like a busy one.
         await send(me, {"t": "busy", "who": "them", "name": target.name if target else None})
         return
     await invite(me, target)
@@ -222,6 +367,10 @@ async def duel_socket(ws: WebSocket) -> None:
             await ws.close(code=4403, reason="consent")
             return
         me = Conn(ws=ws, user_id=user.id, name=user.display_name, photo=None if user.profile_deactivated else user.photo_url)
+        me.blocked = await chat_svc.load_blocks(session, user.id)
+        if user.chat_muted_until is not None:
+            until = user.chat_muted_until
+            me.muted_until = (until if until.tzinfo else until.replace(tzinfo=timezone.utc)).timestamp()
     old = conns.get(me.user_id)
     if old is not None:
         try:
@@ -265,6 +414,16 @@ async def handle(me: Conn, msg: dict) -> None:
         await chat_leave(me)
     elif t == "chat":
         await chat_say(me, msg.get("text"))
+    elif t == "chat_react":
+        await chat_react(me, msg.get("id"), msg.get("r"))
+    elif t == "chat_report":
+        await chat_report(me, msg.get("user"), msg.get("id"), msg.get("reason"))
+    elif t == "chat_block":
+        await chat_block(me, msg.get("id"))
+    elif t == "chat_unblock":
+        await chat_unblock(me, msg.get("id"))
+    elif t == "chat_blocks":
+        await chat_blocks_list(me)
     elif t == "challenge":
         await challenge(me, msg.get("to"))
     elif t == "cancel":
@@ -323,6 +482,8 @@ async def find(me: Conn) -> None:
         and c.state == "idle"
         and now - me.declined.get(c.user_id, -999) > 120
         and c.user_id not in invites
+        and c.user_id not in me.blocked  # nobody you blocked
+        and me.user_id not in c.blocked  # and nobody who blocked you
     ]
     if not pool:
         await send(me, {"t": "none", "n": len(conns)})

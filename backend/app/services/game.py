@@ -29,6 +29,7 @@ from ..core import (
 from ..deps import ApiError, Caller
 from ..models import Event, Run, User, WeekBest
 from ..schemas import RunFinishIn
+from . import chat as chat_service
 from . import crown
 
 # ---------- Users ----------
@@ -522,6 +523,7 @@ async def _next_above_week(session: AsyncSession, wid: str, score: int, at: date
 
 async def delete_player(session: AsyncSession, caller: Caller) -> None:
     # Explicit deletes so SQLite (tests) and PostgreSQL behave the same.
+    await chat_service.delete_player_data(session, caller.user_id)
     await session.execute(delete(Run).where(Run.user_id == caller.user_id))
     await session.execute(delete(WeekBest).where(WeekBest.user_id == caller.user_id))
     await session.execute(delete(User).where(User.id == caller.user_id))

@@ -52,6 +52,19 @@ postgresql://<пользователь>:<пароль>@amvera-<логин>-cnpg-
 
 Откройте `https://vk.com/app<ID>` с аккаунта администратора. Ожидается: экран согласия, после принятия — игра; после проигрыша на экране итогов видно место за неделю и за всё время.
 
+## Жалобы на игроков в чате
+
+Жалобы лежат в таблице `chat_reports` (кто, на кого, причина `words`/`spam`/`other`, текст сообщения, статус `new`). Записи старше 30 дней сервер удаляет сам. Если на игрока пожаловались трое разных людей за час, ему автоматически закрывается чат на час (`users.chat_muted_until`). Посмотреть новые жалобы:
+
+```sql
+SELECT created_at, target_id, reason, text, count(*) OVER (PARTITION BY target_id) AS total
+FROM chat_reports WHERE status = 'new' ORDER BY created_at DESC;
+```
+
+Закрыть чат игроку вручную на сутки: `UPDATE users SET chat_muted_until = now() + interval '1 day' WHERE id = <vk_id>;` (действует при следующем входе игрока в игру). Снять: `UPDATE users SET chat_muted_until = NULL WHERE id = <vk_id>;`.
+
+Миграция `0007_chat_moderation` создаёт таблицы `chat_blocks`, `chat_reports` и поле `chat_muted_until`; она применяется автоматически при старте.
+
 ## Перед отправкой на модерацию
 
 1. В панели приложения укажите ссылки на документы: `https://<github-логин>.github.io/social-lift/terms.html` и `.../privacy.html`.
