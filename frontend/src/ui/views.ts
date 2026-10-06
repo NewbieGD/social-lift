@@ -100,7 +100,7 @@ function rulesView(): string {
 
 export function docView(kind: 'terms' | 'privacy' | 'rules'): string {
   if (kind === 'rules') return rulesView();
-  const doc = kind === 'rules' ? { title: ru.rules.title, sections: ru.rules.sections } : legal[kind];
+  const doc = legal[kind];
   return `${header(doc.title)}<div class="scroll doc">${sections(doc.sections)}</div>`;
 }
 
