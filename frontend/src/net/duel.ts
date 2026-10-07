@@ -14,6 +14,8 @@ export interface ChatUser {
   photo: string | null;
   /** Place in the all-time leaderboard when the player entered the chat. */
   rank: number | null;
+  /** The game may offer a link to this player's VK page. */
+  link?: boolean;
 }
 
 export interface ChatMsg {

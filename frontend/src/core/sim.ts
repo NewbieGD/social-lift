@@ -69,6 +69,10 @@ export class Sim {
   /** Items picked up in this run (same as owned; kept for the report). */
   picked = 0;
   private itemsEnabled: boolean;
+  /** Whether bonus items appear in this run (needed to replay it exactly). */
+  get itemsOn(): boolean {
+    return this.itemsEnabled;
+  }
   /** Items waiting for a platform ahead to be placed on. */
   private pendingItems: number[] = [];
 

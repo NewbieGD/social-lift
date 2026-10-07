@@ -4633,3 +4633,265 @@ body.reduced .buff.pop {
     margin-top: 6px;
   }
 }
+
+/* ===== Decoration ===== */
+.grid2 .styles-tile {
+  grid-column: auto;
+}
+.grid2 .decor-tile {
+  justify-content: center;
+  background: linear-gradient(90deg, rgba(40, 92, 140, 0.95), rgba(40, 120, 130, 0.95));
+}
+.decor-stage {
+  position: relative;
+  height: 250px;
+  margin-bottom: 8px;
+  border-radius: 14px;
+  overflow: hidden;
+  box-shadow: inset 0 0 0 1.5px rgba(255, 255, 255, 0.14);
+}
+.decor-stage canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.tabs.tabs-4 {
+  grid-template-columns: repeat(4, 1fr);
+}
+.tabs.tabs-4 button {
+  font-size: 12px;
+  padding-left: 4px;
+  padding-right: 4px;
+}
+.spot-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 8px 0;
+  font-size: 12px;
+  color: var(--ink-dim);
+}
+.mini-btn.on {
+  background: rgba(255, 214, 64, 0.9);
+  color: #2a2208;
+}
+.decor-grid {
+  margin-top: 8px;
+  grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+}
+.decor-card canvas {
+  width: 88px;
+  height: 78px;
+}
+
+/* ===== Menu: Styles / Decoration / Pets share one row of three ===== */
+.menu-actions .grid2 {
+  grid-template-columns: repeat(6, 1fr);
+}
+.menu-actions .grid2 > .tile {
+  grid-column: span 3;
+}
+.menu-actions .grid2 > .styles-tile,
+.menu-actions .grid2 > .decor-tile,
+.menu-actions .grid2 > .pets-tile {
+  grid-column: span 2;
+  flex-direction: column;
+  justify-content: center;
+  gap: 3px;
+  height: 56px;
+  padding: 0 4px;
+  font-size: 11.5px;
+  line-height: 1.1;
+}
+.menu-actions .grid2 > .pets-tile {
+  background: linear-gradient(90deg, rgba(150, 90, 40, 0.95), rgba(170, 110, 50, 0.95));
+}
+.menu-actions .grid2 > .styles-tile svg,
+.menu-actions .grid2 > .decor-tile svg,
+.menu-actions .grid2 > .pets-tile svg {
+  width: 24px;
+  height: 24px;
+}
+@media (max-height: 640px) {
+  .menu-actions .grid2 > .styles-tile,
+  .menu-actions .grid2 > .decor-tile,
+  .menu-actions .grid2 > .pets-tile {
+    height: 44px;
+  }
+}
+
+/* Narrow phones: labels shrink a little so no tile text is cut off. */
+@media (max-width: 360px) {
+  .menu-actions .grid2 > .tile {
+    font-size: 12px;
+    padding-left: 8px;
+    padding-right: 6px;
+    gap: 5px;
+  }
+  .menu-actions .grid2 > .styles-tile,
+  .menu-actions .grid2 > .decor-tile,
+  .menu-actions .grid2 > .pets-tile {
+    font-size: 10.5px;
+    padding: 0 2px;
+  }
+  .menu-actions .grid2 > .tile svg {
+    width: 20px;
+    height: 20px;
+  }
+}
+
+/* ===== Compact main menu: Play, a 3x2 grid of tiles, the rest behind the Menu button ===== */
+.stage-top {
+  position: absolute;
+  left: 8px;
+  top: 8px;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.stage-top .fs-btn,
+.stage-top .coin-pill {
+  position: static;
+}
+.top-btn {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 0;
+  border-radius: 12px;
+  color: #fff;
+  background: rgba(12, 16, 26, 0.55);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.14);
+  cursor: pointer;
+}
+.top-btn svg {
+  width: 20px;
+  height: 20px;
+}
+.top-btn:active {
+  transform: scale(0.92);
+}
+.menu-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 7px;
+  margin-top: 9px;
+}
+.menu-grid .tile {
+  flex-direction: column;
+  justify-content: center;
+  gap: 3px;
+  height: 58px;
+  padding: 0 4px;
+  font-size: 11.5px;
+  line-height: 1.1;
+  text-align: center;
+}
+.menu-grid .tile svg {
+  width: 24px;
+  height: 24px;
+}
+.menu-grid .pets-tile {
+  background: linear-gradient(90deg, rgba(150, 90, 40, 0.95), rgba(170, 110, 50, 0.95));
+}
+.menu-grid .styles-tile {
+  background: linear-gradient(90deg, rgba(88, 52, 140, 0.95), rgba(58, 60, 140, 0.95));
+}
+.menu-grid .decor-tile {
+  background: linear-gradient(90deg, rgba(40, 92, 140, 0.95), rgba(40, 120, 130, 0.95));
+}
+@media (max-height: 640px) {
+  .menu-grid .tile {
+    height: 46px;
+  }
+  .menu-grid .tile svg {
+    width: 20px;
+    height: 20px;
+  }
+}
+@media (max-width: 360px) {
+  .menu-grid .tile {
+    font-size: 10.5px;
+    padding: 0 2px;
+  }
+}
+.more-menu {
+  position: relative;
+}
+.menu-row {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 12px;
+  padding-left: 16px;
+}
+.menu-row svg {
+  width: 24px;
+  height: 24px;
+  flex: none;
+}
+
+/* ===== Other players' game profile ===== */
+.profile-stage {
+  position: relative;
+  height: 330px;
+  margin-bottom: 8px;
+  border-radius: 14px;
+  overflow: hidden;
+  box-shadow: inset 0 0 0 1.5px rgba(255, 255, 255, 0.14);
+}
+.profile-stage canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.profile-name {
+  margin: 4px 0 8px;
+  text-align: center;
+  font-size: 20px;
+}
+.leader-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 2px 8px;
+  border-radius: 8px;
+  background: rgba(255, 214, 64, 0.2);
+  color: #ffe58a;
+  font-size: 11px;
+  vertical-align: middle;
+}
+.profile-screen .ward-stats {
+  grid-template-columns: 1fr 1fr;
+}
+.profile-screen > button.secondary {
+  width: 100%;
+  margin: 10px 0 20px;
+}
+
+/* Narrow phones: the stats cards start below the top buttons so they never overlap. */
+@media (max-width: 360px) {
+  .showcase .chips {
+    align-self: end;
+    margin-bottom: 8px;
+  }
+  .stage-top {
+    gap: 5px;
+  }
+  .top-btn {
+    width: 32px;
+    height: 32px;
+  }
+  .coin-pill {
+    height: 32px;
+    padding: 0 9px 0 6px;
+  }
+  .coin-pill b {
+    font-size: 14px;
+  }
+}

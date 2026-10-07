@@ -4,6 +4,8 @@ import type { Platform, SimEvent } from '../core/types';
 import { ru } from '../i18n/ru';
 import { isBuffOnly, type Slot } from './slots';
 import { tone } from './shade3d';
+import { drawPet, type PetKind } from './pets';
+import { PetFollower } from './petMotion';
 import type { StyleLoadout } from './styles';
 import { drawHeroBody, drawItem, heroRig, ITEM_ANCHOR, ITEM_BY_TIER, outfitFromMask, type AttachPoint, type Face, type Gesture, type HeroPose, type Item, type Rig } from './hero';
 import { palette } from './palette';
@@ -220,6 +222,9 @@ export class Renderer {
   ownedMask = 0;
   /** Slots taken by worn styles: bonus items for them become buff icons instead of being worn. */
   occupied: ReadonlySet<Slot> = new Set();
+  /** The pet that runs (or flies) beside the hero, or null. */
+  pet: PetKind | null = null;
+  private petFollower = new PetFollower();
   /** Cosmetic styles worn by the hero (drawn on it). */
   styles: StyleLoadout = {};
   /** Color of the cosmetic offered in this run (the box on the platform glows in it). */
@@ -259,6 +264,7 @@ export class Renderer {
   setScene(tier: number): void {
     this.sceneTier = tier;
     this.cine = null;
+    this.petFollower.reset();
     this.danger = 0;
     this.highlights.length = 0;
     this.sparkles.length = 0;
@@ -620,7 +626,13 @@ export class Renderer {
       ctx.globalCompositeOperation = 'source-over';
     }
 
+    // The pet: a cat or a dog runs behind the hero, a parrot flies in front of him.
+    if (this.pet) {
+      if (!sim.dead) this.petFollower.update(sim.time, frameDt, this.pet, hx, hy, hero.facing > 0 ? 1 : -1);
+      if (this.pet !== 'parrot') this.paintPet(toY);
+    }
     this.drawHero(sim, hx, toY(hy), frameDt, tier);
+    if (this.pet === 'parrot') this.paintPet(toY);
     this.drawItems(sim, hx, hy, toY, frameDt);
     this.drawHighlights(frameDt);
     this.drawSparkles(frameDt);
@@ -1587,6 +1599,17 @@ export class Renderer {
   }
 
   /** A clothing item hovering over a platform: touch the platform to put it on early. */
+  private paintPet(toY: (y: number) => number): void {
+    if (!this.pet) return;
+    const v = this.petFollower.view();
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.translate(v.x, toY(v.lift));
+    ctx.scale(v.facing * 1.2, 1.2);
+    drawPet(ctx, this.pet, { t: this.clock, mode: v.mode, phase: v.phase });
+    ctx.restore();
+  }
+
   /** A gift box in the color of the offered set: touch the platform to take the cosmetic. */
   private drawDropBox(x: number, sy: number, t: number): void {
     const ctx = this.ctx;

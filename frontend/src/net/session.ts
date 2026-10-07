@@ -36,16 +36,57 @@ export interface CatalogItem {
   /** Price in coins, or null when it is not for sale. */
   price: number | null;
   drop: boolean;
+  /** style | bg | prop | frame | fx */
+  kind: string;
 }
 
 /** Coins, owned cosmetics, what is worn, and the catalog of rules (all from the server). */
+export type PropSpot = 'left' | 'right' | 'wall';
+
+/** The main-screen decoration chosen by the player (ids of owned items). */
+export interface Decor {
+  /** The chosen pet (pet_cat | pet_dog | pet_parrot). */
+  pet?: string;
+  bg?: string;
+  frame?: string;
+  fx?: string;
+  props?: Partial<Record<PropSpot, string>>;
+}
+
 export interface ShopState {
   coins: number;
+  decor: Decor;
   owned: string[];
   loadout: Loadout;
   catalog: CatalogItem[];
   duel_streak?: number;
   best_duel_streak?: number;
+}
+
+/** What other players see about a player: how they look, records, collection. */
+export interface PublicProfile {
+  id: number;
+  name: string | null;
+  photo: string | null;
+  link: boolean;
+  crown: boolean;
+  stats: {
+    best_all: number;
+    best_tier: number;
+    last_tier: number;
+    rank_all: number | null;
+    rank_week: number | null;
+    duel_wins: number;
+    total_runs: number;
+    best_combo: number;
+  };
+  items_mask: number;
+  loadout: Loadout;
+  decor: Decor;
+  styles_owned: number;
+  styles_total: number;
+  collection_owned: number;
+  collection_total: number;
 }
 
 export interface CrownNotice {
@@ -67,6 +108,8 @@ export interface Bootstrap {
   settings_updated_at: number;
   stats: Stats;
   shop?: ShopState;
+  /** Privacy choices of this player. */
+  privacy?: { hide_vk_link: boolean };
   server_time: number;
   ads: Record<string, number | boolean>;
   crown?: CrownInfo;
@@ -124,6 +167,8 @@ export interface LeaderRow {
   name: string | null;
   photo: string | null;
   deactivated: boolean;
+  /** The game may offer a link to this player's VK page (false when they hid it). */
+  link?: boolean;
   score: number;
 }
 
@@ -341,6 +386,27 @@ export class Session {
     }
   }
 
+  /** The in-game profile of another player (null when it is not available). */
+  async fetchPlayer(id: number): Promise<PublicProfile | null> {
+    try {
+      return await api<PublicProfile>('GET', `/players/${id}`);
+    } catch {
+      return null;
+    }
+  }
+
+  /** Hides (or shows) the link to this player's VK page for other players. */
+  async setHideLink(hide: boolean): Promise<boolean | null> {
+    if (!this.data) return null;
+    try {
+      const res = await api<{ hide_vk_link: boolean }>('PUT', '/privacy', { hide_vk_link: hide });
+      this.data.privacy = { hide_vk_link: res.hide_vk_link };
+      return res.hide_vk_link;
+    } catch {
+      return null;
+    }
+  }
+
   /** Reloads coins, owned cosmetics and the loadout from the server. */
   async refreshShop(): Promise<ShopState | null> {
     if (!this.data) return null;
@@ -360,6 +426,18 @@ export class Session {
       const res = await api<{ loadout: Loadout }>('PUT', '/loadout', { loadout: change });
       this.data.shop.loadout = res.loadout;
       return res.loadout;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Changes the main-screen decoration; a null clears a place. Returns what the server saved. */
+  async setDecor(change: { pet?: string | null; bg?: string | null; frame?: string | null; fx?: string | null; props?: Partial<Record<PropSpot, string | null>> }): Promise<Decor | null> {
+    if (!this.data?.shop) return null;
+    try {
+      const res = await api<{ decor: Decor }>('PUT', '/decor', { decor: change });
+      this.data.shop.decor = res.decor;
+      return res.decor;
     } catch {
       return null;
     }

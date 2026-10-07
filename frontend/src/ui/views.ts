@@ -2,7 +2,7 @@
 import { AGE_LABEL } from '../config';
 import { legal, ru, type DocSection } from '../i18n/ru';
 import type { ChatMsg, ChatUser } from '../net/duel';
-import type { CatalogItem, FinishResult, Leaderboard, LeaderRow, ShopState, Stats } from '../net/session';
+import type { CatalogItem, FinishResult, Leaderboard, LeaderRow, PublicProfile, ShopState, Stats } from '../net/session';
 import { STYLE_SETS } from '../render/styles';
 import { esc } from './dom';
 import { keyLabel } from '../input/input';
@@ -149,6 +149,15 @@ function chip(icon: string, label: string, value: string, i: number, kind = ''):
   return `<div class="chip ${kind}" style="--i:${i}"><span class="chip-ico">${icon}</span><span class="chip-text"><span class="chip-label">${esc(label)}</span><b>${esc(value)}</b></span></div>`;
 }
 
+const PETS_ICON =
+  '<svg viewBox="0 0 24 24" aria-hidden="true"><ellipse cx="12" cy="15.4" rx="5.2" ry="4.4" fill="#F2A65A"/><ellipse cx="5.4" cy="10.4" rx="2.1" ry="2.8" fill="#F2A65A"/><ellipse cx="18.6" cy="10.4" rx="2.1" ry="2.8" fill="#F2A65A"/><ellipse cx="9.4" cy="5.6" rx="2" ry="2.7" fill="#F2A65A"/><ellipse cx="14.6" cy="5.6" rx="2" ry="2.7" fill="#F2A65A"/></svg>';
+
+const DECOR_ICON =
+  '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="13" rx="2" fill="#5AA8FF"/><path d="M3 14l5-4 4 3 4-5 5 6v3H3z" fill="#2257B8"/><circle cx="8" cy="8.5" r="1.8" fill="#FFE58A"/><rect x="9" y="18" width="6" height="2.4" rx="1" fill="#B9C1CD"/></svg>';
+
+const MORE_ICON =
+  '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>';
+
 const STYLES_ICON =
   '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3l-5 3.5 2.2 3L7 8.4V21h10V8.4l1.8 1.1 2.2-3L16 3c-.6 1.6-2.2 2.6-4 2.6S8.6 4.6 8 3z" fill="#B58CFF"/><path d="M9.5 3.6c.7 1.1 1.5 1.7 2.5 1.7s1.8-.6 2.5-1.7" fill="none" stroke="#fff" stroke-width="1.4" stroke-linecap="round" opacity=".7"/></svg>';
 
@@ -171,8 +180,11 @@ export function menuView(d: MenuData): string {
   }
   return `<div class="menu2">
     <div class="showcase">
-      ${d.coins === null ? '' : `<div class="coin-pill" title="${ru.menu.coins}" aria-label="${ru.menu.coins}: ${d.coins}">${COIN_ICON}<b>${d.coins}</b></div>`}
-      <button class="fs-btn" data-action="fullscreen" aria-label="${ru.menu.fullscreen}" title="${ru.menu.fullscreen}">${FS_ICON}</button>
+      <div class="stage-top">
+        <button class="top-btn more-btn" data-action="open" data-arg="moreMenu" aria-label="${ru.menu.more}" title="${ru.menu.more}">${MORE_ICON}</button>
+        <button class="top-btn fs-btn" data-action="fullscreen" aria-label="${ru.menu.fullscreen}" title="${ru.menu.fullscreen}">${FS_ICON}</button>
+        ${d.coins === null ? '' : `<div class="coin-pill" title="${ru.menu.coins}" aria-label="${ru.menu.coins}: ${d.coins}">${COIN_ICON}<b>${d.coins}</b></div>`}
+      </div>
       <div class="hero-stage">
         <span class="stage-glow" aria-hidden="true"></span>
         <canvas id="menuHero" aria-hidden="true"></canvas>
@@ -183,17 +195,27 @@ export function menuView(d: MenuData): string {
     </div>
     <div class="menu-actions">
       <button class="primary big play" data-action="play">${ICON.play}<span>${ru.common.play}</span></button>
-      <div class="grid2 stagger">
-        <button class="tile accent styles-tile" data-action="open" data-arg="styles">${STYLES_ICON}<span>${ru.menu.styles}</span></button>
+      <div class="menu-grid stagger">
         <button class="tile accent duel-tile" data-action="open" data-arg="duels">${ICON.swords}<span>${ru.menu.duels}</span></button>
         <button class="tile accent chat-tile" data-action="open" data-arg="chat">${ICON.chat}<span>${ru.menu.chat}</span></button>
         <button class="tile" data-action="open" data-arg="leaders">${ICON.crown}<span>${ru.menu.leaders}</span></button>
-        <button class="tile" data-action="open" data-arg="rules">${ICON.book}<span>${ru.menu.rules}</span></button>
-        <button class="tile" data-action="open" data-arg="settings">${ICON.gear}<span>${ru.menu.settings}</span></button>
-        <button class="tile" data-action="open" data-arg="contact">${ICON.mail}<span>${ru.menu.contactShort}</span></button>
+        <button class="tile accent styles-tile" data-action="open" data-arg="styles">${STYLES_ICON}<span>${ru.menu.styles}</span></button>
+        <button class="tile accent decor-tile" data-action="open" data-arg="decor">${DECOR_ICON}<span>${ru.menu.decor}</span></button>
+        <button class="tile accent pets-tile" data-action="open" data-arg="pets">${PETS_ICON}<span>${ru.menu.pets}</span></button>
       </div>
       ${status}
     </div>
+  </div>`;
+}
+
+/** The rest of the menu: rules, settings and the developer contact. */
+export function moreMenuView(): string {
+  return `<div class="panel more-menu">
+    <button class="icon-btn close" data-action="back" aria-label="${ru.chat.close}">${CLOSE_ICON}</button>
+    <h2>${ru.moreMenu.title}</h2>
+    <button class="secondary menu-row" data-action="openFromMore" data-arg="rules">${ICON.book}<span>${ru.menu.rules}</span></button>
+    <button class="secondary menu-row" data-action="openFromMore" data-arg="settings">${ICON.gear}<span>${ru.menu.settings}</span></button>
+    <button class="secondary menu-row" data-action="openFromMore" data-arg="contact">${ICON.mail}<span>${ru.menu.contactShort}</span></button>
   </div>`;
 }
 
@@ -210,6 +232,7 @@ const LOCK_ICON =
   '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="10" width="14" height="10" rx="3" fill="currentColor"/><path d="M8 10V8a4 4 0 018 0v2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
 const CHECK_ICON =
   '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
 
 export function wardrobeView(s: Stats | null, mask: number, who?: { name: string | null; crown: boolean }): string {
   const v = (n: number | null | undefined): string => (n === null || n === undefined || n === 0 ? ru.wardrobe.none : String(n));
@@ -336,6 +359,132 @@ export function stylesView(shop: ShopState | null): string {
   </div>`;
 }
 
+// ---------- Decoration ----------
+
+export type DecorTab = 'bg' | 'prop' | 'frame' | 'fx';
+
+const BG_IDS = ['bg_default', 'bg_dusk', 'bg_roof', 'bg_metro', 'bg_neon', 'bg_winter', 'bg_space'];
+const PROP_LIST = ['prop_football', 'prop_basketball', 'prop_lamp', 'prop_bat', 'prop_cup', 'prop_sword', 'prop_tv'];
+const FRAME_LIST = ['frame_gold', 'frame_neon'];
+const FX_LIST = ['fx_sparks', 'fx_snow'];
+
+function decorRequirement(c: CatalogItem | undefined): string {
+  if (!c) return ru.styles.requireNone;
+  if (c.record !== null) return ru.styles.requireRecord(c.record);
+  if (c.price !== null) return ru.styles.requirePrice(c.price);
+  return ru.styles.requireNone;
+}
+
+export function decorView(shop: ShopState | null, tab: DecorTab, spot: 'left' | 'right' | 'wall'): string {
+  if (!shop) {
+    return `${header(ru.decor.title)}<div class="panel flat"><p class="status warn">${ru.duel.offline}</p></div>`;
+  }
+  const owned = new Set(shop.owned);
+  const byId = new Map(shop.catalog.map((c) => [c.id, c]));
+  const decor = shop.decor ?? {};
+  const ids = tab === 'bg' ? BG_IDS : tab === 'prop' ? PROP_LIST : tab === 'frame' ? FRAME_LIST : FX_LIST;
+  const isChosen = (id: string): boolean => {
+    if (tab === 'bg') return (decor.bg ?? 'bg_default') === id;
+    if (tab === 'prop') return Object.values(decor.props ?? {}).includes(id);
+    return (tab === 'frame' ? decor.frame : decor.fx) === id;
+  };
+  const cards = ids
+    .map((id) => {
+      const c = byId.get(id);
+      const free = id === 'bg_default';
+      const has = free || owned.has(id);
+      const chosen = isChosen(id);
+      const priced = !has && c?.price !== null && c?.price !== undefined;
+      const action = has ? `data-action="decorPick" data-arg="${id}"` : priced ? `data-action="askBuy" data-arg="${id}"` : 'disabled';
+      const where = tab === 'prop' && chosen ? Object.entries(decor.props ?? {}).find(([, v]) => v === id)?.[0] : undefined;
+      const note = has
+        ? chosen
+          ? where
+            ? `${ru.decor.chosen} · ${ru.decor.spots[where]}`
+            : ru.decor.chosen
+          : tab === 'prop'
+            ? ru.decor.place
+            : ru.styles.wear
+        : priced
+          ? `${ru.decor.buy} · ${c!.price}`
+          : decorRequirement(c);
+      return `<button class="style-card decor-card ${has ? 'owned' : 'locked'} ${chosen ? 'worn' : ''}" ${action} aria-label="${esc(ru.decor.names[id])}">
+        <canvas data-decor="${id}" data-kind="${tab}" data-locked="${has ? '0' : '1'}" aria-hidden="true"></canvas>
+        <b>${esc(ru.decor.names[id])}</b>
+        <span>${esc(note)}</span>
+        ${chosen ? '<i class="tick" aria-hidden="true">✓</i>' : ''}
+      </button>`;
+    })
+    .join('');
+  const extra =
+    tab === 'frame' || tab === 'fx'
+      ? `<button class="style-card decor-card owned ${(tab === 'frame' ? decor.frame : decor.fx) ? '' : 'worn'}" data-action="decorPick" data-arg="${tab === 'frame' ? 'frame_none' : 'fx_none'}">
+          <canvas data-decor="none" data-kind="${tab}" aria-hidden="true"></canvas>
+          <b>${tab === 'frame' ? ru.decor.none : ru.decor.noneFx}</b><span>${(tab === 'frame' ? decor.frame : decor.fx) ? ru.styles.wear : ru.decor.chosen}</span>
+        </button>`
+      : '';
+  const tabs = (['bg', 'prop', 'frame', 'fx'] as DecorTab[])
+    .map((k) => `<button role="tab" class="${k === tab ? 'on' : ''}" aria-selected="${k === tab}" data-action="decorTab" data-arg="${k}">${ru.decor.tabs[k]}</button>`)
+    .join('');
+  const spots =
+    tab === 'prop'
+      ? `<div class="spot-row"><span>${ru.decor.spotHint}</span>${(['left', 'right', 'wall'] as const)
+          .map((s) => `<button class="mini-btn ${s === spot ? 'on' : ''}" data-action="decorSpot" data-arg="${s}">${ru.decor.spots[s]}</button>`)
+          .join('')}${decor.props?.[spot] ? `<button class="mini-btn" data-action="decorClear" data-arg="${spot}">${ru.decor.remove}</button>` : ''}</div>`
+      : '';
+  return `${header(ru.decor.title)}<div class="scroll styles-screen">
+    <div class="decor-stage"><canvas id="decorHero" aria-hidden="true"></canvas></div>
+    <div class="tabs tabs-4" role="tablist">${tabs}</div>
+    ${spots}
+    ${tab === 'prop' ? `<p class="muted small">${ru.decor.tvHint}: ${ru.decor.names.prop_tv}.</p>` : ''}
+    <div class="style-grid decor-grid">${extra}${cards}</div>
+    <p class="muted small">${ru.decor.lead}</p>
+  </div>`;
+}
+
+export function petsView(shop: ShopState | null): string {
+  if (!shop) {
+    return `${header(ru.pets.title)}<div class="panel flat"><p class="status warn">${ru.duel.offline}</p></div>`;
+  }
+  const owned = new Set(shop.owned);
+  const byId = new Map(shop.catalog.map((c) => [c.id, c]));
+  const chosenId = shop.decor?.pet;
+  const cards = ['pet_cat', 'pet_dog', 'pet_parrot']
+    .map((id) => {
+      const has = owned.has(id);
+      const chosen = chosenId === id;
+      const c = byId.get(id);
+      const note = has ? (chosen ? ru.pets.chosen : ru.pets.pick) : c?.record != null ? ru.pets.requireRecord(c.record) : ru.styles.requireNone;
+      return `<button class="style-card decor-card ${has ? 'owned' : 'locked'} ${chosen ? 'worn' : ''}" ${has ? `data-action="petPick" data-arg="${id}"` : 'disabled'} aria-label="${esc(ru.pets.names[id])}">
+        <canvas data-pet="${id}" data-locked="${has ? '0' : '1'}" aria-hidden="true"></canvas>
+        <b>${esc(ru.pets.names[id])}</b>
+        <span>${esc(note)}</span>
+        ${chosen ? '<i class="tick" aria-hidden="true">✓</i>' : ''}
+      </button>`;
+    })
+    .join('');
+  const none = `<button class="style-card decor-card owned ${chosenId ? '' : 'worn'}" data-action="petPick" data-arg="pet_none">
+      <canvas data-pet="none" aria-hidden="true"></canvas><b>${ru.pets.none}</b><span>${chosenId ? ru.pets.pick : ru.pets.chosen}</span>
+    </button>`;
+  return `${header(ru.pets.title)}<div class="scroll styles-screen">
+    <div class="decor-stage"><canvas id="petsHero" aria-hidden="true"></canvas></div>
+    <div class="style-grid decor-grid">${none}${cards}</div>
+    <p class="muted small">${ru.pets.lead}</p>
+  </div>`;
+}
+
+export function buyConfirmView(name: string, price: number, coins: number): string {
+  const ok = coins >= price;
+  return `<div class="panel">
+    <h2>${ru.decor.buyTitle}</h2>
+    <p>${esc(ru.decor.buyText(name, price))}</p>
+    <p class="muted">${ru.decor.balance(coins)}</p>
+    ${ok ? '' : `<p class="status warn">${ru.decor.notEnough}</p>`}
+    <button class="primary" data-action="confirmBuy" ${ok ? '' : 'disabled'}>${ru.decor.buy}</button>
+    <button class="secondary" data-action="back">${ru.decor.cancel}</button>
+  </div>`;
+}
+
 // ---------- Rules card before a run ----------
 
 export function rulesCardView(): string {
@@ -421,9 +570,16 @@ function keyRows(s: Settings, k: KeysView): string {
 
 export function settingsView(
   s: Settings,
-  opts: { vibration: boolean; playerId: number | null; canDelete: boolean; keys: KeysView },
+  opts: { vibration: boolean; playerId: number | null; canDelete: boolean; keys: KeysView; hideLink: boolean | null },
 ): string {
   return `${header(ru.settings.title)}<div class="scroll settings">
+    ${
+      opts.hideLink === null
+        ? ''
+        : `<h3>${ru.settings.hideVk}</h3>
+    <label class="row toggle-row"><span>${ru.settings.hideVk}</span><input type="checkbox" role="switch" class="switch" data-privacy="hideVk" ${opts.hideLink ? 'checked' : ''} /></label>
+    <p class="muted small">${ru.settings.hideVkHint}</p>`
+    }
     <h3>${ru.settings.sound}</h3>
     ${toggle('music', ru.settings.music, s.music)}
     ${slider('musicVol', ru.settings.musicVol, s.musicVol, 0, 1, 0.05)}
@@ -814,6 +970,56 @@ export function chatMsgHtml(m: ChatMsg, myId: number | null): string {
       <div class="chat-meta"><button type="button" class="chat-name" data-action="player" data-arg="${m.user.id}">${esc(name)}</button>${m.user.rank ? `<span class="chat-rank">#${m.user.rank}</span>` : ''}<time>${time}</time></div>
       <p>${esc(m.text)}</p>
     </div>
+  </div>`;
+}
+
+export interface ProfileWho {
+  id: number;
+  name: string | null;
+  photo: string | null;
+  link: boolean;
+  /** Offer a duel challenge (chat only). */
+  canDuel: boolean;
+  mine: boolean;
+}
+
+/** Tap on a player in a rating or in the chat: the game profile or the VK page. */
+export function profileChoiceView(w: ProfileWho): string {
+  const name = w.name || ru.leaders.player;
+  const img = w.photo ? `<img src="${esc(w.photo)}" alt="" referrerpolicy="no-referrer" />` : `<b>${esc(name.slice(0, 1))}</b>`;
+  return `<div class="panel invite">
+    <button class="icon-btn close" data-action="back" aria-label="${ru.chat.close}">${CLOSE_ICON}</button>
+    <div class="invite-ava">${img}</div>
+    <h2>${esc(name)}</h2>
+    <button class="primary" data-action="openGameProfile" data-arg="${w.id}">${ru.profileChoice.game}</button>
+    ${w.link ? `<button class="secondary" data-action="openVkProfile" data-arg="${w.id}">${ru.profileChoice.vk}</button>` : `<p class="muted small">${ru.profileChoice.hidden}</p>`}
+    ${w.canDuel && !w.mine ? `<button class="secondary" data-action="challenge" data-arg="${w.id}">${ru.profileChoice.duel}</button>` : ''}
+  </div>`;
+}
+
+export function profileView(p: PublicProfile | null, state: 'loading' | 'ready' | 'failed'): string {
+  if (state !== 'ready' || !p) {
+    return `${header(ru.profile.title)}<div class="panel flat center-col">${
+      state === 'loading' ? `<p class="status">${ru.profile.loading}</p>` : `<p class="status warn">${ru.profile.failed}</p><button class="secondary" data-action="profileRetry">${ru.profile.retry}</button>`
+    }</div>`;
+  }
+  const v = (n: number | null | undefined): string => (n === null || n === undefined || n === 0 ? ru.wardrobe.none : String(n));
+  const rows: [string, string][] = [
+    [ru.profile.best, v(p.stats.best_all)],
+    [ru.profile.rankAll, p.stats.rank_all ? `#${p.stats.rank_all}` : ru.wardrobe.none],
+    [ru.profile.rankWeek, p.stats.rank_week ? `#${p.stats.rank_week}` : ru.wardrobe.none],
+    [ru.profile.duelWins, v(p.stats.duel_wins)],
+    [ru.profile.combo, v(p.stats.best_combo)],
+    [ru.profile.stage, ru.tiers[p.stats.best_tier] ?? ru.tiers[0]],
+    [ru.profile.styles, ru.profile.of(p.styles_owned, p.styles_total)],
+    [ru.profile.collection, ru.profile.of(p.collection_owned, p.collection_total)],
+  ];
+  const name = p.name || ru.leaders.player;
+  return `${header(ru.profile.title)}<div class="scroll profile-screen">
+    <div class="profile-stage"><canvas id="profileHero" aria-hidden="true"></canvas></div>
+    <h2 class="profile-name">${esc(name)}${p.crown ? ` <span class="leader-badge">${ru.profile.leader}</span>` : ''}</h2>
+    <dl class="ward-stats stagger">${rows.map(([k, val]) => `<div><dt>${k}</dt><dd>${esc(val)}</dd></div>`).join('')}</dl>
+    ${p.link ? `<button class="secondary" data-action="openVkProfile" data-arg="${p.id}">${ru.profile.openVk}</button>` : `<p class="muted small">${ru.profileChoice.hidden}</p>`}
   </div>`;
 }
 

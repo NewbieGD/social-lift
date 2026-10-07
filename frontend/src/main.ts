@@ -9,7 +9,7 @@ import type { SimEvent } from './core/types';
 import { ru } from './i18n/ru';
 import { DEFAULT_KEYS, InputController, keyLabel, STEER_CODES } from './input/input';
 import { ApiError } from './net/api';
-import { Session, type CrownNotice, type RunTicket, type Stats } from './net/session';
+import { Session, type Decor, type CrownNotice, type RunTicket, type Stats } from './net/session';
 import { haptic, hapticsSupported, initHaptics } from './platform/haptics';
 import { ads, DEFAULT_ADS, type AdsConfig } from './platform/ads';
 import { canShare, initShare, shareStory, shareWall } from './platform/share';
@@ -19,7 +19,12 @@ import { DuelClient, type ChatMsg, type ChatUser, type DuelMsg, type DuelPlayer 
 import { scenes } from './render/palette';
 import { drawItem, ITEM_BY_TIER, itemCount, outfitFromMask, type Item } from './render/hero';
 import { fullscreenSupported, onFullscreenChange, toggleFullscreen } from './platform/fullscreen';
-import { drawStageBackdrop, StageWind, stageLayout } from './render/ground';
+import { StageWind, stageLayout } from './render/ground';
+import { drawMenuBackdrop } from './render/menuBackdrops';
+import { drawFrame, drawFx, drawProp, propHeight, type PropSpot } from './render/menuProps';
+import { ReplayTv, saveReplay } from './render/replayTv';
+import { PetWalker } from './render/petMotion';
+import { drawPet, PET_IDS, petHeight } from './render/pets';
 import { CROWN_LIFT_FRONT, crownBob, drawCrown } from './render/crown';
 import { occupiedSlots, splitBonus, type Slot } from './render/slots';
 import { STYLE_SETS, STYLES, type StyleLoadout } from './render/styles';
@@ -491,7 +496,7 @@ function startTutorial(): void {
 
 /** Worn cosmetic styles (from the server; empty outside VK). */
 function heroLoadout(): StyleLoadout {
-  return (session.data?.shop?.loadout ?? {}) as StyleLoadout;
+  return stageOverride ? stageOverride.loadout : ((session.data?.shop?.loadout ?? {}) as StyleLoadout);
 }
 
 /** The bonus items that are drawn on the hero: those in slots without a worn style. */
@@ -507,6 +512,7 @@ function newSim(seed: number, tutorial = false, items = false, drop = false): vo
   // Every run starts with nothing worn; items found along the way count for this run only.
   sim = new Sim(seed, sim.viewH, { tutorial, items, drop });
   renderer.styles = heroLoadout();
+  renderer.pet = PET_IDS[heroDecor().pet ?? ''] ?? null;
   renderer.dropColor = (runDrop && STYLES[runDrop]?.palette.main) || '#FFD640';
   renderer.ownedMask = 0;
   // Worn styles keep their slots: bonus items for those slots become buff icons.
@@ -656,6 +662,11 @@ function finishRun(): void {
   saveAdState();
   session.event('run_end', sim.score);
   rememberLocalRun(sim.score, sim.tier);
+  if (!finishedDuel && sim.score > 0) {
+    // The TV on the main screen replays this run.
+    saveReplay({ v: 1, seed: sim.seed, viewH: sim.viewH, items: sim.itemsOn, log: sim.inputLog.slice(), score: sim.score });
+    tv.reload();
+  }
   if (session.mode === 'outside') {
     const local = readLocalItems();
     writeLocalItems(local.mask | sim.picked, local.misses);
@@ -925,6 +936,27 @@ function sizeCanvas(c: HTMLCanvasElement): CanvasRenderingContext2D | null {
 const stageWinds = new Map<string, { wind: StageWind; last: number }>();
 
 /** The hero facing the player on a small podium: breathing, blinking, waving now and then. */
+const petWalkers = new Map<string, PetWalker>();
+const petLast = new Map<string, number>();
+
+function paintStagePet(g: CanvasRenderingContext2D, walker: PetWalker, kind: 'cat' | 'dog' | 'parrot', base: number, scale: number, t: number): void {
+  const v = walker.view();
+  g.save();
+  // Behind the hero the pet walks a little higher up the floor; in front of him a little lower.
+  g.translate(v.x, base + (walker.lane === 'front' ? 3.2 : -3) * scale - v.lift);
+  g.scale(scale * v.facing, scale);
+  drawPet(g, kind, { t, mode: v.mode, phase: v.phase });
+  g.restore();
+}
+
+const tv = new ReplayTv();
+tv.reload();
+let tvLast = -1;
+
+function heroDecor(): Decor {
+  return stageOverride ? stageOverride.decor : session.data?.shop?.decor ?? {};
+}
+
 function drawStageHero(c: HTMLCanvasElement, _tier: number, t: number, _silhouette = false, still = false, mask = ownedMask()): void {
   const g = sizeCanvas(c);
   if (!g) return;
@@ -935,7 +967,10 @@ function drawStageHero(c: HTMLCanvasElement, _tier: number, t: number, _silhouet
   const L = stageLayout(h);
   const scale = Math.min(w / 58, (L.feet - 6) / (hasCrown() ? 124 : 96));
   const base = L.feet;
-  drawStageBackdrop(g, w, h, L, scale);
+  // The main screen and the decoration preview wear the chosen decoration.
+  const decorOn = c.id === 'menuHero' || c.id === 'decorHero' || c.id === 'petsHero' || c.id === 'profileHero';
+  const decor = decorOn ? heroDecor() : ({} as Decor);
+  drawMenuBackdrop(g, decor.bg, w, h, L, scale, t);
   // Light wind: leaves and scraps of paper blow along the street (not with "less effects").
   const windOn = !settingsStore.get().reducedFx && !still;
   let wind: StageWind | null = null;
@@ -973,6 +1008,51 @@ function drawStageHero(c: HTMLCanvasElement, _tier: number, t: number, _silhouet
       hit.style.height = `${base - top + 2 * scale}px`;
     }
   }
+  // Objects stand on both sides of the hero, or on a shelf on the wall.
+  if (decorOn && decor.props) {
+    const spots: Record<PropSpot, { x: number; y: number }> = {
+      left: { x: cx - 19 * scale, y: base + 1.5 * scale },
+      right: { x: cx + 19 * scale, y: base + 1.5 * scale },
+      wall: { x: cx - 19 * scale, y: base - 50 * scale },
+    };
+    let tvShown = false;
+    for (const spot of ['wall', 'left', 'right'] as PropSpot[]) {
+      const id = decor.props[spot];
+      if (!id) continue;
+      g.save();
+      g.translate(spots[spot].x, spots[spot].y);
+      g.scale(scale, scale);
+      if (spot === 'wall') {
+        // A little shelf under the object.
+        g.fillStyle = '#6B4A2E';
+        g.fillRect(-8, 0, 16, 1.6);
+        g.fillStyle = 'rgba(0,0,0,0.3)';
+        g.fillRect(-8, 1.6, 16, 0.8);
+      }
+      // Another player's TV shows no signal (their last run lives on their device).
+      drawProp(g, id, t, id === 'prop_tv' ? (gg, ww, hh) => (stageOverride ? tv.paintNoSignal(gg, ww, hh) : tv.paint(gg, ww, hh)) : undefined);
+      g.restore();
+      if (id === 'prop_tv' && !stageOverride) tvShown = true;
+    }
+    if (tvShown) {
+      const dtTv = tvLast < 0 ? 0 : Math.min(0.1, Math.max(0, t - tvLast));
+      tvLast = t;
+      tv.setStyles(heroLoadout());
+      tv.update(dtTv);
+    } else tvLast = -1;
+  }
+  // The pet wanders around on the floor, sometimes behind the hero, sometimes in front of him.
+  const petKind = decorOn && decor.pet ? PET_IDS[decor.pet] : undefined;
+  let walker: PetWalker | null = null;
+  if (petKind) {
+    walker = petWalkers.get(c.id) ?? new PetWalker();
+    petWalkers.set(c.id, walker);
+    const free = side ? w - side - 8 : w;
+    const dtPet = Math.max(0, Math.min(0.1, t - (petLast.get(c.id) ?? t)));
+    petLast.set(c.id, t);
+    walker.update(dtPet, petKind, 14 * scale, free - 14 * scale, scale);
+    if (walker.lane === 'back') paintStagePet(g, walker, petKind, base, scale, t);
+  }
   g.save();
   g.translate(cx, base);
   g.scale(scale, scale);
@@ -985,12 +1065,44 @@ function drawStageHero(c: HTMLCanvasElement, _tier: number, t: number, _silhouet
     drawCrown(g, t, settingsStore.get().reducedFx);
   }
   g.restore();
+  if (walker && petKind && walker.lane === 'front') paintStagePet(g, walker, petKind, base, scale, t);
   wind?.draw(g, 1, scale);
+  if (decorOn && decor.fx) drawFx(g, decor.fx, w, h, t, cx, base);
+  if (decorOn && decor.frame) drawFrame(g, decor.frame, w, h, t);
 }
 
 /** The player holds the crown of the weekly leader. */
+/** How another player looks, while their profile is drawn (the stage reads these instead of ours). */
+interface StageView {
+  decor: Decor;
+  loadout: StyleLoadout;
+  mask: number;
+  crown: boolean;
+}
+let stageOverride: StageView | null = null;
+
 function hasCrown(): boolean {
-  return !!session.data?.stats.crown;
+  return stageOverride ? stageOverride.crown : !!session.data?.stats.crown;
+}
+
+// ---------- Other players' profiles ----------
+
+const lbKnown = new Map<number, import('./net/session').LeaderRow>();
+let profileWho: V.ProfileWho | null = null;
+let profileData: import('./net/session').PublicProfile | null = null;
+let profileState: 'loading' | 'ready' | 'failed' = 'loading';
+let profileId = 0;
+
+async function showGameProfile(id: number): Promise<void> {
+  profileId = id;
+  profileData = null;
+  profileState = 'loading';
+  router.open('profile');
+  const p = await session.fetchPlayer(id);
+  if (profileId !== id) return;
+  profileData = p;
+  profileState = p ? 'ready' : 'failed';
+  if (router.top === 'profile') router.refresh();
 }
 
 /** Paints the part icons of the styles screen (parts you do not have yet are dark silhouettes). */
@@ -1014,6 +1126,121 @@ function drawStyleIcons(root: HTMLElement): void {
       g.fillRect(0, 0, w, h);
       g.globalCompositeOperation = 'source-over';
     }
+  });
+}
+
+// ---------- Pets screen ----------
+
+function drawPetIcons(root: HTMLElement): void {
+  root.querySelectorAll<HTMLCanvasElement>('canvas[data-pet]').forEach((c) => {
+    const id = c.dataset.pet ?? '';
+    const g = sizeCanvas(c);
+    if (!g) return;
+    const w = c.clientWidth;
+    const h = c.clientHeight;
+    g.clearRect(0, 0, w, h);
+    g.save();
+    g.beginPath();
+    g.roundRect(0, 0, w, h, 8);
+    g.clip();
+    g.fillStyle = '#242A38';
+    g.fillRect(0, 0, w, h);
+    const kind = PET_IDS[id];
+    if (kind) {
+      const k = Math.min((h - 12) / petHeight(kind), (w - 8) / 14);
+      g.translate(w / 2, h - 7);
+      g.scale(k, k);
+      drawPet(g, kind, { t: 1.1, mode: kind === 'parrot' ? 'perch' : 'sit', phase: 0 });
+    }
+    g.restore();
+    if (c.dataset.locked === '1') {
+      g.fillStyle = 'rgba(14,17,26,0.7)';
+      g.beginPath();
+      g.roundRect(0, 0, w, h, 8);
+      g.fill();
+    }
+  });
+}
+
+// ---------- Decoration screen ----------
+
+let decorTab: V.DecorTab = 'bg';
+let decorSpot: 'left' | 'right' | 'wall' = 'left';
+let buyTarget: string | null = null;
+
+/** Paints the cards of the decoration screen: background thumbnails, objects, frames, effects. */
+function drawDecorIcons(root: HTMLElement): void {
+  root.querySelectorAll<HTMLCanvasElement>('canvas[data-decor]').forEach((c) => {
+    const id = c.dataset.decor ?? '';
+    const kind = c.dataset.kind ?? '';
+    const g = sizeCanvas(c);
+    if (!g) return;
+    const w = c.clientWidth;
+    const h = c.clientHeight;
+    g.clearRect(0, 0, w, h);
+    g.save();
+    g.beginPath();
+    g.roundRect(0, 0, w, h, 8);
+    g.clip();
+    if (kind === 'bg') {
+      const L = stageLayout(h);
+      drawMenuBackdrop(g, id === 'bg_default' ? undefined : id, w, h, L, Math.max(1, h / 130), 1.4);
+    } else {
+      g.fillStyle = '#242A38';
+      g.fillRect(0, 0, w, h);
+      if (kind === 'prop') {
+        const k = Math.min((h - 12) / propHeight(id), (w - 8) / 14);
+        g.translate(w / 2, h - 6);
+        g.scale(k, k);
+        drawProp(g, id, 1.2, (gg, ww, hh) => {
+          gg.fillStyle = '#2E7D52';
+          gg.fillRect(0, 0, ww, hh);
+          gg.fillStyle = '#FFD640';
+          gg.fillRect(ww * 0.3, hh * 0.45, ww * 0.4, hh * 0.1);
+        });
+      } else if (kind === 'frame' && id !== 'none') {
+        drawFrame(g, id, w, h, 1.2);
+      } else if (kind === 'fx' && id !== 'none') {
+        drawFx(g, id, w, h, 2.1, w / 2, h - 4);
+      }
+    }
+    g.restore();
+    if (c.dataset.locked === '1') {
+      g.fillStyle = 'rgba(14,17,26,0.55)';
+      g.beginPath();
+      g.roundRect(0, 0, w, h, 8);
+      g.fill();
+    }
+  });
+}
+
+/** Applies a decoration change at once and lets the server confirm it. */
+function applyDecor(change: Parameters<Session['setDecor']>[0]): void {
+  const shop = session.data?.shop;
+  if (!shop) return;
+  const next: Decor = { ...(shop.decor ?? {}), props: { ...(shop.decor?.props ?? {}) } };
+  for (const key of ['bg', 'frame', 'fx', 'pet'] as const) {
+    if (key in change) {
+      if (change[key]) next[key] = change[key] as string;
+      else delete next[key];
+    }
+  }
+  if (change.props) {
+    for (const [spot, id] of Object.entries(change.props)) {
+      if (id) {
+        // The same object cannot stand in two places: it moves.
+        for (const [other, v] of Object.entries(next.props ?? {})) if (v === id) delete (next.props as Record<string, string>)[other];
+        (next.props as Record<string, string>)[spot] = id;
+      } else delete (next.props as Record<string, string>)[spot];
+    }
+  }
+  if (next.props && !Object.keys(next.props).length) delete next.props;
+  shop.decor = next;
+  tvLast = -1;
+  if (router.top === 'decor') router.refresh();
+  void session.setDecor(change).then((saved) => {
+    if (saved) return;
+    void session.refreshShop().then(() => router.top === 'decor' && router.refresh());
   });
 }
 
@@ -1093,6 +1320,7 @@ function drawCollection(root: HTMLElement): void {
 
 /** Collected items: from the server, or kept locally when playing outside VK. */
 function ownedMask(): number {
+  if (stageOverride) return stageOverride.mask;
   return session.data?.stats.items_mask ?? readLocalItems().mask;
 }
 
@@ -1170,6 +1398,23 @@ router.register('consent', {
 router.register('declined', { html: () => V.declinedView(), cls: 'solid' });
 router.register('doc', { html: () => V.docView(docKind), cls: 'solid' });
 router.register('rules', { html: () => V.docView('rules'), cls: 'solid' });
+router.register('pets', {
+  html: () => V.petsView(session.data?.shop ?? null),
+  cls: 'solid',
+  mount: (root) => requestAnimationFrame(() => drawPetIcons(root)),
+});
+router.register('decor', {
+  html: () => V.decorView(session.data?.shop ?? null, decorTab, decorSpot),
+  cls: 'solid',
+  mount: (root) => requestAnimationFrame(() => drawDecorIcons(root)),
+});
+router.register('buyConfirm', {
+  html: () => {
+    const target = buyTarget ? session.data?.shop?.catalog.find((c) => c.id === buyTarget) : undefined;
+    return target ? V.buyConfirmView(ru.decor.names[target.id] ?? target.id, target.price ?? 0, session.data?.shop?.coins ?? 0) : '';
+  },
+  modal: true,
+});
 router.register('styles', {
   html: () => V.stylesView(session.data?.shop ?? null),
   cls: 'solid',
@@ -1203,6 +1448,7 @@ router.register('settings', {
       playerId: session.data?.profile.id ?? null,
       canDelete: session.mode === 'online',
       keys: { show: !isTouch, rebinding, error: keyError },
+      hideLink: session.mode === 'online' && session.data ? !!session.data.privacy?.hide_vk_link : null,
     }),
   cls: 'solid',
 });
@@ -1246,10 +1492,19 @@ router.register('chat', {
 router.register('player', {
   html: () => {
     const u = chat.known.get(chat.cardId);
-    return u ? V.playerCardView(u, u.id === myId()) : '';
+    return u ? V.profileChoiceView({ id: u.id, name: u.name, photo: u.photo, link: u.link !== false, canDuel: true, mine: u.id === myId() }) : '';
   },
   modal: true,
 });
+router.register('profileChoice', {
+  html: () => (profileWho ? V.profileChoiceView(profileWho) : ''),
+  modal: true,
+});
+router.register('profile', {
+  html: () => V.profileView(profileData, profileState),
+  cls: 'solid',
+});
+router.register('moreMenu', { html: () => V.moreMenuView(), modal: true });
 router.register('share', { html: () => V.shareView(canShare()), modal: true });
 router.register('tutorialDone', { html: () => V.tutorialDoneView(), modal: true });
 let stubKind: V.StubKind = 'offline';
@@ -1344,6 +1599,7 @@ async function loadLeaders(force: boolean): Promise<void> {
   const scope = lbScope;
   try {
     const lb = await session.leaderboard(scope, force);
+    for (const r of lb.rows) lbKnown.set(r.user_id, r);
     if (router.top !== 'leaders' || scope !== lbScope) return;
     const offset = lb.server_time - Date.now();
     list.innerHTML = V.leadersBoard(lb, session.data?.profile.id ?? null, true);
@@ -1459,6 +1715,48 @@ const actions: Record<string, (arg: string, el: HTMLElement) => void> = {
     router.back();
     duelClient.send({ t: 'challenge', to: Number(arg) });
   },
+  petPick: (id) => {
+    const pet = session.data?.shop?.decor?.pet;
+    applyDecor({ pet: id === 'pet_none' || pet === id ? null : id });
+    if (router.top === 'pets') router.refresh();
+  },
+  decorTab: (tab) => {
+    decorTab = tab as V.DecorTab;
+    router.refresh();
+  },
+  decorSpot: (spot) => {
+    decorSpot = spot as 'left' | 'right' | 'wall';
+    router.refresh();
+  },
+  decorClear: (spot) => applyDecor({ props: { [spot]: null } }),
+  decorPick: (id) => {
+    const decor = session.data?.shop?.decor ?? {};
+    if (id === 'frame_none') applyDecor({ frame: null });
+    else if (id === 'fx_none') applyDecor({ fx: null });
+    else if (id.startsWith('bg_')) applyDecor({ bg: id === 'bg_default' || decor.bg === id ? null : id });
+    else if (id.startsWith('frame_')) applyDecor({ frame: decor.frame === id ? null : id });
+    else if (id.startsWith('fx_')) applyDecor({ fx: decor.fx === id ? null : id });
+    else if (id.startsWith('prop_')) {
+      // Tap again on the same spot to take the object away.
+      applyDecor({ props: { [decorSpot]: decor.props?.[decorSpot] === id ? null : id } });
+    }
+  },
+  askBuy: (id) => {
+    buyTarget = id;
+    router.open('buyConfirm');
+  },
+  confirmBuy: () => {
+    const id = buyTarget;
+    if (!id) return;
+    void session.buy(id).then((res) => {
+      router.back();
+      if (res.ok) {
+        toast(ru.decor.bought(ru.decor.names[id] ?? id), 2200);
+        audio.play('unlock');
+      } else toast(res.code === 'not_enough_coins' ? ru.decor.notEnough : ru.decor.failed, 2200);
+      if (router.top === 'decor') router.refresh();
+    });
+  },
   wearStyle: (id) => {
     const shop = session.data?.shop;
     const slot = STYLES[id]?.slot;
@@ -1503,8 +1801,29 @@ const actions: Record<string, (arg: string, el: HTMLElement) => void> = {
     if (session.mode === 'offline') void reconnect().then(() => router.refresh());
     else void loadLeaders(true);
   },
+  // Tap on a player in a rating: the game profile or the VK page.
   profile: (arg) => {
+    const id = Number(arg);
+    const row = lbKnown.get(id);
+    if (!row) return;
+    profileWho = { id, name: row.name, photo: row.photo, link: row.link !== false, canDuel: false, mine: id === myId() };
+    router.open('profileChoice');
+  },
+  openVkProfile: (arg) => {
     if (/^\d+$/.test(arg)) window.open(`${PROFILE_URL}${arg}`, '_blank', 'noopener');
+  },
+  openGameProfile: (arg) => {
+    const id = Number(arg);
+    if (!Number.isFinite(id)) return;
+    router.back();
+    void showGameProfile(id);
+  },
+  profileRetry: () => {
+    if (profileId) void showGameProfile(profileId);
+  },
+  openFromMore: (arg) => {
+    router.back();
+    setTimeout(() => router.open(arg), 60);
   },
   support: () => {
     if (SUPPORT_URL) window.open(SUPPORT_URL, '_blank', 'noopener');
@@ -1562,6 +1881,16 @@ document.addEventListener('click', (e) => {
 });
 
 // Toggles and sliders on the settings screen.
+// The privacy switch is saved on the server, not with the other settings.
+document.addEventListener('input', (e) => {
+  const el = e.target as HTMLInputElement;
+  if (el.dataset?.privacy !== 'hideVk') return;
+  const want = el.checked;
+  void session.setHideLink(want).then((saved) => {
+    if (saved === null) el.checked = !want;
+  });
+});
+
 document.addEventListener('input', (e) => {
   const el = e.target as HTMLInputElement;
   const key = el.dataset?.setting as keyof Settings | undefined;
@@ -2193,6 +2522,22 @@ function frame(now: number): void {
   if (document.body.classList.contains('wide')) renderer.drawBackdrop(backdrop, sim);
   if (router.top === 'menu' || router.top === 'wardrobe') drawShowcase(now / 1000);
   if (router.top === 'styles') drawStylesPreview(now / 1000);
+  if (router.top === 'decor') {
+    const dc = document.getElementById('decorHero') as HTMLCanvasElement | null;
+    if (dc) drawStageHero(dc, lastTier(), now / 1000);
+  }
+  if (router.top === 'pets') {
+    const pc = document.getElementById('petsHero') as HTMLCanvasElement | null;
+    if (pc) drawStageHero(pc, lastTier(), now / 1000);
+  }
+  if (router.top === 'profile' && profileData) {
+    const hc = document.getElementById('profileHero') as HTMLCanvasElement | null;
+    if (hc) {
+      stageOverride = { decor: profileData.decor, loadout: profileData.loadout as StyleLoadout, mask: profileData.items_mask, crown: profileData.crown };
+      drawStageHero(hc, profileData.stats.last_tier, now / 1000);
+      stageOverride = null;
+    }
+  }
   updateHud(realDt);
   requestAnimationFrame(frame);
 }
