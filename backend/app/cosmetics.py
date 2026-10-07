@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-SLOTS = ("head", "torso", "arms", "legs", "feet")
+SLOTS = ("head", "torso", "arms", "legs", "feet", "torch")
 
 
 # What an item is. Styles are worn on the hero (one per body slot); the rest decorate the main
@@ -37,6 +37,8 @@ class Item:
     # May drop on a platform during a run.
     drop: bool = False
     kind: str = "style"
+    # Premium: sold for VK votes as part of this product (see PRODUCTS); empty = not premium.
+    product: str = ""
 
 
 def _set(set_id: str, parts: tuple[str, ...], **how) -> list[Item]:
@@ -96,6 +98,32 @@ DECOR: tuple[Item, ...] = (
 )
 ITEMS.update({i.id: i for i in DECOR})
 
+# Premium: sold for VK votes. The price lives here, on the server: the client only names the product.
+# A product gives all of its items at once. The set has 5 parts (the flashlight is a slot of its own).
+PREMIUM_SET = ("head", "torso", "arms", "legs", "torch")
+ITEMS.update({i.id: i for i in _set("seraph", PREMIUM_SET, product="seraph_set")})
+ITEMS["pet_spark"] = Item("pet_spark", "pet", kind="pet", product="pet_spark")
+
+
+@dataclass(frozen=True)
+class Product:
+    id: str
+    # Shown in the VK purchase window (48 characters at most).
+    title: str
+    votes: int
+    items: tuple[str, ...]
+
+
+PRODUCTS: dict[str, Product] = {
+    "seraph_set": Product("seraph_set", "Набор «Серафим»: 5 вещей", 10, tuple(f"seraph_{s}" for s in PREMIUM_SET)),
+    "pet_spark": Product("pet_spark", "Питомец «Золотая искра»", 10, ("pet_spark",)),
+}
+
+
+def products_public() -> list[dict]:
+    return [{"id": p.id, "title": p.title, "votes": p.votes, "items": list(p.items)} for p in PRODUCTS.values()]
+
+
 # Run drops: chance that a run has a drop at all, and the least score a run needs to claim it.
 DROP_CHANCE = 0.35
 DROP_MIN_SCORE = 100
@@ -113,6 +141,7 @@ def catalog_public() -> list[dict]:
             "price": i.price,
             "drop": i.drop,
             "kind": i.kind,
+            "product": i.product,
         }
         for i in ITEMS.values()
     ]

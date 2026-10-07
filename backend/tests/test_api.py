@@ -533,3 +533,145 @@ async def test_five_or_more_objects_can_be_placed(client):
     # An old client that still sends the three fixed places keeps working.
     legacy = await client.put("/api/decor", json={"decor": {"props": {"left": "prop_cup", "wall": "prop_tv"}}}, headers=headers(96))
     assert [p["id"] for p in legacy.json()["decor"]["props"]] == ["prop_cup", "prop_tv"]
+
+
+async def test_profile_shows_what_the_player_wears_and_chose(client):
+    from app.models import OwnedCosmetic
+
+    await ready_player(client, 97)
+    await ready_player(client, 98)
+    async with SessionLocal() as s:
+        user = await s.get(User, 97)
+        user.best_all = 1400
+        await s.commit()
+    await client.post("/api/session/bootstrap", headers=headers(97))  # grants starter items, backgrounds and pets
+    wear = await client.put("/api/loadout", json={"loadout": {"head": "starter_head", "feet": "starter_feet"}}, headers=headers(97))
+    assert wear.status_code == 200
+    decor = await client.put(
+        "/api/decor",
+        json={"decor": {"bg": "bg_dusk", "pet": "pet_dog", "props": [{"id": "prop_football", "x": 0.8, "y": 0.9, "r": 90}]}},
+        headers=headers(97),
+    )
+    assert decor.status_code == 200
+    # Another player opens this profile and sees the same state.
+    prof = (await client.get("/api/players/97", headers=headers(98))).json()
+    assert prof["loadout"] == {"head": "starter_head", "feet": "starter_feet"}
+    assert prof["decor"]["bg"] == "bg_dusk" and prof["decor"]["pet"] == "pet_dog"
+    assert prof["decor"]["props"] == [{"id": "prop_football", "x": 0.8, "y": 0.9, "r": 90}]
+
+
+async def test_duel_start_sends_the_opponent_look(client):
+    """The look helper used by the duel start returns the worn styles and the chosen pet."""
+    from app.duel_ws import _look
+
+    await ready_player(client, 99)
+    async with SessionLocal() as s:
+        user = await s.get(User, 99)
+        user.best_all = 1400
+        await s.commit()
+    await client.post("/api/session/bootstrap", headers=headers(99))
+    await client.put("/api/loadout", json={"loadout": {"torso": "starter_torso"}}, headers=headers(99))
+    await client.put("/api/decor", json={"decor": {"pet": "pet_cat"}}, headers=headers(99))
+    async with SessionLocal() as s:
+        look = await _look(s, await s.get(User, 99))
+    assert look == {"loadout": {"torso": "starter_torso"}, "pet": "pet_cat"}
+
+
+# ---------------------------------------------------------------- purchases for VK votes
+
+def _vk_sign(params: dict) -> str:
+    import hashlib
+
+    from .conftest import SECRET
+
+    raw = "".join(f"{k}={params[k]}" for k in sorted(params)) + SECRET
+    return hashlib.md5(raw.encode()).hexdigest()
+
+
+async def _vk_notify(client, **params):
+    from urllib.parse import urlencode
+
+    from .conftest import APP_ID
+
+    base = {"app_id": str(APP_ID)}
+    base.update({k: str(v) for k, v in params.items()})
+    base["sig"] = _vk_sign(base)
+    r = await client.post("/api/vk/payments", content=urlencode(base), headers={"content-type": "application/x-www-form-urlencoded"})
+    assert r.status_code == 200
+    return r.json()
+
+
+async def test_vk_get_item_and_purchase_delivers_the_set(client):
+    await ready_player(client, 120)
+    info = await _vk_notify(client, notification_type="get_item_test", user_id=120, receiver_id=120, order_id=1, lang="ru_RU", item="seraph_set")
+    assert info["response"]["price"] == 10 and info["response"]["item_id"] == "seraph_set" and len(info["response"]["title"]) <= 48
+    paid = await _vk_notify(
+        client, notification_type="order_status_change_test", user_id=120, receiver_id=120, order_id=777, date=1790000000,
+        status="chargeable", item="seraph_set", item_title="Набор", item_price=10,
+    )
+    assert paid["response"]["order_id"] == 777 and paid["response"]["app_order_id"] >= 1
+    shop = (await client.get("/api/shop", headers=headers(120))).json()
+    assert {"seraph_head", "seraph_torso", "seraph_arms", "seraph_legs", "seraph_torch"} <= set(shop["owned"])
+    assert any(p["id"] == "seraph_set" and p["votes"] == 10 for p in shop["products"])
+    # The same notification again: the same answer and nothing is given twice.
+    again = await _vk_notify(
+        client, notification_type="order_status_change_test", user_id=120, receiver_id=120, order_id=777, date=1790000000,
+        status="chargeable", item="seraph_set", item_title="Набор", item_price=10,
+    )
+    assert again == paid
+    # The goods can be worn, the flashlight has a slot of its own.
+    wear = await client.put("/api/loadout", json={"loadout": {"torch": "seraph_torch", "head": "seraph_head"}}, headers=headers(120))
+    assert wear.status_code == 200 and wear.json()["loadout"] == {"torch": "seraph_torch", "head": "seraph_head"}
+    # A bought set is no longer offered.
+    owned = await _vk_notify(client, notification_type="get_item_test", user_id=120, receiver_id=120, order_id=2, lang="ru_RU", item="seraph_set")
+    assert owned["error"]["error_code"] == 100
+
+
+async def test_vk_payment_checks(client):
+    await ready_player(client, 121)
+    # Bad signature.
+    bad = await client.post(
+        "/api/vk/payments",
+        content="notification_type=get_item&app_id=7000000&user_id=121&item=seraph_set&sig=00",
+        headers={"content-type": "application/x-www-form-urlencoded"},
+    )
+    assert bad.json()["error"]["error_code"] == 10
+    # Unknown product, unknown user, another price, a gift.
+    assert (await _vk_notify(client, notification_type="get_item", user_id=121, receiver_id=121, order_id=1, lang="ru_RU", item="nothing"))["error"]["error_code"] == 20
+    assert (await _vk_notify(client, notification_type="get_item", user_id=999999, receiver_id=999999, order_id=1, lang="ru_RU", item="seraph_set"))["error"]["error_code"] == 22
+    cheap = await _vk_notify(
+        client, notification_type="order_status_change", user_id=121, receiver_id=121, order_id=5, date=1,
+        status="chargeable", item="seraph_set", item_title="x", item_price=1,
+    )
+    assert cheap["error"]["error_code"] == 101
+    gift = await _vk_notify(
+        client, notification_type="order_status_change", user_id=121, receiver_id=122, order_id=6, date=1,
+        status="chargeable", item="seraph_set", item_title="x", item_price=10,
+    )
+    assert gift["error"]["error_code"] == 11
+    shop = (await client.get("/api/shop", headers=headers(121))).json()
+    assert not any(i.startswith("seraph") for i in shop["owned"])
+    # Premium goods cannot be bought for coins.
+    async with SessionLocal() as s:
+        user = await s.get(User, 121)
+        user.coins = 10**6
+        await s.commit()
+    r = await client.post("/api/shop/buy", json={"item_id": "seraph_head"}, headers=headers(121))
+    assert r.json()["error"]["code"] == "not_for_sale"
+
+
+async def test_vk_refund_takes_the_goods_back(client):
+    await ready_player(client, 122)
+    await _vk_notify(
+        client, notification_type="order_status_change", user_id=122, receiver_id=122, order_id=31, date=1,
+        status="chargeable", item="pet_spark", item_title="x", item_price=10,
+    )
+    assert "pet_spark" in (await client.get("/api/shop", headers=headers(122))).json()["owned"]
+    assert (await client.put("/api/decor", json={"decor": {"pet": "pet_spark"}}, headers=headers(122))).status_code == 200
+    back = await _vk_notify(
+        client, notification_type="order_status_change", user_id=122, receiver_id=122, order_id=31, date=1,
+        status="refunded", item="pet_spark", item_title="x", item_price=10,
+    )
+    assert back["response"]["order_id"] == 31
+    shop = (await client.get("/api/shop", headers=headers(122))).json()
+    assert "pet_spark" not in shop["owned"] and "pet" not in shop["decor"]

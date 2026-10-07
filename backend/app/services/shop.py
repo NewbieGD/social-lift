@@ -89,6 +89,7 @@ async def state(session: AsyncSession, user: User) -> dict:
         "duel_streak": user.duel_streak or 0,
         "best_duel_streak": user.best_duel_streak or 0,
         "catalog": cosmetics.catalog_public(),
+        "products": cosmetics.products_public(),
     }
 
 

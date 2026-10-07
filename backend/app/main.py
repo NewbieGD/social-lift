@@ -69,7 +69,9 @@ async def guard(request: Request, call_next):
     if length and (not length.isdigit() or int(length) > MAX_BODY_BYTES):
         return error(413, "payload_too_large", "Request body is too large")
     # Per-IP limit for every API call except health checks.
-    if request.url.path.startswith("/api/") and request.url.path != "/api/health" and request.method != "OPTIONS":
+    # VK's payment servers call from a few addresses at once: those calls are signed instead.
+    exempt = {"/api/health", "/api/vk/payments"}
+    if request.url.path.startswith("/api/") and request.url.path not in exempt and request.method != "OPTIONS":
         retry = limiter.hit(f"ip:{client_ip(request)}", *gc.LIMIT_IP)
         if retry > 0:
             return error(429, "rate_limited", "Too many requests", {"Retry-After": str(int(retry) + 1)})

@@ -27,7 +27,7 @@ from ..core import (
     week_reset_at,
 )
 from ..deps import ApiError, Caller
-from ..models import CoinTx, Event, OwnedCosmetic, Run, User, WeekBest
+from ..models import CoinTx, Event, OwnedCosmetic, Run, User, VkOrder, WeekBest
 from ..schemas import RunFinishIn
 from . import crown, shop
 
@@ -559,6 +559,7 @@ async def _next_above_week(session: AsyncSession, wid: str, score: int, at: date
 
 async def delete_player(session: AsyncSession, caller: Caller) -> None:
     # Explicit deletes so SQLite (tests) and PostgreSQL behave the same.
+    await session.execute(delete(VkOrder).where(VkOrder.user_id == caller.user_id))
     await session.execute(delete(CoinTx).where(CoinTx.user_id == caller.user_id))
     await session.execute(delete(OwnedCosmetic).where(OwnedCosmetic.user_id == caller.user_id))
     await session.execute(delete(Run).where(Run.user_id == caller.user_id))

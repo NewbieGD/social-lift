@@ -23,8 +23,8 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from .config import settings
 from .db import SessionLocal
 from .models import User
-from . import chat_filter
-from .services import game, notify
+from . import chat_filter, cosmetics
+from .services import game, notify, shop
 from .vk_sign import verify_launch_params
 
 log = logging.getLogger("duel")
@@ -367,6 +367,13 @@ async def _expire_invite(target_id: int, from_id: int) -> None:
             await send(fc, {"t": "declined"})
 
 
+async def _look(session, user: User) -> dict:
+    """How a player looks: the styles they wear and their pet, shown on the opponent's screen."""
+    owned = await shop.owned_ids(session, user.id)
+    decor = cosmetics.clean_decor(user.decor or {}, owned)
+    return {"loadout": cosmetics.clean_loadout(user.loadout or {}, owned), "pet": decor.get("pet")}
+
+
 async def accept(me: Conn) -> None:
     inv = invites.pop(me.user_id, None)
     if not inv:
@@ -387,12 +394,23 @@ async def accept(me: Conn) -> None:
             return
         ta = await game.start_run(session, ua, seed=seed, duel_id=duel_id)
         tb = await game.start_run(session, ub, seed=seed, duel_id=duel_id)
+        looks = {ua.id: await _look(session, ua), ub.id: await _look(session, ub)}
     duels[duel_id] = Duel(id=duel_id, a=other.user_id, b=me.user_id)
     start_at = int(time.time() * 1000) + START_DELAY_MS
     for c, ticket, opp in ((other, ta, me), (me, tb, other)):
         c.state = "duel"
         c.duel = duel_id
-        await send(c, {"t": "start", "duel": duel_id, "seed": seed, "start_at": start_at, "ticket": ticket, "opponent": public(opp)})
+        await send(
+            c,
+            {
+                "t": "start",
+                "duel": duel_id,
+                "seed": seed,
+                "start_at": start_at,
+                "ticket": ticket,
+                "opponent": {**public(opp), "look": looks.get(opp.user_id)},
+            },
+        )
 
 
 async def leave_duel(me: Conn) -> None:

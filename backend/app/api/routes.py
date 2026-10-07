@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from typing import Literal
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, Query, Request
+from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .. import game_config as gc
@@ -13,7 +14,7 @@ from ..core import aware, utcnow
 from ..db import get_session
 from ..deps import ApiError, Caller, current_user, enforce_limit
 from ..schemas import BuyIn, ConsentIn, DecorIn, EventIn, LoadoutIn, PrivacyIn, RunFinishIn, SettingsIn
-from ..services import crown, game, public, shop
+from ..services import crown, game, payments, public, shop
 from ..services.profiles import refresh_profiles
 
 router = APIRouter(prefix="/api")
@@ -154,6 +155,15 @@ async def put_privacy(
     user.hide_vk_link = body.hide_vk_link
     await session.commit()
     return {"hide_vk_link": user.hide_vk_link}
+
+
+@router.post("/vk/payments")
+async def vk_payments(request: Request, session: AsyncSession = Depends(get_session)) -> JSONResponse:
+    """Notifications of the VK Payments system (purchases for votes). Signed by VK, no launch params."""
+    body = await request.body()
+    if len(body) > 8192:
+        return JSONResponse(payments._err(payments.BAD_REQUEST, "Too large"))
+    return JSONResponse(await payments.handle(session, payments.parse_body(body)))
 
 
 @router.get("/players/{user_id}")

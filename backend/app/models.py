@@ -168,3 +168,21 @@ class OwnedCosmetic(Base):
     item_id: Mapped[str] = mapped_column(String(40), primary_key=True)
     source: Mapped[str] = mapped_column(String(8))  # record | drop | duel | buy
     acquired_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class VkOrder(Base):
+    """A purchase for VK votes. The pair (order_id, test) is unique: VK repeats notifications."""
+
+    __tablename__ = "vk_orders"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    order_id: Mapped[int] = mapped_column(BigInteger)  # the order in the VK payment system
+    test: Mapped[bool] = mapped_column(Boolean, default=False)
+    user_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    product: Mapped[str] = mapped_column(String(64))
+    votes: Mapped[int] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(String(12))  # delivered | refunded
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    refunded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    __table_args__ = (UniqueConstraint("order_id", "test", name="uq_vk_order"),)
