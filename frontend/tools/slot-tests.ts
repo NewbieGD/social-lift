@@ -34,7 +34,7 @@ test('a head style turns head items into buffs, the rest is still worn', () => {
 });
 
 test('a full set turns everything into buffs', () => {
-  const occ = occupiedSlots({ head: 'a', torso: 'b', arms: 'c', legs: 'd', feet: 'e' });
+  const occ = occupiedSlots({ head: 'a', torso: 'b', arms: 'c', legs: 'd', feet: 'e', torch: 'f' });
   const all = (1 << ITEM_BY_TIER.length) - 1;
   assert.deepEqual(splitBonus(all, occ), { worn: 0, buffs: all });
 });

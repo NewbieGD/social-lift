@@ -118,6 +118,8 @@ export function preparingView(): string {
 
 export interface MenuData {
   stats: Stats | null;
+  /** The statistics cards are unfolded. */
+  statsOpen: boolean;
   /** Coin balance; null when there is no server (offline, outside VK). */
   coins: number | null;
   mode: 'loading' | 'online' | 'offline' | 'outside';
@@ -183,7 +185,7 @@ export function menuView(d: MenuData): string {
       <div class="stage-top">
         <button class="top-btn more-btn" data-action="open" data-arg="moreMenu" aria-label="${ru.menu.more}" title="${ru.menu.more}">${MORE_ICON}</button>
         <button class="top-btn fs-btn" data-action="fullscreen" aria-label="${ru.menu.fullscreen}" title="${ru.menu.fullscreen}">${FS_ICON}</button>
-        ${d.coins === null ? '' : `<div class="coin-pill" title="${ru.menu.coins}" aria-label="${ru.menu.coins}: ${d.coins}">${COIN_ICON}<b>${d.coins}</b></div>`}
+        ${d.coins === null ? '' : `<button class="coin-pill" data-action="open" data-arg="coinsInfo" title="${ru.menu.coins}" aria-label="${ru.menu.coins}: ${d.coins}">${COIN_ICON}<b>${d.coins}</b></button>`}
       </div>
       <div class="hero-stage">
         <span class="stage-glow" aria-hidden="true"></span>
@@ -191,7 +193,12 @@ export function menuView(d: MenuData): string {
         <button class="hero-hit" id="menuHeroHit" data-action="open" data-arg="wardrobe" aria-label="${ru.wardrobe.title}"></button>
         <span class="tap-hint">${HAND_ICON}${ru.wardrobe.hint}</span>
       </div>
-      <div class="chips">${chips}</div>
+      <div class="chips ${d.statsOpen ? 'open' : ''}" id="statsBox">
+        <button class="stats-toggle" data-action="toggleStats" aria-expanded="${d.statsOpen}" aria-label="${ru.menu.stats}">
+          ${ICON.crown}<b>${s?.rank_all ? `#${s.rank_all}` : ru.wardrobe.none}</b><i class="chev" aria-hidden="true">▾</i>
+        </button>
+        <div class="chips-body">${chips}</div>
+      </div>
     </div>
     <div class="menu-actions">
       <button class="primary big play" data-action="play">${ICON.play}<span>${ru.common.play}</span></button>
@@ -205,6 +212,21 @@ export function menuView(d: MenuData): string {
       </div>
       ${status}
     </div>
+  </div>`;
+}
+
+/** What coins are for: how they are earned and where to spend them. */
+export function coinsInfoView(coins: number): string {
+  return `<div class="panel coins-info">
+    <button class="icon-btn close" data-action="back" aria-label="${ru.coinsInfo.close}">${CLOSE_ICON}</button>
+    <div class="coins-big">${COIN_ICON}<b>${coins}</b></div>
+    <p class="muted">${ru.coinsInfo.balance(coins)}</p>
+    <h3>${ru.coinsInfo.earnTitle}</h3>
+    <p>${ru.coinsInfo.earn}</p>
+    <h3>${ru.coinsInfo.spendTitle}</h3>
+    <p>${ru.coinsInfo.spend}</p>
+    <button class="primary" data-action="openFromMore" data-arg="decor">${ru.coinsInfo.open}</button>
+    <button class="secondary" data-action="back">${ru.coinsInfo.close}</button>
   </div>`;
 }
 
@@ -297,8 +319,12 @@ export function wardrobeView(s: Stats | null, mask: number, who?: { name: string
 
 // ---------- Styles ----------
 
-function requirementText(c: CatalogItem | undefined): string {
+function requirementText(c: CatalogItem | undefined, shop?: ShopState): string {
   if (!c) return ru.styles.requireNone;
+  if (c.product) {
+    const pr = shop?.products?.find((q) => q.id === c.product);
+    return pr ? ru.styles.requirePremium(pr.votes) : ru.styles.requireNone;
+  }
   if (c.record !== null) return ru.styles.requireRecord(c.record);
   if (c.duel_streak !== null) return ru.styles.requireStreak(c.duel_streak);
   if (c.drop) return ru.styles.requireDrop;
@@ -306,14 +332,21 @@ function requirementText(c: CatalogItem | undefined): string {
   return ru.styles.requireNone;
 }
 
-export function stylesView(shop: ShopState | null): string {
+export function stylesView(shop: ShopState | null, tab: 'mine' | 'premium' = 'mine', canBuy = true, showPremiumTab = true): string {
   if (!shop) {
     return `${header(ru.styles.title)}<div class="panel flat"><p class="status warn">${ru.duel.offline}</p></div>`;
   }
   const owned = new Set(shop.owned);
   const byId = new Map(shop.catalog.map((c) => [c.id, c]));
   const worn = (slot: string): string | undefined => (shop.loadout as Record<string, string | undefined>)[slot];
-  const slotChips = (['head', 'torso', 'arms', 'legs', 'feet'] as const)
+  const tabs = showPremiumTab
+    ? `<div class="tabs tabs-2" role="tablist">
+        <button role="tab" class="${tab === 'mine' ? 'on' : ''}" aria-selected="${tab === 'mine'}" data-action="stylesTab" data-arg="mine">${ru.premium.tabMine}</button>
+        <button role="tab" class="${tab === 'premium' ? 'on' : ''} premium-tab" aria-selected="${tab === 'premium'}" data-action="stylesTab" data-arg="premium">${ru.premium.tab}</button>
+      </div>`
+    : '';
+  if (tab === 'premium' && showPremiumTab) return `${header(ru.styles.title)}<div class="scroll styles-screen">${tabs}${premiumBody(shop, canBuy)}</div>`;
+  const slotChips = (['head', 'torso', 'arms', 'legs', 'feet', 'torch'] as const)
     .map((slot) => {
       const id = worn(slot);
       return `<button class="slot-chip ${id ? 'on' : ''}" ${id ? `data-action="takeOff" data-arg="${slot}"` : 'disabled'} aria-label="${ru.styles.slots[slot]}">
@@ -331,8 +364,9 @@ export function stylesView(shop: ShopState | null): string {
         const c = byId.get(id)!;
         const isOwned = owned.has(id);
         const isWorn = worn(c.slot) === id;
-        const note = isOwned ? (isWorn ? ru.styles.worn : ru.styles.wear) : requirementText(c);
-        return `<button class="style-card ${isOwned ? 'owned' : 'locked'} ${isWorn ? 'worn' : ''}" ${isOwned ? `data-action="wearStyle" data-arg="${id}"` : 'disabled'} aria-label="${esc(ru.styles.parts[id])}">
+        const note = isOwned ? (isWorn ? ru.styles.worn : ru.styles.wear) : requirementText(c, shop);
+        const premiumLocked = !isOwned && !!c.product && showPremiumTab;
+        return `<button class="style-card ${isOwned ? 'owned' : 'locked'} ${isWorn ? 'worn' : ''} ${premiumLocked ? 'premium-locked' : ''}" ${isOwned ? `data-action="wearStyle" data-arg="${id}"` : premiumLocked ? 'data-action="stylesTab" data-arg="premium"' : 'disabled'} aria-label="${esc(ru.styles.parts[id])}">
           <canvas data-style="${id}" data-locked="${isOwned ? '0' : '1'}" aria-hidden="true"></canvas>
           <b>${esc(ru.styles.parts[id])}</b>
           <span>${esc(isOwned ? ru.styles.slots[c.slot] + ' · ' + note : note)}</span>
@@ -350,6 +384,7 @@ export function stylesView(shop: ShopState | null): string {
     </section>`;
   }).join('');
   return `${header(ru.styles.title)}<div class="scroll styles-screen">
+    ${tabs}
     <div class="styles-top">
       <div class="styles-stage"><span class="stage-glow" aria-hidden="true"></span><canvas id="stylesHero" aria-hidden="true"></canvas></div>
       <div class="slot-chips">${slotChips}</div>
@@ -357,6 +392,49 @@ export function stylesView(shop: ShopState | null): string {
     <p class="muted small">${ru.styles.lead}</p>
     ${sets}
   </div>`;
+}
+
+/** The premium tab: things sold for VK votes (the set and the pet), with previews and buy buttons. */
+function premiumBody(shop: ShopState, canBuy: boolean): string {
+  const owned = new Set(shop.owned);
+  const prod = (id: string): { votes: number; items: string[] } => {
+    const p = shop.products?.find((q) => q.id === id);
+    return p ? { votes: p.votes, items: p.items } : { votes: 10, items: [] };
+  };
+  const set = prod('seraph_set');
+  const setOwned = set.items.length > 0 && set.items.every((i) => owned.has(i));
+  const pet = prod('pet_spark');
+  const petOwned = owned.has('pet_spark');
+  const loadout = shop.loadout as Record<string, string | undefined>;
+  const setWorn = setOwned && set.items.every((i) => Object.values(loadout).includes(i));
+  const petChosen = shop.decor?.pet === 'pet_spark';
+  const buyBtn = (productId: string, votes: number, ownedFlag: boolean): string =>
+    ownedFlag
+      ? ''
+      : `<button class="primary buy-btn" data-action="buyPremium" data-arg="${productId}" ${canBuy ? '' : 'disabled'}>${ru.premium.buy(votes)}</button>`;
+  return `<p class="muted small">${ru.premium.lead}</p>
+    <section class="premium-card">
+      <div class="premium-stage"><span class="stage-glow" aria-hidden="true"></span><canvas id="premiumHero" aria-hidden="true"></canvas></div>
+      <div class="premium-info">
+        <h3>${ru.premium.seraphTitle}</h3>
+        <span class="price-badge">${ru.premium.price(set.votes)}</span>
+        <p>${ru.premium.seraphLead}</p>
+        <ul class="perks"><li>${ru.premium.seraphPerk1}</li><li>${ru.premium.seraphPerk2}</li></ul>
+        <div class="part-icons">${['head', 'torso', 'arms', 'legs', 'torch'].map((slot) => `<canvas data-style="seraph_${slot}" data-locked="${owned.has(`seraph_${slot}`) ? '0' : '0'}" aria-hidden="true"></canvas>`).join('')}</div>
+        ${setOwned ? `<p class="owned-note">✓ ${ru.premium.bought}</p><button class="primary" data-action="${setWorn ? 'takeOffSet' : 'wearSet'}" data-arg="seraph">${setWorn ? ru.styles.takeOffAll : ru.premium.wearSet}</button>` : buyBtn('seraph_set', set.votes, false)}
+      </div>
+    </section>
+    <section class="premium-card">
+      <div class="premium-stage small"><span class="stage-glow" aria-hidden="true"></span><canvas id="premiumPet" aria-hidden="true"></canvas></div>
+      <div class="premium-info">
+        <h3>${ru.premium.petTitle}</h3>
+        <span class="price-badge">${ru.premium.price(pet.votes)}</span>
+        <p>${ru.premium.petLead}</p>
+        ${petOwned ? `<p class="owned-note">✓ ${ru.premium.bought}</p><button class="primary" data-action="petPick" data-arg="pet_spark">${petChosen ? ru.pets.chosen : ru.premium.choosePet}</button>` : buyBtn('pet_spark', pet.votes, false)}
+      </div>
+    </section>
+    ${canBuy ? '' : `<p class="status warn">${ru.premium.notHere}</p>`}
+    <p class="muted small">${ru.premium.note}</p>`;
 }
 
 // ---------- Decoration ----------
@@ -451,13 +529,15 @@ export function petsView(shop: ShopState | null): string {
   const owned = new Set(shop.owned);
   const byId = new Map(shop.catalog.map((c) => [c.id, c]));
   const chosenId = shop.decor?.pet;
-  const cards = ['pet_cat', 'pet_dog', 'pet_parrot']
+  const cards = ['pet_cat', 'pet_dog', 'pet_parrot', 'pet_spark']
     .map((id) => {
       const has = owned.has(id);
       const chosen = chosenId === id;
       const c = byId.get(id);
-      const note = has ? (chosen ? ru.pets.chosen : ru.pets.pick) : c?.record != null ? ru.pets.requireRecord(c.record) : ru.styles.requireNone;
-      return `<button class="style-card decor-card ${has ? 'owned' : 'locked'} ${chosen ? 'worn' : ''}" ${has ? `data-action="petPick" data-arg="${id}"` : 'disabled'} aria-label="${esc(ru.pets.names[id])}">
+      const premium = !!c?.product;
+      const votes = shop.products?.find((q) => q.id === c?.product)?.votes ?? 10;
+      const note = has ? (chosen ? ru.pets.chosen : ru.pets.pick) : premium ? ru.pets.premiumNote(votes) : c?.record != null ? ru.pets.requireRecord(c.record) : ru.styles.requireNone;
+      return `<button class="style-card decor-card ${has ? 'owned' : 'locked'} ${chosen ? 'worn' : ''} ${premium && !has ? 'premium-locked' : ''}" ${has ? `data-action="petPick" data-arg="${id}"` : premium ? 'data-action="openPremium"' : 'disabled'} aria-label="${esc(ru.pets.names[id])}">
         <canvas data-pet="${id}" data-locked="${has ? '0' : '1'}" aria-hidden="true"></canvas>
         <b>${esc(ru.pets.names[id])}</b>
         <span>${esc(note)}</span>
@@ -600,6 +680,7 @@ export function settingsView(
     ${toggle('reducedFx', ru.settings.reducedFx, s.reducedFx)}
     ${toggle('rulesCard', ru.settings.rulesCard, s.rulesCard)}
     ${toggle('cinematic', ru.settings.cinematic, s.cinematic)}
+    ${toggle('duelPreview', ru.settings.duelPreview, s.duelPreview)}
 
     <h3>${ru.settings.docs}</h3>
     <div class="doc-links left">
@@ -999,6 +1080,20 @@ export function profileChoiceView(w: ProfileWho): string {
   </div>`;
 }
 
+/** A short list of what the player has chosen right now (so it is clear what the picture shows). */
+function profileLook(p: PublicProfile): string {
+  const d = p.decor ?? {};
+  const parts: string[] = [];
+  const styles = Object.values(p.loadout ?? {}).filter(Boolean) as string[];
+  if (styles.length) parts.push(`${ru.profile.lookStyles}: ${styles.map((id) => ru.styles.parts[id] ?? id).join(', ')}`);
+  if (d.bg) parts.push(`${ru.profile.lookBg}: ${ru.decor.names[d.bg] ?? d.bg}`);
+  if (d.pet) parts.push(`${ru.profile.lookPet}: ${ru.pets.names[d.pet] ?? d.pet}`);
+  if (d.frame) parts.push(`${ru.profile.lookFrame}: ${ru.decor.names[d.frame] ?? d.frame}`);
+  if (d.fx) parts.push(`${ru.profile.lookFx}: ${ru.decor.names[d.fx] ?? d.fx}`);
+  if (Array.isArray(d.props) && d.props.length) parts.push(`${ru.profile.lookProps}: ${d.props.length}`);
+  return `<div class="profile-look"><b>${ru.profile.lookTitle}</b><p>${parts.length ? parts.map(esc).join(' · ') : ru.profile.lookNone}</p></div>`;
+}
+
 export function profileView(p: PublicProfile | null, state: 'loading' | 'ready' | 'failed'): string {
   if (state !== 'ready' || !p) {
     return `${header(ru.profile.title)}<div class="panel flat center-col">${
@@ -1020,6 +1115,7 @@ export function profileView(p: PublicProfile | null, state: 'loading' | 'ready' 
   return `${header(ru.profile.title)}<div class="scroll profile-screen">
     <div class="profile-stage"><canvas id="profileHero" aria-hidden="true"></canvas></div>
     <h2 class="profile-name">${esc(name)}${p.crown ? ` <span class="leader-badge">${ru.profile.leader}</span>` : ''}</h2>
+    ${profileLook(p)}
     <dl class="ward-stats stagger">${rows.map(([k, val]) => `<div><dt>${k}</dt><dd>${esc(val)}</dd></div>`).join('')}</dl>
     ${p.link ? `<button class="secondary" data-action="openVkProfile" data-arg="${p.id}">${ru.profile.openVk}</button>` : `<p class="muted small">${ru.profileChoice.hidden}</p>`}
   </div>`;

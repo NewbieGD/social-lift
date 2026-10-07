@@ -3,8 +3,8 @@
 // Origin: between the feet on the floor; y grows downward.
 
 import type { Outfit } from './hero';
-import { armColor, armScale, drawStyleArm, drawStyleBack, drawStyleFoot, drawStyleHead, drawStyleLeg, drawStyleTorso, handColor, legColors as styleLegColors, skinFor, torsoColor } from './styleArt';
-import { wornStyles, type StyleLoadout, type WornStyles } from './styles';
+import { armColor, armScale, drawSeraphAura, drawSeraphWings, drawStyleArm, drawStyleBack, drawStyleFoot, drawStyleHead, drawStyleLeg, drawStyleTorch, drawStyleTorso, handColor, legColors as styleLegColors, skinFor, torsoColor } from './styleArt';
+import { fullSeraph, wornStyles, type StyleLoadout, type WornStyles } from './styles';
 import { bodyGradient, edge, fist3d, hand3d, limb3d, sphere, spec, tone, torch3d, type P } from './shade3d';
 
 const SKIN = '#EDB48A';
@@ -116,7 +116,7 @@ export function drawHeroFront(
     sleeve = forearm = armColor(w.arms);
   } else if (w.torso) {
     // A worn top brings its own sleeves (or leaves the arms bare for armor and bare chests).
-    sleeve = forearm = ['hoodie', 'tunic', 'suit', 'wraps', 'web'].includes(w.torso.kind) ? torsoColor(w.torso) : SKIN;
+    sleeve = forearm = ['hoodie', 'tunic', 'suit', 'wraps', 'web', 'seraphArmor'].includes(w.torso.kind) ? torsoColor(w.torso) : SKIN;
   }
   const handSkin = handColor(w.arms, skin);
   const asc = armScale(w.arms);
@@ -130,6 +130,18 @@ export function drawHeroFront(
   ctx.ellipse(0, 0.6, 18, 4, 0, 0, Math.PI * 2);
   ctx.fill();
 
+  // The premium set: the glow of the full set and the wings of the armor.
+  if (w.torso && fullSeraph(w)) {
+    ctx.save();
+    drawSeraphAura(ctx, w.torso, t, -30);
+    ctx.restore();
+  }
+  if (w.torso?.kind === 'seraphArmor') {
+    ctx.save();
+    ctx.translate(0, ty + 21);
+    drawSeraphWings(ctx, w.torso, 21, 'front', 0.5 + 0.1 * Math.sin(t * 2), t);
+    ctx.restore();
+  }
   // Capes and the shell hang behind the whole body.
   if (w.torso && (w.torso.kind === 'tunic' || w.torso.kind === 'suit' || w.torso.kind === 'wraps')) {
     ctx.save();
@@ -310,7 +322,8 @@ export function drawHeroFront(
   ctx.save();
   ctx.translate(tArm[2].x + Math.cos(ang) * 1.6, tArm[2].y + Math.sin(ang) * 1.6 + 1.2);
   ctx.rotate(Math.PI * 0.62);
-  torch3d(ctx, 8.5, 1.8, '255,214,64', o.newTorch);
+  if (w.torch) drawStyleTorch(ctx, w.torch, 8.5, 1.8, t);
+  else torch3d(ctx, 8.5, 1.8, '255,214,64', o.newTorch);
   ctx.restore();
   sphere(ctx, lS.x + 0.6, lS.y + 0.6, 3.6 * asc, 3.4 * asc, sleeve);
   limb3d(ctx, tArm[0], tArm[1], tArm[2], [6 * asc, 5 * asc, 4.4 * asc], sleeve, 1, forearm);
@@ -402,8 +415,8 @@ export function drawHeroFront(
   ctx.save();
   ctx.translate(0, hy);
   ctx.rotate(Math.sin(t * 1.3) * 0.03);
-  const coversHair = !!w.head && ['helmet', 'cowl', 'mask', 'brute'].includes(w.head.kind);
-  if (!coversHair) sphere(ctx, 0, -2, 12.4, 11.6, HAIR);
+  const coversHair = !!w.head && ['helmet', 'cowl', 'mask', 'brute', 'beanie', 'seraphHelm'].includes(w.head.kind);
+  if (!coversHair || w.head?.kind === 'beanie') sphere(ctx, 0, -2, 12.4, 11.6, HAIR);
   for (const s of [-1, 1]) {
     sphere(ctx, s * 11.2, 1.4, 2.5, 3.2, skinHead);
     ctx.strokeStyle = tone(skinHead, -0.4);

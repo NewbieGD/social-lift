@@ -629,10 +629,10 @@ export class Renderer {
     // The pet: a cat or a dog runs behind the hero, a parrot flies in front of him.
     if (this.pet) {
       if (!sim.dead) this.petFollower.update(sim.time, frameDt, this.pet, hx, hy, hero.facing > 0 ? 1 : -1);
-      if (this.pet !== 'parrot') this.paintPet(toY);
+      if (this.pet !== 'parrot' && this.pet !== 'spark') this.paintPet(toY);
     }
     this.drawHero(sim, hx, toY(hy), frameDt, tier);
-    if (this.pet === 'parrot') this.paintPet(toY);
+    if (this.pet === 'parrot' || this.pet === 'spark') this.paintPet(toY);
     this.drawItems(sim, hx, hy, toY, frameDt);
     this.drawHighlights(frameDt);
     this.drawSparkles(frameDt);

@@ -118,7 +118,7 @@ const roof: Painter = (g, w, h, L, u) => {
   vignette(g, w, h, 0.3);
 };
 
-/** Metro platform: tiled wall, a tunnel on the right, a yellow safety line. */
+/** Metro platform: tiled wall, a train standing behind with an open door, a yellow safety line. */
 const metro: Painter = (g, w, h, L, u) => {
   const wall = g.createLinearGradient(0, 0, 0, L.wallBase);
   wall.addColorStop(0, '#DAD6C8');
@@ -164,30 +164,84 @@ const metro: Painter = (g, w, h, L, u) => {
     g.closePath();
     g.fill();
   }
-  // Tunnel opening on the right.
-  const tx = w * 0.7;
-  const tw = w * 0.34;
-  const ty = L.wallBase * 0.3;
-  g.fillStyle = '#0B0C12';
-  g.beginPath();
-  g.moveTo(tx, L.wallBase);
-  g.lineTo(tx, ty + tw * 0.4);
-  g.quadraticCurveTo(tx + tw / 2, ty - tw * 0.2, tx + tw, ty + tw * 0.4);
-  g.lineTo(tx + tw, L.wallBase);
-  g.closePath();
-  g.fill();
-  g.strokeStyle = '#8D8A7C';
-  g.lineWidth = 2 * u;
-  g.stroke();
-  // Rails running into the dark.
-  g.strokeStyle = '#59546A';
-  g.lineWidth = 1.2;
-  for (const dx of [0.3, 0.7]) {
-    g.beginPath();
-    g.moveTo(tx + tw * dx, L.wallBase);
-    g.lineTo(tx + tw * 0.5, L.wallBase - tw * 0.3);
-    g.stroke();
-  }
+  // A train stands at the platform behind: windows on the left, an open door on the right,
+  // a closed door at the far edge.
+  const top = L.wallBase * 0.2;
+  const bodyH = L.wallBase - top;
+  const body = g.createLinearGradient(0, top, 0, L.wallBase);
+  body.addColorStop(0, '#E4E8EF');
+  body.addColorStop(0.55, '#B4BCC9');
+  body.addColorStop(1, '#8C95A5');
+  g.fillStyle = body;
+  g.fillRect(-4, top, w + 8, bodyH);
+  g.fillStyle = '#2C4A86';
+  g.fillRect(-4, top + bodyH * 0.58, w + 8, bodyH * 0.08);
+  g.fillStyle = 'rgba(255,255,255,0.35)';
+  g.fillRect(-4, top, w + 8, 1.4);
+  g.fillStyle = '#4A5160';
+  g.fillRect(-4, L.wallBase - 3 * u, w + 8, 3 * u);
+  // Windows.
+  const win = (x: number, ww: number): void => {
+    const wy = top + bodyH * 0.1;
+    const wh = bodyH * 0.38;
+    g.fillStyle = '#2A2F3C';
+    g.fillRect(x - 1.2, wy - 1.2, ww + 2.4, wh + 2.4);
+    const glass = g.createLinearGradient(0, wy, 0, wy + wh);
+    glass.addColorStop(0, '#FFF1C8');
+    glass.addColorStop(1, '#F2C97A');
+    g.fillStyle = glass;
+    g.fillRect(x, wy, ww, wh);
+    g.fillStyle = 'rgba(80,60,40,0.55)';
+    g.fillRect(x + ww * 0.3, wy, 1.2, wh);
+    g.fillRect(x + ww * 0.72, wy, 1.2, wh);
+    g.fillStyle = 'rgba(255,255,255,0.35)';
+    g.fillRect(x, wy, ww * 0.12, wh);
+  };
+  win(w * 0.05, w * 0.2);
+  win(w * 0.29, w * 0.2);
+  // Open door: the leaves are slid aside and the lit inside is visible.
+  const dx = w * 0.56;
+  const dw = w * 0.24;
+  const dy = top + bodyH * 0.06;
+  const dh = L.wallBase - 3 * u - dy;
+  g.fillStyle = '#1F232D';
+  g.fillRect(dx - 2, dy - 2, dw + 4, dh + 2);
+  const inside = g.createLinearGradient(0, dy, 0, dy + dh);
+  inside.addColorStop(0, '#FFF3D0');
+  inside.addColorStop(1, '#F5CE86');
+  g.fillStyle = inside;
+  g.fillRect(dx, dy, dw, dh);
+  // Seats along the inside back, poles and a handrail.
+  g.fillStyle = '#2C4A86';
+  g.fillRect(dx, dy + dh * 0.58, dw, dh * 0.2);
+  g.fillStyle = '#1E3566';
+  g.fillRect(dx, dy + dh * 0.78, dw, dh * 0.06);
+  g.fillStyle = 'rgba(120,80,40,0.25)';
+  g.fillRect(dx, dy + dh * 0.9, dw, dh * 0.1);
+  g.fillStyle = '#C9CED8';
+  g.fillRect(dx + dw * 0.3, dy, 1.6, dh);
+  g.fillRect(dx + dw * 0.7, dy, 1.6, dh);
+  g.fillRect(dx, dy + dh * 0.14, dw, 1.4);
+  // Door leaves slid to both sides.
+  g.fillStyle = '#C3CAD6';
+  g.fillRect(dx - 1, dy, dw * 0.1, dh);
+  g.fillRect(dx + dw * 0.9 + 1, dy, dw * 0.1, dh);
+  g.fillStyle = 'rgba(0,0,0,0.25)';
+  g.fillRect(dx + dw * 0.1 - 1, dy, 1.6, dh);
+  g.fillRect(dx + dw * 0.9 + 0.2, dy, 1.6, dh);
+  // Closed door at the far edge.
+  const cx2 = w * 0.84;
+  const cw2 = w * 0.18;
+  g.fillStyle = '#9AA3B2';
+  g.fillRect(cx2, dy, cw2, dh);
+  g.fillStyle = '#1F232D';
+  g.fillRect(cx2 + cw2 * 0.48, dy, 1.6, dh);
+  g.fillStyle = '#F2C97A';
+  g.fillRect(cx2 + cw2 * 0.12, dy + dh * 0.1, cw2 * 0.3, dh * 0.32);
+  g.fillRect(cx2 + cw2 * 0.58, dy + dh * 0.1, cw2 * 0.3, dh * 0.32);
+  // Door signal lamp above the open door.
+  g.fillStyle = '#2A2F3C';
+  g.fillRect(dx + dw * 0.4, dy - 5 * u, dw * 0.2, 3 * u);
   // Platform floor with the safety line.
   const floor = g.createLinearGradient(0, L.wallBase, 0, h);
   floor.addColorStop(0, '#7C7A82');
@@ -206,11 +260,6 @@ const metro: Painter = (g, w, h, L, u) => {
     g.lineTo(x - (w / 2 - x) * 0.25, h);
     g.stroke();
   }
-  // A bench against the wall.
-  g.fillStyle = '#3A3C46';
-  g.fillRect(w * 0.14, L.wallBase - 6 * u, w * 0.3, 2 * u);
-  g.fillRect(w * 0.16, L.wallBase - 4 * u, 1.4 * u, 4 * u);
-  g.fillRect(w * 0.4, L.wallBase - 4 * u, 1.4 * u, 4 * u);
   vignette(g, w, h, 0.3);
 };
 
@@ -533,13 +582,17 @@ function animate(g: Ctx, id: string, w: number, h: number, L: StageLayout, u: nu
       break;
     }
     case 'bg_metro': {
-      // A train's headlights sweep through the tunnel now and then.
-      const p = (t % 9) / 9;
-      if (p < 0.4) {
-        const k = p / 0.4;
-        const cx = w * 0.7 + w * 0.17;
-        glow(g, cx, L.wallBase - 8 * u, (6 + k * 26) * u, 'rgba(255,250,215,1)', 0.15 + k * 0.55);
-      }
+      // The door signal blinks and the lit inside of the car flickers a little.
+      const dx = w * 0.56;
+      const dw = w * 0.24;
+      const top = L.wallBase * 0.2;
+      const bodyH = L.wallBase - top;
+      const dy = top + bodyH * 0.06;
+      const on = Math.sin(t * 5) > 0;
+      glow(g, dx + dw / 2, dy - 3.5 * u, 6 * u, on ? '#FF4C5A' : '#7DFF6B', on ? 0.9 : 0.5);
+      g.fillStyle = on ? '#FF4C5A' : '#7DFF6B';
+      g.fillRect(dx + dw * 0.42, dy - 4.6 * u, dw * 0.16, 1.4 * u);
+      glow(g, dx + dw / 2, dy + bodyH * 0.4, dw, 'rgba(255,230,160,1)', 0.12 + 0.04 * Math.sin(t * 3));
       break;
     }
     case 'bg_neon': {

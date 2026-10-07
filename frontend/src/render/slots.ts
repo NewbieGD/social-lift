@@ -4,9 +4,9 @@
 
 import { ITEM_BY_TIER } from './hero';
 
-export type Slot = 'head' | 'torso' | 'arms' | 'legs' | 'feet';
+export type Slot = 'head' | 'torso' | 'arms' | 'legs' | 'feet' | 'torch';
 
-export const SLOTS: readonly Slot[] = ['head', 'torso', 'arms', 'legs', 'feet'];
+export const SLOTS: readonly Slot[] = ['head', 'torso', 'arms', 'legs', 'feet', 'torch'];
 
 /** Which slot every bonus item belongs to. */
 export const ITEM_SLOT: Record<string, Slot> = {
@@ -21,7 +21,7 @@ export const ITEM_SLOT: Record<string, Slot> = {
   jacket: 'torso',
   tie: 'torso',
   watch: 'arms',
-  newTorch: 'arms',
+  newTorch: 'torch',
   phone: 'arms',
 };
 

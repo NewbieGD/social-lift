@@ -6,6 +6,8 @@ export interface DuelPlayer {
   id: number;
   name: string | null;
   photo: string | null;
+  /** How the opponent looks: worn styles and the pet (shown on their screen in the duel). */
+  look?: { loadout: Record<string, string>; pet: string | null } | null;
 }
 
 export interface ChatUser {

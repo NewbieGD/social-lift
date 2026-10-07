@@ -17,7 +17,7 @@ export const PROP_IDS = [
 ] as const;
 
 /** The TV screen in prop units (relative to the base): the last run is shown here. */
-export const TV_SCREEN = { x: -4.8, y: -19.4, w: 9.6, h: 16.6 };
+export const TV_SCREEN = { x: -7.6, y: -13.8, w: 10.8, h: 10.4 };
 
 function shadow(g: Ctx, rx: number): void {
   const s = g.createRadialGradient(0, 0.4, 0.5, 0, 0.4, rx);
@@ -215,43 +215,87 @@ export function drawProp(g: Ctx, id: string, t: number, tv?: (g: Ctx, w: number,
       break;
     }
     case 'prop_tv': {
-      shadow(g, 6.8);
-      // Stand.
-      g.fillStyle = '#2A2C36';
-      g.fillRect(-3.2, -2.2, 6.4, 1.6);
-      g.fillRect(-1, -3.4, 2, 1.4);
-      // Body and bezel.
+      // An old square TV with a wooden cabinet, a round screen window, knobs and rabbit-ear antennas.
+      shadow(g, 9);
+      g.fillStyle = '#2A2018';
+      g.fillRect(-7.4, -1.8, 3, 1.8);
+      g.fillRect(4.4, -1.8, 3, 1.8);
+      // Antennas: a V of two rods on a little round base.
+      g.strokeStyle = '#C9CED8';
+      g.lineWidth = 0.7;
+      g.lineCap = 'round';
       g.beginPath();
-      g.roundRect(-6.2, -23.2, 12.4, 20.2, 1.6);
-      g.fillStyle = bodyGradient(g, '#3A3D4A', -6.2, 6.2);
+      g.moveTo(-0.6, -15.8);
+      g.lineTo(-8.4, -26);
+      g.moveTo(0.6, -15.8);
+      g.lineTo(6.6, -24.6);
+      g.stroke();
+      g.fillStyle = '#E7EAF0';
+      for (const [x, y] of [[-8.4, -26], [6.6, -24.6]] as [number, number][]) {
+        g.beginPath();
+        g.arc(x, y, 0.8, 0, Math.PI * 2);
+        g.fill();
+      }
+      g.fillStyle = '#3A3D4A';
+      g.beginPath();
+      g.ellipse(0, -15.6, 2.6, 1, 0, 0, Math.PI * 2);
       g.fill();
-      edge(g, '#3A3D4A', 0.7);
+      // Cabinet.
+      g.beginPath();
+      g.roundRect(-9.4, -16, 18.8, 14.6, 2);
+      g.fillStyle = bodyGradient(g, '#8A5E3A', -9.4, 9.4);
+      g.fill();
+      edge(g, '#8A5E3A', 0.7);
+      g.strokeStyle = 'rgba(40,24,12,0.25)';
+      g.lineWidth = 0.4;
+      for (let y = -14.6; y < -2; y += 1.8) {
+        g.beginPath();
+        g.moveTo(-9, y);
+        g.lineTo(9, y + 0.3);
+        g.stroke();
+      }
+      // Screen window.
       const s = TV_SCREEN;
       g.beginPath();
-      g.roundRect(s.x - 0.5, s.y - 0.5, s.w + 1, s.h + 1, 1);
-      g.fillStyle = '#05060A';
+      g.roundRect(s.x - 1, s.y - 1, s.w + 2, s.h + 2, 3);
+      g.fillStyle = '#1E160F';
       g.fill();
       g.save();
       g.beginPath();
-      g.roundRect(s.x, s.y, s.w, s.h, 0.8);
+      g.roundRect(s.x, s.y, s.w, s.h, 2.4);
       g.clip();
       g.translate(s.x, s.y);
+      g.fillStyle = '#05060A';
+      g.fillRect(0, 0, s.w, s.h);
       if (tv) tv(g, s.w, s.h);
-      else {
-        g.fillStyle = '#10131C';
-        g.fillRect(0, 0, s.w, s.h);
-      }
-      // Glass shine.
+      // Curved glass: dark corners and a shine.
+      const vg = g.createRadialGradient(s.w / 2, s.h / 2, s.h * 0.3, s.w / 2, s.h / 2, s.w * 0.8);
+      vg.addColorStop(0, 'rgba(0,0,0,0)');
+      vg.addColorStop(1, 'rgba(0,0,0,0.45)');
+      g.fillStyle = vg;
+      g.fillRect(0, 0, s.w, s.h);
       const sh = g.createLinearGradient(0, 0, s.w, s.h);
-      sh.addColorStop(0, 'rgba(255,255,255,0.18)');
-      sh.addColorStop(0.4, 'rgba(255,255,255,0)');
+      sh.addColorStop(0, 'rgba(255,255,255,0.2)');
+      sh.addColorStop(0.35, 'rgba(255,255,255,0)');
       g.fillStyle = sh;
       g.fillRect(0, 0, s.w, s.h);
       g.restore();
-      glowAt(g, 0, -12, 14, 'rgba(120,180,255,1)', 0.18);
+      // Control panel: speaker grille and two knobs.
+      g.strokeStyle = '#2A2018';
+      g.lineWidth = 0.5;
+      for (let i = 0; i < 5; i++) {
+        g.beginPath();
+        g.moveTo(4.8, -13.6 + i * 1.3);
+        g.lineTo(8.2, -13.6 + i * 1.3);
+        g.stroke();
+      }
+      for (const [y, c] of [[-6.4, '#D9C27A'], [-3.7, '#C9CED8']] as [number, string][]) {
+        sphere(g, 6.5, y, 1.35, 1.35, c);
+      }
+      glowAt(g, s.x + s.w / 2, s.y + s.h / 2, 13, 'rgba(120,180,255,1)', 0.16);
       g.fillStyle = '#7DFF6B';
       g.beginPath();
-      g.arc(4.6, -3.6, 0.4, 0, Math.PI * 2);
+      g.arc(7.6, -2.6, 0.35, 0, Math.PI * 2);
       g.fill();
       break;
     }
@@ -276,7 +320,7 @@ export function propHalfWidth(id: string): number {
     case 'prop_sword':
       return 4;
     case 'prop_tv':
-      return 6.4;
+      return 9.4;
     default:
       return 5;
   }
@@ -298,7 +342,7 @@ export function propHeight(id: string): number {
     case 'prop_sword':
       return 34;
     case 'prop_tv':
-      return 23;
+      return 26;
     default:
       return 10;
   }

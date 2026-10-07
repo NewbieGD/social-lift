@@ -137,7 +137,13 @@ export class ReplayTv {
     this.renderer.ownedMask = sim.owned;
     this.renderer.draw(sim, Math.min(1, this.acc / DT), 1 / 30);
     this.drawn = true;
-    g.drawImage(this.canvas, 0, 0, w, h);
+    // The run is a tall picture and the TV is square: keep its proportions, bars on the sides.
+    g.fillStyle = '#05060A';
+    g.fillRect(0, 0, w, h);
+    const ar = this.canvas.width / Math.max(1, this.canvas.height);
+    const dw = Math.min(w, h * ar);
+    const dh = dw / ar;
+    g.drawImage(this.canvas, (w - dw) / 2, (h - dh) / 2, dw, dh);
     if (sim.dead) {
       g.fillStyle = 'rgba(0,0,0,0.45)';
       g.fillRect(0, 0, w, h);

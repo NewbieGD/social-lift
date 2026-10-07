@@ -27,6 +27,8 @@ export interface StyleDef {
 
 export interface StyleSet {
   id: string;
+  /** Sold for VK votes (not found or earned). */
+  premium?: boolean;
   palette: Palette;
   /** Parts in display order. */
   parts: Slot[];
@@ -73,6 +75,14 @@ export const STYLE_SETS: StyleSet[] = [
     parts: ['head', 'torso', 'arms', 'legs'],
   },
   {
+    // Premium: pearl-white and gold armor with winged boots and a glowing cyan crystal. Worn
+    // completely it wraps the hero in light; the armor also grows wings while he jumps.
+    id: 'seraph',
+    premium: true,
+    palette: { main: '#F4F1E8', sub: '#E9B93C', accent: '#7FE8FF', dark: '#2B3A8C', glow: '#BFF6FF' },
+    parts: ['head', 'torso', 'arms', 'legs', 'torch'],
+  },
+  {
     // Green skin and ragged teal clothes: huge arms, torn trousers.
     id: 'brute',
     palette: { main: '#55707A', sub: '#34474F', accent: '#9CD28A', dark: '#223037', skin: '#6FBF5B', skinShade: '#4E9540' },
@@ -88,6 +98,7 @@ const KINDS: Record<string, Partial<Record<Slot, string>>> = {
   ninja: { head: 'headband', torso: 'wraps', arms: 'wrap', legs: 'wraplegs' },
   acrobat: { head: 'mask', torso: 'web', arms: 'webglove', legs: 'weblegs' },
   brute: { head: 'brute', torso: 'bare', arms: 'big', legs: 'torn' },
+  seraph: { head: 'seraphHelm', torso: 'seraphArmor', arms: 'seraphGauntlet', legs: 'seraphGreaves', torch: 'seraphLantern' },
 };
 
 export const STYLES: Record<string, StyleDef> = {};
@@ -111,6 +122,7 @@ export interface WornStyles {
   arms?: StyleDef;
   legs?: StyleDef;
   feet?: StyleDef;
+  torch?: StyleDef;
   /** The style that draws the boots: a feet piece, else the boots of a worn legs piece. */
   boots?: StyleDef;
 }
@@ -123,11 +135,17 @@ export function wornStyles(loadout: StyleLoadout | undefined): WornStyles {
   w.arms = styleDef(loadout.arms);
   w.legs = styleDef(loadout.legs);
   w.feet = styleDef(loadout.feet);
+  w.torch = styleDef(loadout.torch);
   // A full-body set (no separate feet piece) brings its own boots.
   w.boots = w.feet ?? (w.legs && w.legs.set !== 'starter' ? w.legs : undefined);
   return w;
 }
 
 export function hasAnyStyle(w: WornStyles): boolean {
-  return !!(w.head || w.torso || w.arms || w.legs || w.feet);
+  return !!(w.head || w.torso || w.arms || w.legs || w.feet || w.torch);
+}
+
+/** All five parts of the premium set are worn together: the hero glows. */
+export function fullSeraph(w: WornStyles): boolean {
+  return [w.head, w.torso, w.arms, w.legs, w.torch].every((d) => d?.set === 'seraph');
 }

@@ -20,6 +20,8 @@ export interface Settings {
   rulesCard: boolean;
   /** Freeze-frame movie when the outfit changes. */
   cinematic: boolean;
+  /** Show the opponent's game in the corner during a duel. */
+  duelPreview: boolean;
   /** Keyboard bindings for the four light buttons (KeyboardEvent.code), browser only. */
   keyYellow: string;
   keyBlue: string;
@@ -40,6 +42,7 @@ export const DEFAULTS: Settings = {
   reducedFx: false,
   rulesCard: true,
   cinematic: true,
+  duelPreview: true,
   keyYellow: 'Digit1',
   keyBlue: 'Digit2',
   keyGreen: 'Digit3',

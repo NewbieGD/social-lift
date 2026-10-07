@@ -22,7 +22,7 @@ export interface Stats {
   crown?: boolean;
 }
 
-export type Slot = 'head' | 'torso' | 'arms' | 'legs' | 'feet';
+export type Slot = 'head' | 'torso' | 'arms' | 'legs' | 'feet' | 'torch';
 export type Loadout = Partial<Record<Slot, string>>;
 
 export interface CatalogItem {
@@ -36,8 +36,18 @@ export interface CatalogItem {
   /** Price in coins, or null when it is not for sale. */
   price: number | null;
   drop: boolean;
-  /** style | bg | prop | frame | fx */
+  /** style | bg | prop | frame | fx | pet */
   kind: string;
+  /** Premium: the product (sold for VK votes) this item belongs to, or "". */
+  product: string;
+}
+
+/** Something sold for VK votes: all of its items come at once. */
+export interface Product {
+  id: string;
+  title: string;
+  votes: number;
+  items: string[];
 }
 
 /** Coins, owned cosmetics, what is worn, and the catalog of rules (all from the server). */
@@ -66,6 +76,7 @@ export interface ShopState {
   owned: string[];
   loadout: Loadout;
   catalog: CatalogItem[];
+  products?: Product[];
   duel_streak?: number;
   best_duel_streak?: number;
 }

@@ -62,29 +62,36 @@ export function drawStyleHead(ctx: CanvasRenderingContext2D, d: StyleDef, view: 
   const rx = side ? 9.8 : 10.8;
   switch (d.kind) {
     case 'beanie': {
-      // Knitted cap with a folded band and a pompom.
+      // Knitted cap pulled over the whole top of the head: the band sits just above the brows,
+      // the dome covers the hair, a pompom on top.
+      const yb = side ? -6.6 : -7.2; // bottom of the folded band
+      const bh = 4.2;
+      const hw = rx + 1.8;
       ctx.beginPath();
-      ctx.moveTo(cx - rx - 0.9, -2.4);
-      ctx.bezierCurveTo(cx - rx - 1.6, -15.5, cx + rx + 1.8, -15.5, cx + rx + 1, -2.4);
-      ctx.quadraticCurveTo(cx, -5.4, cx - rx - 0.9, -2.4);
+      ctx.moveTo(cx - hw + 0.4, yb - bh + 0.4);
+      ctx.bezierCurveTo(cx - hw - 0.6, -21, cx + hw + 0.6, -21, cx + hw - 0.4, yb - bh + 0.4);
       ctx.closePath();
-      const g = ctx.createRadialGradient(cx - 3, -11, 1, cx, -6, 15);
-      g.addColorStop(0, tone(p.sub, 0.3));
+      const g = ctx.createRadialGradient(cx - 3.4, -16, 1, cx, -12, 16);
+      g.addColorStop(0, tone(p.sub, 0.34));
       g.addColorStop(0.5, p.sub);
-      g.addColorStop(1, tone(p.sub, -0.35));
+      g.addColorStop(1, tone(p.sub, -0.34));
       ctx.fillStyle = g;
       ctx.fill();
       edge(ctx, p.sub);
-      ctx.strokeStyle = 'rgba(255,255,255,0.16)';
+      ctx.save();
+      ctx.clip();
+      ctx.strokeStyle = 'rgba(255,255,255,0.14)';
       ctx.lineWidth = 0.7;
-      for (let i = -3; i <= 3; i++) {
+      for (let i = -4; i <= 4; i++) {
         ctx.beginPath();
-        ctx.moveTo(cx + i * 2.8, -14);
-        ctx.quadraticCurveTo(cx + i * 3.2, -9, cx + i * 3.6, -5.4);
+        ctx.moveTo(cx + i * 1.5, -20);
+        ctx.quadraticCurveTo(cx + i * 3.4, -14, cx + i * 3.2, yb - bh);
         ctx.stroke();
       }
-      rr(ctx, cx - rx - 1.2, -6.2, rx * 2 + 2.4, 4.4, 2.1);
-      const bg = ctx.createLinearGradient(0, -6.2, 0, -1.8);
+      ctx.restore();
+      // Folded band with ribbing.
+      rr(ctx, cx - hw - 0.6, yb - bh, hw * 2 + 1.2, bh, 2);
+      const bg = ctx.createLinearGradient(0, yb - bh, 0, yb);
       bg.addColorStop(0, '#F4F8FD');
       bg.addColorStop(1, '#BFCCDD');
       ctx.fillStyle = bg;
@@ -92,13 +99,13 @@ export function drawStyleHead(ctx: CanvasRenderingContext2D, d: StyleDef, view: 
       edge(ctx, '#BFCCDD');
       ctx.strokeStyle = 'rgba(70,90,120,0.45)';
       ctx.lineWidth = 0.6;
-      for (let i = -4; i <= 4; i++) {
+      for (let i = -5; i <= 5; i++) {
         ctx.beginPath();
-        ctx.moveTo(cx + i * 2.4, -6);
-        ctx.lineTo(cx + i * 2.4, -2.2);
+        ctx.moveTo(cx + i * 2.3, yb - bh + 0.4);
+        ctx.lineTo(cx + i * 2.3, yb - 0.4);
         ctx.stroke();
       }
-      sphere(ctx, cx, -15.4, 2.9, 2.6, p.accent);
+      sphere(ctx, cx, -20.4, 2.7, 2.5, p.accent);
       break;
     }
     case 'helmet': {
@@ -398,6 +405,105 @@ export function drawStyleHead(ctx: CanvasRenderingContext2D, d: StyleDef, view: 
       }
       break;
     }
+    case 'seraphHelm': {
+      // A pearl helm with a face window, a gold visor over the eyes, little wings at the temples
+      // and a halo that floats above.
+      ctx.beginPath();
+      ctx.ellipse(cx - (side ? 1.2 : 0), -0.8, rx + 2, 12.6, 0, 0, Math.PI * 2);
+      if (side) {
+        ctx.moveTo(cx + 0.2, -4.4);
+        ctx.quadraticCurveTo(cx + rx + 2.2, -5.6, cx + rx + 2.6, -1);
+        ctx.quadraticCurveTo(cx + rx + 3, 6, cx + 4, 11.6);
+        ctx.quadraticCurveTo(cx - 1.4, 9, cx + 0.2, 2);
+        ctx.closePath();
+      } else {
+        ctx.moveTo(-8.8, -4.6);
+        ctx.quadraticCurveTo(0, -6.8, 8.8, -4.6);
+        ctx.quadraticCurveTo(10.2, 4, 5.6, 10.8);
+        ctx.quadraticCurveTo(0, 13, -5.6, 10.8);
+        ctx.quadraticCurveTo(-10.2, 4, -8.8, -4.6);
+        ctx.closePath();
+      }
+      const g = ctx.createRadialGradient(cx - 4, -9, 1, cx, 0, 17);
+      g.addColorStop(0, '#FFFFFF');
+      g.addColorStop(0.5, p.main);
+      g.addColorStop(1, tone(p.main, -0.28));
+      ctx.fillStyle = g;
+      ctx.fill('evenodd');
+      edge(ctx, p.main, 0.9);
+      // Gold crest line over the top.
+      ctx.strokeStyle = p.sub;
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(cx - (side ? 8 : 0), -11.6);
+      ctx.quadraticCurveTo(cx + (side ? 2 : 0), -14.6, cx + (side ? 9 : 0), -9);
+      ctx.stroke();
+      // Gold visor band with glowing cyan slits.
+      ctx.beginPath();
+      if (side) {
+        ctx.moveTo(cx + 0.2, -4.6);
+        ctx.lineTo(cx + rx + 2.4, -5.2);
+        ctx.lineTo(cx + rx + 2.6, 1.2);
+        ctx.lineTo(cx + 0.2, 1.6);
+      } else {
+        ctx.moveTo(-9, -4.8);
+        ctx.quadraticCurveTo(0, -6.8, 9, -4.8);
+        ctx.lineTo(9.2, 1.4);
+        ctx.quadraticCurveTo(0, 2.8, -9.2, 1.4);
+      }
+      ctx.closePath();
+      const vg = ctx.createLinearGradient(0, -6, 0, 2);
+      vg.addColorStop(0, tone(p.sub, 0.35));
+      vg.addColorStop(1, tone(p.sub, -0.25));
+      ctx.fillStyle = vg;
+      ctx.fill();
+      edge(ctx, p.sub, 0.8);
+      ctx.fillStyle = p.accent;
+      for (const e of eyes(view)) {
+        ctx.beginPath();
+        ctx.moveTo(e.x - e.r - 0.4, -2.2);
+        ctx.lineTo(e.x + e.r + 0.8, -3);
+        ctx.lineTo(e.x + e.r + 0.2, -0.2);
+        ctx.lineTo(e.x - e.r, 0);
+        ctx.closePath();
+        ctx.fill();
+        glowDot(ctx, e.x, -1.4, 5, p.accent, 0.6);
+      }
+      // Little feathered wings at the temples.
+      for (const sd of side ? [-1] : [-1, 1]) {
+        ctx.save();
+        ctx.translate(side ? cx - rx - 1.2 : sd * (rx + 1.4), -3.4);
+        ctx.scale(side ? 1 : -sd, 1);
+        for (let i = 0; i < 3; i++) {
+          ctx.save();
+          ctx.rotate(-0.5 + i * 0.42);
+          ctx.beginPath();
+          ctx.moveTo(0, 0);
+          ctx.quadraticCurveTo(-3 - i * 0.6, -1.4, -8 + i * 1.2, -1.2 + i * 0.3);
+          ctx.quadraticCurveTo(-3, 1.6, 0, 1);
+          ctx.closePath();
+          ctx.fillStyle = i === 1 ? p.main : tone(p.main, -0.06);
+          ctx.fill();
+          edge(ctx, p.sub, 0.5);
+          ctx.restore();
+        }
+        ctx.restore();
+      }
+      // The halo.
+      const hy = -19.5 + Math.sin(t * 2) * 0.5;
+      glowDot(ctx, cx, hy, 14, p.sub, 0.55);
+      ctx.strokeStyle = tone(p.sub, 0.3);
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.ellipse(cx, hy, 8.4, 2.4, 0, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.strokeStyle = '#FFF7D6';
+      ctx.lineWidth = 0.8;
+      ctx.beginPath();
+      ctx.ellipse(cx, hy, 8.4, 2.4, 0, Math.PI * 1.05, Math.PI * 1.9);
+      ctx.stroke();
+      break;
+    }
     case 'brute': {
       // Messy dark hair, heavy angry brows and clenched teeth (the skin is tinted by the caller).
       ctx.fillStyle = '#2B2A22';
@@ -441,7 +547,8 @@ export function torsoColor(d: StyleDef): string {
     case 'suit':
     case 'wraps':
     case 'web':
-      return d.kind === 'hoodie' ? d.palette.main : d.palette.main;
+    case 'seraphArmor':
+      return d.palette.main;
     case 'bare':
       return d.palette.skin ?? SKIN;
     default:
@@ -709,6 +816,68 @@ export function drawStyleTorso(ctx: CanvasRenderingContext2D, d: StyleDef, len: 
       ctx.fill();
       break;
     }
+    case 'seraphArmor': {
+      // Blue undersuit at the sides, pearl chest plates with gold ridges, a cyan crystal.
+      ctx.fillStyle = p.dark;
+      for (const sd of [-1, 1]) {
+        ctx.fillRect(mid + sd * (hw - 2.4) - 1.2, -len + 1, 2.4, len - 3);
+      }
+      for (const sd of [-1, 1]) {
+        ctx.beginPath();
+        ctx.moveTo(mid + sd * 0.6, -len + 3);
+        ctx.quadraticCurveTo(mid + sd * (hw - 0.6), -len + 1.4, mid + sd * (hw - 1.6), -len * 0.5);
+        ctx.quadraticCurveTo(mid + sd * (hw * 0.5), -len * 0.36, mid + sd * 0.6, -len * 0.42);
+        ctx.closePath();
+        ctx.fillStyle = tone(p.main, sd < 0 ? 0.1 : -0.04);
+        ctx.fill();
+        ctx.strokeStyle = p.sub;
+        ctx.lineWidth = 0.9;
+        ctx.stroke();
+      }
+      // Feather ridges on the abdomen.
+      ctx.strokeStyle = p.sub;
+      ctx.lineWidth = 0.9;
+      for (let i = 0; i < 3; i++) {
+        const y = -len * 0.34 + i * 3.4;
+        ctx.beginPath();
+        ctx.moveTo(mid - hw * 0.62, y + 1.2);
+        ctx.quadraticCurveTo(mid, y - 0.8, mid + hw * 0.62, y + 1.2);
+        ctx.stroke();
+      }
+      // The crystal.
+      const gy = -len * 0.62;
+      glowDot(ctx, mid, gy, 7, p.accent, 0.8);
+      ctx.beginPath();
+      ctx.moveTo(mid, gy - 3.4);
+      ctx.lineTo(mid + 2.2, gy);
+      ctx.lineTo(mid, gy + 3.4);
+      ctx.lineTo(mid - 2.2, gy);
+      ctx.closePath();
+      const cg = ctx.createLinearGradient(mid - 2, gy - 3, mid + 2, gy + 3);
+      cg.addColorStop(0, '#FFFFFF');
+      cg.addColorStop(0.5, p.accent);
+      cg.addColorStop(1, '#3FB8E0');
+      ctx.fillStyle = cg;
+      ctx.fill();
+      ctx.strokeStyle = p.sub;
+      ctx.lineWidth = 0.8;
+      ctx.stroke();
+      // Gold collar and a belt with a pair of wing marks.
+      ctx.fillStyle = p.sub;
+      ctx.fillRect(-hw - 1, -len, hw * 2 + 2, 2);
+      rr(ctx, -hw - 1, -5.4, hw * 2 + 2, 5.4, 1.2);
+      ctx.fillStyle = bodyGradient(ctx, p.sub, -hw, hw);
+      ctx.fill();
+      ctx.strokeStyle = p.dark;
+      ctx.lineWidth = 0.7;
+      for (const sd of [-1, 1]) {
+        ctx.beginPath();
+        ctx.moveTo(mid + sd * 0.8, -2.8);
+        ctx.quadraticCurveTo(mid + sd * 3.6, -4.8, mid + sd * 5.6, -3.4);
+        ctx.stroke();
+      }
+      break;
+    }
     case 'bare': {
       ctx.strokeStyle = tone(p.skin ?? SKIN, -0.3);
       ctx.lineWidth = 0.9;
@@ -757,6 +926,11 @@ export function armColor(d: StyleDef): string {
   return d.kind === 'big' ? d.palette.skin ?? SKIN : d.palette.main;
 }
 
+/** True when this arm style is the premium gauntlet (gold pauldron, cyan rings). */
+export function isSeraphArm(d: StyleDef | undefined): boolean {
+  return d?.kind === 'seraphGauntlet';
+}
+
 export function armScale(d: StyleDef | undefined): number {
   return d?.kind === 'big' ? 1.34 : 1;
 }
@@ -765,6 +939,7 @@ export function handColor(d: StyleDef | undefined, skin: string): string {
   if (!d) return skin;
   switch (d.kind) {
     case 'gauntlet':
+    case 'seraphGauntlet':
       return d.palette.sub;
     case 'bracer':
       return d.palette.dark;
@@ -794,6 +969,26 @@ export function drawStyleArm(ctx: CanvasRenderingContext2D, d: StyleDef, l: Limb
     case 'bracer':
       limb3d(ctx, lerp(el, wr, 0.3), lerp(el, wr, 0.65), wr, [5.2, 5, 4.6], tone(p.sub, k), 1);
       break;
+    case 'seraphGauntlet': {
+      // A gold pauldron on the shoulder, a long gold bracer and glowing cyan rings.
+      sphere(ctx, l[0].x, l[0].y + 0.4, 3.9, 3.4, tone(p.sub, k));
+      ctx.strokeStyle = tone(p.main, k);
+      ctx.lineWidth = 0.8;
+      ctx.beginPath();
+      ctx.arc(l[0].x, l[0].y + 0.4, 2.2, Math.PI * 1.1, Math.PI * 1.9);
+      ctx.stroke();
+      limb3d(ctx, lerp(el, wr, 0.3), lerp(el, wr, 0.62), wr, [5.7, 5.5, 5], tone(p.sub, k), 1);
+      for (const u of [0.34, 0.8]) {
+        const a = lerp(el, wr, u);
+        glowDot(ctx, a.x, a.y, 4.4, p.accent, 0.6);
+        ctx.beginPath();
+        ctx.arc(a.x, a.y, 2.9, 0, Math.PI * 2);
+        ctx.strokeStyle = p.accent;
+        ctx.lineWidth = 0.9;
+        ctx.stroke();
+      }
+      break;
+    }
     case 'glove':
       limb3d(ctx, lerp(el, wr, 0.66), lerp(el, wr, 0.8), wr, [5.2, 5, 4.6], tone(p.accent, k), 1);
       break;
@@ -848,6 +1043,8 @@ export function legColors(d: StyleDef): { thigh: string; shin: string } {
       return { thigh: '#3A5A92', shin: '#3A5A92' };
     case 'torn':
       return { thigh: p.main, shin: p.skin ?? SKIN };
+    case 'seraphGreaves':
+      return { thigh: p.main, shin: p.main };
     default:
       return { thigh: p.main, shin: p.main };
   }
@@ -928,6 +1125,27 @@ export function drawStyleLeg(ctx: CanvasRenderingContext2D, d: StyleDef, l: Limb
       ctx.stroke();
       ctx.globalAlpha = 1;
       break;
+    case 'seraphGreaves': {
+      // Gold knee guards with a feather fin and long gold greaves.
+      limb3d(ctx, lerp(knee, ank, 0.18), lerp(knee, ank, 0.55), lerp(knee, ank, 0.92), [6.2, 6, 5.2], tone(p.sub, k), 1);
+      sphere(ctx, knee.x, knee.y, 3.7, 3.7, tone(p.sub, k));
+      ctx.beginPath();
+      ctx.moveTo(knee.x - 0.8, knee.y - 1);
+      ctx.quadraticCurveTo(knee.x - 4.6, knee.y - 3.6, knee.x - 5.6, knee.y - 1.2);
+      ctx.quadraticCurveTo(knee.x - 3, knee.y, knee.x - 0.8, knee.y + 1);
+      ctx.closePath();
+      ctx.fillStyle = tone(p.main, k);
+      ctx.fill();
+      edge(ctx, p.sub, 0.5);
+      glowDot(ctx, knee.x, knee.y, 4.4, p.accent, 0.4);
+      ctx.strokeStyle = tone(p.accent, k);
+      ctx.lineWidth = 0.7;
+      ctx.beginPath();
+      ctx.moveTo(lerp(knee, ank, 0.3).x, lerp(knee, ank, 0.3).y);
+      ctx.lineTo(lerp(knee, ank, 0.8).x, lerp(knee, ank, 0.8).y);
+      ctx.stroke();
+      break;
+    }
     case 'torn': {
       // Torn teal trousers end in a jagged hem above the knee.
       const a = lerp(hip, knee, 0.88);
@@ -966,7 +1184,7 @@ export function drawStyleFoot(ctx: CanvasRenderingContext2D, d: StyleDef, view: 
   const upper = d.kind === 'sneaker' ? '#F2F4F8' : d.kind === 'barefoot' || d.kind === 'torn' ? p.skin ?? SKIN : p.main;
   const sole = d.kind === 'sneaker' ? '#C5CCD8' : d.kind === 'torn' ? p.skinShade ?? tone(p.skin ?? SKIN, -0.3) : p.dark;
   const trim = d.kind === 'sneaker' ? '#D94A4A' : d.kind === 'captainboot' ? '#fff' : p.sub;
-  const boot = ['plates', 'trousers', 'bodysuit', 'wraplegs', 'weblegs'].includes(d.kind);
+  const boot = ['plates', 'trousers', 'bodysuit', 'wraplegs', 'weblegs', 'seraphGreaves'].includes(d.kind);
   const col = tone(upper, k);
   if (view === 'side') {
     // Sole
@@ -1009,6 +1227,23 @@ export function drawStyleFoot(ctx: CanvasRenderingContext2D, d: StyleDef, view: 
       ctx.fillStyle = p.sub;
       ctx.fill();
     }
+    if (d.kind === 'seraphGreaves') {
+      // Winged boots: a feather fan at the ankle pointing back.
+      for (let i = 0; i < 3; i++) {
+        ctx.save();
+        ctx.translate(-3.4, -6.4);
+        ctx.rotate(Math.PI + 0.5 - i * 0.5);
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.quadraticCurveTo(3, -1.4, 7 - i * 0.8, -0.6);
+        ctx.quadraticCurveTo(3.4, 1.4, 0, 1);
+        ctx.closePath();
+        ctx.fillStyle = i === 1 ? '#FFFFFF' : p.main;
+        ctx.fill();
+        edge(ctx, p.sub, 0.5);
+        ctx.restore();
+      }
+    }
     spec(ctx, 4.6, -2.4, 2.4, 0.8, d.kind === 'sneaker' ? 0.5 : 0.65);
   } else {
     // Front view: a rounded toe seen from the front.
@@ -1023,9 +1258,217 @@ export function drawStyleFoot(ctx: CanvasRenderingContext2D, d: StyleDef, view: 
     } else if (boot) {
       rr(ctx, -4.4, -4.2, 8.8, 2.2, 1);
       fillEdge(ctx, tone(trim, k), 0.6);
+      if (d.kind === 'seraphGreaves') {
+        for (const sd of [-1, 1]) {
+          ctx.beginPath();
+          ctx.moveTo(sd * 4.4, -3.2);
+          ctx.quadraticCurveTo(sd * 8, -5.2, sd * 8.6, -2.4);
+          ctx.quadraticCurveTo(sd * 6.4, -2.6, sd * 4.4, -2);
+          ctx.closePath();
+          ctx.fillStyle = '#FFFFFF';
+          ctx.fill();
+          edge(ctx, p.sub, 0.4);
+        }
+      }
     }
     spec(ctx, -1.8, -1.9, 1.6, 0.7, 0.6);
   }
+}
+
+// ===========================================================================
+// FLASHLIGHT (the premium set has one of its own) and the premium glow and wings
+// ===========================================================================
+
+/**
+ * A golden lantern-torch with a glowing cyan crystal lens. Frame like torch3d: the grip is at
+ * 0,0 and the lens points along +x; `lensTilt` is how wide the lens is seen (0..3.4).
+ */
+export function drawStyleTorch(ctx: CanvasRenderingContext2D, d: StyleDef, len: number, lensTilt: number, t: number): void {
+  const p = d.palette;
+  // Pearl-wrapped handle.
+  const hg = ctx.createLinearGradient(0, -2.2, 0, 2.2);
+  hg.addColorStop(0, '#FFFFFF');
+  hg.addColorStop(0.5, p.main);
+  hg.addColorStop(1, tone(p.main, -0.3));
+  ctx.fillStyle = hg;
+  ctx.beginPath();
+  ctx.roundRect(-4.6, -2, len * 0.55, 4, 2);
+  ctx.fill();
+  edge(ctx, p.main, 0.6);
+  ctx.strokeStyle = tone(p.main, -0.35);
+  ctx.lineWidth = 0.5;
+  for (let x = -3.6; x < len * 0.5 - 4; x += 1.6) {
+    ctx.beginPath();
+    ctx.moveTo(x, -2);
+    ctx.lineTo(x + 0.9, 2);
+    ctx.stroke();
+  }
+  // Gold body with cyan inlays.
+  const bx = len * 0.5;
+  const bg = ctx.createLinearGradient(0, -3, 0, 3);
+  bg.addColorStop(0, tone(p.sub, 0.4));
+  bg.addColorStop(0.5, p.sub);
+  bg.addColorStop(1, tone(p.sub, -0.4));
+  ctx.fillStyle = bg;
+  ctx.beginPath();
+  ctx.roundRect(bx, -2.8, len * 0.4, 5.6, 1.6);
+  ctx.fill();
+  edge(ctx, p.sub, 0.7);
+  ctx.fillStyle = p.accent;
+  ctx.fillRect(bx + 1.2, -0.5, len * 0.4 - 2.4, 1);
+  // Flared head with four fins and the crystal.
+  const hx = len * 0.88;
+  ctx.fillStyle = bg;
+  ctx.beginPath();
+  ctx.moveTo(hx, -2.8);
+  ctx.lineTo(len + 2, -4.4);
+  ctx.lineTo(len + 2, 4.4);
+  ctx.lineTo(hx, 2.8);
+  ctx.closePath();
+  ctx.fill();
+  edge(ctx, p.sub, 0.7);
+  for (const sd of [-1, 1]) {
+    ctx.beginPath();
+    ctx.moveTo(hx + 0.4, sd * 2.6);
+    ctx.quadraticCurveTo(hx - 2.6, sd * 5.6, hx - 4.6, sd * 4.4);
+    ctx.quadraticCurveTo(hx - 2, sd * 3.2, hx + 0.4, sd * 2);
+    ctx.closePath();
+    ctx.fillStyle = p.main;
+    ctx.fill();
+    edge(ctx, p.sub, 0.5);
+  }
+  // The lens crystal: a faceted ellipse that glows.
+  const pulse = 0.85 + 0.15 * Math.sin(t * 5);
+  ctx.beginPath();
+  ctx.ellipse(len + 2.2, 0, Math.max(0.8, lensTilt * 1.05), 3.6, 0, 0, Math.PI * 2);
+  ctx.fillStyle = '#E8FBFF';
+  ctx.fill();
+  edge(ctx, p.sub, 0.7);
+  const lg = ctx.createRadialGradient(len + 1.8, -0.8, 0.2, len + 2.2, 0, 3.4);
+  lg.addColorStop(0, '#FFFFFF');
+  lg.addColorStop(0.5, p.accent);
+  lg.addColorStop(1, '#3FB8E0');
+  ctx.beginPath();
+  ctx.ellipse(len + 2.3, 0, Math.max(0.5, lensTilt * 0.8), 2.8, 0, 0, Math.PI * 2);
+  ctx.fillStyle = lg;
+  ctx.fill();
+  glowDot(ctx, len + 3, 0, 11 * pulse, p.accent, 0.55);
+}
+
+/** The glow of the full premium set: a soft aura, a ring and sparks circling the hero. Hero frame. */
+export function drawSeraphAura(ctx: CanvasRenderingContext2D, d: StyleDef, t: number, cy = -30): void {
+  const p = d.palette;
+  const pulse = 0.9 + 0.1 * Math.sin(t * 2.4);
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  const g = ctx.createRadialGradient(0, cy, 4, 0, cy, 50 * pulse);
+  g.addColorStop(0, 'rgba(255,236,160,0.5)');
+  g.addColorStop(0.45, 'rgba(127,232,255,0.22)');
+  g.addColorStop(1, 'rgba(127,232,255,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(-56, cy - 56, 112, 112);
+  // Slow rays.
+  ctx.rotate(0);
+  for (let i = 0; i < 8; i++) {
+    const a = (i / 8) * Math.PI * 2 + t * 0.35;
+    ctx.save();
+    ctx.translate(0, cy);
+    ctx.rotate(a);
+    const rg = ctx.createLinearGradient(0, 0, 0, -48);
+    rg.addColorStop(0, 'rgba(255,240,190,0.22)');
+    rg.addColorStop(1, 'rgba(255,240,190,0)');
+    ctx.fillStyle = rg;
+    ctx.beginPath();
+    ctx.moveTo(-1.6, 0);
+    ctx.lineTo(1.6, 0);
+    ctx.lineTo(0.4, -48);
+    ctx.lineTo(-0.4, -48);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  }
+  // A thin ring that breathes, and sparks orbiting on it.
+  ctx.strokeStyle = 'rgba(255,236,160,0.28)';
+  ctx.lineWidth = 0.8;
+  ctx.beginPath();
+  ctx.ellipse(0, cy + 2, 30 * pulse, 40 * pulse, 0, 0, Math.PI * 2);
+  ctx.stroke();
+  for (let i = 0; i < 12; i++) {
+    const a = t * (0.8 + (i % 3) * 0.25) + i * 0.52;
+    const x = Math.cos(a) * 30 * pulse;
+    const y = cy + 2 + Math.sin(a) * 40 * pulse;
+    const tw = 0.4 + 0.6 * Math.abs(Math.sin(t * 3 + i));
+    const sg = ctx.createRadialGradient(x, y, 0, x, y, 3.4);
+    sg.addColorStop(0, `rgba(255,252,220,${0.95 * tw})`);
+    sg.addColorStop(1, 'rgba(255,220,120,0)');
+    ctx.fillStyle = sg;
+    ctx.fillRect(x - 3.4, y - 3.4, 6.8, 6.8);
+  }
+  ctx.restore();
+  void p;
+}
+
+/**
+ * Wings grown from the armor, drawn behind the body in the torso frame (hip at 0,0). `spread`
+ * is 0 (folded) to 1 (wide open): they open while the hero jumps up.
+ */
+export function drawSeraphWings(ctx: CanvasRenderingContext2D, d: StyleDef, len: number, view: View, spread: number, t: number): void {
+  const p = d.palette;
+  const sh = { x: 0, y: -len + 3.4 };
+  const feather = (ang: number, flen: number, dark: boolean): void => {
+    ctx.save();
+    ctx.translate(sh.x, sh.y);
+    ctx.rotate(ang);
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.bezierCurveTo(-2.6, -flen * 0.3, -3, -flen * 0.8, 0, -flen);
+    ctx.bezierCurveTo(3, -flen * 0.8, 2.6, -flen * 0.3, 0, 0);
+    ctx.closePath();
+    const fg = ctx.createLinearGradient(0, 0, 0, -flen);
+    fg.addColorStop(0, dark ? tone(p.main, -0.25) : '#FFFFFF');
+    fg.addColorStop(0.6, dark ? tone(p.main, -0.1) : p.main);
+    fg.addColorStop(1, p.sub);
+    ctx.globalAlpha = dark ? 0.8 : 0.95;
+    ctx.fillStyle = fg;
+    ctx.fill();
+    ctx.globalAlpha = 1;
+    ctx.strokeStyle = tone(p.sub, -0.25);
+    ctx.lineWidth = 0.6;
+    ctx.stroke();
+    ctx.restore();
+  };
+  const flap = Math.sin(t * 9) * 0.06 * spread;
+  const fan = (side: number, base: number, dark: boolean, extra: number): void => {
+    // Longest feathers at the outer edge first.
+    for (let i = 6; i >= 0; i--) {
+      const open = (14 + i * 7) * (Math.PI / 180) + spread * (i * 0.2 + 0.25);
+      const flen = (14 + i * 2.8) * (0.72 + 0.28 * spread);
+      feather(side * (base + open) + flap * side + extra, flen, dark);
+    }
+  };
+  ctx.save();
+  if (view === 'front') {
+    // One wing on each side of the back.
+    for (const sd of [-1, 1]) {
+      ctx.save();
+      ctx.translate(sd * 4.2, 0);
+      fan(sd, 0.1, false, 0);
+      ctx.restore();
+    }
+  } else {
+    // Seen from the side: both wings sweep back (to the left), the far one slightly higher.
+    ctx.save();
+    ctx.translate(-1.5, -1.5);
+    fan(-1, 0.3, true, 0);
+    ctx.restore();
+    ctx.save();
+    ctx.translate(-2, 1);
+    fan(-1, 0.22, false, 0);
+    ctx.restore();
+  }
+  ctx.restore();
+  // A soft glow at the roots.
+  glowDot(ctx, sh.x, sh.y, 9, p.accent, 0.4 * (0.5 + spread * 0.5));
 }
 
 // ===========================================================================
@@ -1093,6 +1536,12 @@ export function drawStyleIcon(ctx: CanvasRenderingContext2D, d: StyleDef): void 
         if (d.set !== 'starter') drawStyleFoot(ctx, d, 'front', false);
         ctx.restore();
       }
+      break;
+    }
+    case 'torch': {
+      ctx.translate(-12, 2);
+      ctx.scale(1.55, 1.55);
+      drawStyleTorch(ctx, d, 15, 2, 1.2);
       break;
     }
     case 'feet': {

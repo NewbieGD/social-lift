@@ -52,6 +52,27 @@ export class PetWalker {
       if (Math.abs(t - this.x) < 18 * u) t = this.x + (this.x > (minX + maxX) / 2 ? -1 : 1) * 30 * u;
       return Math.max(minX, Math.min(maxX, t));
     };
+    if (kind === 'spark') {
+      // Always airborne: it drifts from place to place, bobbing in the air.
+      this.mode = 'fly';
+      this.timer -= dt;
+      if (this.timer <= 0) {
+        this.from = this.x;
+        this.target = pick();
+        this.facing = this.target >= this.x ? 1 : -1;
+        this.flyT = 0;
+        this.flyDur = 1.1 + Math.abs(this.target - this.x) / (60 * u);
+        this.flyH = (16 + Math.random() * 22) * u;
+        this.lane = Math.random() < 0.5 ? 'back' : 'front';
+        this.timer = this.flyDur + 0.4 + Math.random() * 1.2;
+      }
+      this.flyT += dt;
+      const k = Math.min(1, this.flyT / this.flyDur);
+      const e = k * k * (3 - 2 * k);
+      this.x = this.from + (this.target - this.from) * e;
+      this.lift = this.flyH * (0.55 + 0.45 * Math.sin(k * Math.PI)) + Math.sin(this.flyT * 4) * 1.5 * u;
+      return;
+    }
     if (kind === 'parrot') {
       if (this.mode === 'perch' || this.mode === 'walk') {
         this.timer -= dt;
@@ -145,10 +166,11 @@ export class PetFollower {
     this.hist.push({ t: now, x: hx, y: hy });
     while (this.hist.length > 90 && this.hist[0].t < now - 1.2) this.hist.shift();
 
-    if (kind === 'parrot') {
-      // Lazy circles around the hero, a little above him.
-      const tx = hx + Math.cos(now * 1.35) * 26;
-      const ty = hy + 24 + Math.sin(now * 2.1) * 8;
+    if (kind === 'parrot' || kind === 'spark') {
+      // Lazy circles around the hero, a little above him (the spark is quicker and a little higher).
+      const quick = kind === 'spark' ? 1.7 : 1;
+      const tx = hx + Math.cos(now * 1.35 * quick) * (kind === 'spark' ? 30 : 26);
+      const ty = hy + (kind === 'spark' ? 30 : 24) + Math.sin(now * 2.1 * quick) * 8;
       const k = Math.min(1, dt * 5);
       this.x += (tx - this.x) * k;
       this.y += (ty - this.y) * k;

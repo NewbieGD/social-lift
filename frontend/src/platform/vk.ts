@@ -12,6 +12,16 @@ export function isInVk(): boolean {
   return q.has('sign') && q.has('vk_user_id');
 }
 
+/** The platform VK reports at launch (mobile_android, mobile_iphone, mobile_web, desktop_web ...). */
+export function vkPlatform(): string {
+  return new URLSearchParams(launchParamsRaw()).get('vk_platform') ?? '';
+}
+
+/** On iPhone digital goods cannot be sold inside the app (Apple's rule), so purchases are hidden. */
+export function isIOS(): boolean {
+  return vkPlatform().startsWith('mobile_iphone');
+}
+
 /** Fire-and-forget bridge call: older clients may not know a method, which is fine. */
 function quiet(method: string, params?: Record<string, unknown>): void {
   try {

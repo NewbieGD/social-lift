@@ -25,7 +25,9 @@ import { drawMenuBackdrop } from './render/menuBackdrops';
 import { drawFrame, drawFx, drawProp, propHalfWidth, propHeight } from './render/menuProps';
 import { ReplayTv, saveReplay } from './render/replayTv';
 import { PetWalker } from './render/petMotion';
-import { drawPet, PET_IDS, petHeight } from './render/pets';
+import { drawPet, PET_IDS, petHeight, type PetKind } from './render/pets';
+import { buyWithVotes, canPay } from './platform/pay';
+import { isIOS } from './platform/vk';
 import { CROWN_LIFT_FRONT, crownBob, drawCrown } from './render/crown';
 import { occupiedSlots, splitBonus, type Slot } from './render/slots';
 import { STYLE_SETS, STYLES, type StyleLoadout } from './render/styles';
@@ -193,6 +195,7 @@ function applySettings(s: Settings, changed?: (keyof Settings)[]): void {
   renderer.colorblind = s.colorblind;
   renderer.cinematic = s.cinematic;
   document.body.classList.toggle('reduced', s.reducedFx);
+  document.body.classList.toggle('hide-opp', !s.duelPreview);
   audio.musicOn = s.music;
   audio.musicVol = s.musicVol;
   audio.sfxVol = s.sfxVol;
@@ -927,7 +930,7 @@ const stageWinds = new Map<string, { wind: StageWind; last: number }>();
 const petWalkers = new Map<string, PetWalker>();
 const petLast = new Map<string, number>();
 
-function paintStagePet(g: CanvasRenderingContext2D, walker: PetWalker, kind: 'cat' | 'dog' | 'parrot', base: number, scale: number, t: number): void {
+function paintStagePet(g: CanvasRenderingContext2D, walker: PetWalker, kind: PetKind, base: number, scale: number, t: number): void {
   const v = walker.view();
   g.save();
   // Behind the hero the pet walks a little higher up the floor; in front of him a little lower.
@@ -939,7 +942,10 @@ function paintStagePet(g: CanvasRenderingContext2D, walker: PetWalker, kind: 'ca
 
 /** Proportions of the main screen stage (the editor and profiles copy them). */
 let menuAspect = 320 / 430;
-let menuSideFrac = 0.4;
+// The hero stands in the middle of the stage: the stats cards unfold over it on demand.
+const menuSideFrac = 0;
+/** The statistics cards on the main screen are folded until tapped. */
+let statsOpen = false;
 
 /** Sizes a preview stage like the main screen stage, as large as the screen allows. */
 function fitStage(root: HTMLElement, selector: string): void {
@@ -1079,9 +1085,7 @@ function drawStageHero(c: HTMLCanvasElement, _tier: number, t: number, _silhouet
   // main screen stage, so objects stand where they do there.
   let side = 0;
   if (c.id === 'menuHero') {
-    side = (document.querySelector('.menu2 .chips') as HTMLElement | null)?.offsetWidth ?? 0;
     menuAspect = w / h;
-    menuSideFrac = side / w;
   } else if (c.id === 'decorHero' || c.id === 'profileHero') side = Math.round(w * menuSideFrac);
   const cx = side ? (w - side - 8) / 2 : w / 2;
   if (c.id === 'menuHero') {
@@ -1109,19 +1113,19 @@ function drawStageHero(c: HTMLCanvasElement, _tier: number, t: number, _silhouet
   const propLayer = c.id === 'decorHero' ? 'edit' : 'view';
   if (decorOn) paintStageProps(g, placed, c.id, w, h, L, scale, t, base, 'back', propLayer);
   if (c.id === 'decorHero' && decorTab === 'prop') {
-    // Where the statistics cards cover the main screen.
+    // The buttons and the folded statistics sit over the top edge of the main screen.
     g.save();
-    g.fillStyle = 'rgba(8,10,16,0.35)';
-    g.strokeStyle = 'rgba(255,255,255,0.35)';
+    g.fillStyle = 'rgba(8,10,16,0.3)';
+    g.strokeStyle = 'rgba(255,255,255,0.3)';
     g.setLineDash([4, 4]);
     g.beginPath();
-    g.roundRect(w - side, h * 0.06, side - 4, h * 0.4, 8);
+    g.roundRect(4, 4, w - 8, Math.max(30, h * 0.085), 8);
     g.fill();
     g.stroke();
     g.fillStyle = 'rgba(255,255,255,0.7)';
-    g.font = '600 11px sans-serif';
+    g.font = '600 10px sans-serif';
     g.textAlign = 'center';
-    g.fillText(ru.decor.statsZone, w - side / 2 - 2, h * 0.26);
+    g.fillText(ru.decor.statsZone, w / 2, 4 + Math.max(30, h * 0.085) / 2 + 3);
     g.restore();
   }
   // The pet wanders around on the floor, sometimes behind the hero, sometimes in front of him.
@@ -1211,6 +1215,76 @@ function drawStyleIcons(root: HTMLElement): void {
       g.globalCompositeOperation = 'source-over';
     }
   });
+}
+
+// ---------- Premium: things sold for VK votes ----------
+
+let stylesTab: 'mine' | 'premium' = 'mine';
+const SERAPH_LOADOUT = { head: 'seraph_head', torso: 'seraph_torso', arms: 'seraph_arms', legs: 'seraph_legs', torch: 'seraph_torch' } as StyleLoadout;
+let buying = false;
+
+/** Live previews on the premium tab: the full set with its glow and wings, and the golden spark. */
+function drawPremiumPreviews(t: number): void {
+  const hc = document.getElementById('premiumHero') as HTMLCanvasElement | null;
+  const hg = hc ? sizeCanvas(hc) : null;
+  if (hc && hg) {
+    const w = hc.clientWidth;
+    const h = hc.clientHeight;
+    hg.clearRect(0, 0, w, h);
+    const scale = Math.min(w / 74, (h - 4) / 86);
+    hg.save();
+    hg.translate(w / 2, h - 5 * scale);
+    hg.scale(scale, scale);
+    drawHeroFront(hg, outfitFromMask(0), t, 'hips', 'normal', SERAPH_LOADOUT);
+    hg.restore();
+  }
+  const pc = document.getElementById('premiumPet') as HTMLCanvasElement | null;
+  const pg = pc ? sizeCanvas(pc) : null;
+  if (pc && pg) {
+    const w = pc.clientWidth;
+    const h = pc.clientHeight;
+    pg.clearRect(0, 0, w, h);
+    const k = Math.min(w / 30, h / 24);
+    pg.save();
+    pg.translate(w / 2, h * 0.86);
+    pg.scale(k, k);
+    drawPet(pg, 'spark', { t, mode: 'fly', phase: 0 });
+    pg.restore();
+  }
+}
+
+/** Waits a moment for the server to confirm the order (VK reports success after it did). */
+async function waitForDelivery(productId: string): Promise<boolean> {
+  for (let i = 0; i < 5; i++) {
+    const shop = await session.refreshShop();
+    const items = shop?.products?.find((q) => q.id === productId)?.items ?? [];
+    if (shop && items.length && items.every((id) => shop.owned.includes(id))) return true;
+    await new Promise((r) => setTimeout(r, 900));
+  }
+  return false;
+}
+
+async function buyPremium(productId: string): Promise<void> {
+  if (buying) return;
+  if (!canPay()) {
+    toast(ru.premium.notHere, 3200);
+    return;
+  }
+  buying = true;
+  try {
+    const res = await buyWithVotes(productId);
+    if (res === 'ok') {
+      toast(ru.premium.pending, 4000);
+      const done = await waitForDelivery(productId);
+      toast(done ? ru.premium.done : ru.premium.failed, 3200);
+      if (done) audio.play('fanfare');
+      if (router.top === 'styles') router.refresh();
+    } else if (res === 'error') {
+      toast(ru.premium.failed, 3200);
+    }
+  } finally {
+    buying = false;
+  }
 }
 
 // ---------- Pets screen ----------
@@ -1628,7 +1702,7 @@ router.register('buyConfirm', {
   modal: true,
 });
 router.register('styles', {
-  html: () => V.stylesView(session.data?.shop ?? null),
+  html: () => V.stylesView(session.data?.shop ?? null, stylesTab, canPay(), !isIOS()),
   cls: 'solid',
   mount: (root) => requestAnimationFrame(() => drawStyleIcons(root)),
 });
@@ -1645,6 +1719,7 @@ router.register('menu', {
   html: () =>
     V.menuView({
       stats: session.data?.stats ?? localStats(),
+      statsOpen,
       coins: session.mode === 'online' && session.data?.shop ? session.data.shop.coins : null,
       mode: session.mode,
     }),
@@ -1718,6 +1793,7 @@ router.register('profile', {
   mount: (root) => fitStage(root, '.profile-stage'),
 });
 router.register('moreMenu', { html: () => V.moreMenuView(), modal: true });
+router.register('coinsInfo', { html: () => V.coinsInfoView(session.data?.shop?.coins ?? 0), modal: true });
 router.register('share', { html: () => V.shareView(canShare()), modal: true });
 router.register('tutorialDone', { html: () => V.tutorialDoneView(), modal: true });
 let stubKind: V.StubKind = 'offline';
@@ -1964,6 +2040,19 @@ const actions: Record<string, (arg: string, el: HTMLElement) => void> = {
       if (router.top === 'decor') router.refresh();
     });
   },
+  stylesTab: (tab) => {
+    stylesTab = tab === 'premium' ? 'premium' : 'mine';
+    router.refresh();
+  },
+  openPremium: () => {
+    if (isIOS()) {
+      toast(ru.premium.notHere, 3200);
+      return;
+    }
+    stylesTab = 'premium';
+    router.open('styles');
+  },
+  buyPremium: (id) => void buyPremium(id),
   wearStyle: (id) => {
     const shop = session.data?.shop;
     const slot = STYLES[id]?.slot;
@@ -2027,6 +2116,12 @@ const actions: Record<string, (arg: string, el: HTMLElement) => void> = {
   },
   profileRetry: () => {
     if (profileId) void showGameProfile(profileId);
+  },
+  toggleStats: () => {
+    statsOpen = !statsOpen;
+    const box = document.getElementById('statsBox');
+    box?.classList.toggle('open', statsOpen);
+    box?.querySelector('.stats-toggle')?.setAttribute('aria-expanded', String(statsOpen));
   },
   openFromMore: (arg) => {
     router.back();
@@ -2510,6 +2605,9 @@ async function startDuel(m: Extract<DuelMsg, { t: 'start' }>): Promise<void> {
   const oppRenderer = new Renderer(oppCanvas);
   oppRenderer.reducedEffects = true;
   oppRenderer.cinematic = false;
+  // The opponent looks the way he does on his own main screen: his styles and his pet.
+  oppRenderer.styles = (m.opponent.look?.loadout ?? {}) as StyleLoadout;
+  oppRenderer.pet = PET_IDS[m.opponent.look?.pet ?? ''] ?? null;
   duel = {
     id: m.duel,
     seed: m.seed,
@@ -2534,6 +2632,8 @@ async function startDuel(m: Extract<DuelMsg, { t: 'start' }>): Promise<void> {
   oppName.textContent = m.opponent.name || ru.duel.player;
   duelOppNameEl.textContent = m.opponent.name || ru.duel.player;
   document.body.classList.add('duel');
+  // The bar is visible now, so the canvas has a size to draw into.
+  requestAnimationFrame(() => drawOppLook(m.opponent.look?.loadout ?? {}, m.opponent.look?.pet ?? null));
   newSim(m.seed, false, true);
   sizeOpp();
   // Both start at the same moment (server time + countdown).
@@ -2544,11 +2644,35 @@ async function startDuel(m: Extract<DuelMsg, { t: 'start' }>): Promise<void> {
   session.event('run_start');
 }
 
+/** A small portrait of the opponent in the score bar: his styles and his pet. */
+function drawOppLook(loadout: Record<string, string>, pet: string | null): void {
+  const c = document.getElementById('duelOppLook') as HTMLCanvasElement | null;
+  const g = c ? sizeCanvas(c) : null;
+  if (!c || !g) return;
+  const w = c.clientWidth;
+  const h = c.clientHeight;
+  g.clearRect(0, 0, w, h);
+  // The upper body of the front hero fills the little frame.
+  g.save();
+  g.translate(w * 0.42, h + 19 * (h / 46));
+  g.scale(h / 46, h / 46);
+  drawHeroFront(g, outfitFromMask(0), 1, 'hips', 'normal', loadout as StyleLoadout);
+  g.restore();
+  const kind = PET_IDS[pet ?? ''];
+  if (kind) {
+    g.save();
+    g.translate(w * 0.84, h - 1);
+    g.scale(h / 34, h / 34);
+    drawPet(g, kind, { t: 1.1, mode: kind === 'parrot' ? 'perch' : 'sit', phase: 0 });
+    g.restore();
+  }
+}
+
 function sizeOpp(): void {
   if (!duel) return;
   const wide = document.body.classList.contains('wide');
   const boardW = board.clientWidth;
-  const w = wide ? Math.min(260, Math.max(160, (window.innerWidth - boardW) / 2 - 60)) : Math.round(boardW * 0.3);
+  const w = wide ? Math.min(260, Math.max(160, (window.innerWidth - boardW) / 2 - 60)) : Math.round(boardW * 0.24);
   const s = w / gameConfig.world.width;
   duel.oppRenderer.resize(w, Math.round(700 * s), s);
 }
@@ -2728,7 +2852,10 @@ function frame(now: number): void {
   renderer.draw(sim, active && !renderer.cineActive && !tutFrozenNow ? acc / DT : 1, renderDt);
   if (document.body.classList.contains('wide')) renderer.drawBackdrop(backdrop, sim);
   if (router.top === 'menu' || router.top === 'wardrobe') drawShowcase(now / 1000);
-  if (router.top === 'styles') drawStylesPreview(now / 1000);
+  if (router.top === 'styles') {
+    if (stylesTab === 'premium') drawPremiumPreviews(now / 1000);
+    else drawStylesPreview(now / 1000);
+  }
   if (router.top === 'decor') {
     const dc = document.getElementById('decorHero') as HTMLCanvasElement | null;
     if (dc) drawStageHero(dc, lastTier(), now / 1000);

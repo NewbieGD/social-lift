@@ -2539,7 +2539,7 @@ body.wide.in-menu #controls {
 .tabs.tabs-3 {
   grid-template-columns: repeat(3, 1fr);
 }
-.opp {
+#oppWrap {
   position: absolute;
   top: 112px;
   right: 8px;
@@ -2550,11 +2550,10 @@ body.wide.in-menu #controls {
   pointer-events: none;
   z-index: 3;
 }
-body.duel.playing .opp,
-body.duel .opp {
+body.duel #oppWrap {
   display: block;
 }
-.opp canvas {
+#oppWrap canvas {
   display: block;
   filter: grayscale(1) brightness(0.85);
 }
@@ -2577,7 +2576,7 @@ body.duel .opp {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-body.wide .opp {
+body.wide #oppWrap {
   position: fixed;
   top: 50%;
   right: auto;
@@ -4923,4 +4922,298 @@ body.reduced .buff.pop {
   max-height: none;
   margin-left: auto;
   margin-right: auto;
+}
+
+/* ===== Main screen: the stats unfold on tap, small coins button ===== */
+.showcase {
+  grid-template-columns: 1fr;
+}
+.showcase .chips {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+  width: auto;
+  margin: 0;
+  align-self: auto;
+}
+.stats-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 32px;
+  padding: 0 9px 0 6px;
+  border: 0;
+  border-radius: 12px;
+  color: #ffe58a;
+  font: 800 14px/1 var(--font);
+  background: rgba(12, 16, 26, 0.6);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+  box-shadow: inset 0 0 0 1.5px rgba(242, 182, 45, 0.6);
+  cursor: pointer;
+}
+.stats-toggle svg {
+  width: 18px;
+  height: 18px;
+}
+.stats-toggle .chev {
+  font-style: normal;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.7);
+  transition: transform 0.25s;
+}
+.chips.open .stats-toggle .chev {
+  transform: rotate(180deg);
+}
+.showcase .chips .chips-body {
+  display: none;
+  flex-direction: column;
+  gap: 6px;
+  width: 150px;
+}
+.showcase .chips.open .chips-body {
+  display: flex;
+}
+.coin-pill {
+  height: 30px;
+  gap: 5px;
+  padding: 0 9px 0 6px;
+  border: 0;
+  pointer-events: auto;
+  cursor: pointer;
+  font-family: var(--font);
+}
+.coin-pill svg {
+  width: 18px;
+  height: 18px;
+}
+.coin-pill b {
+  font-size: 13px;
+}
+.coin-pill:active {
+  transform: scale(0.94);
+}
+.coins-big {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-size: 34px;
+  font-weight: 900;
+  color: #ffe58a;
+}
+.coins-big svg {
+  width: 38px;
+  height: 38px;
+}
+.coins-info h3 {
+  margin: 12px 0 4px;
+  font-size: 14px;
+}
+.coins-info p {
+  margin: 0 0 6px;
+  font-size: 13px;
+  line-height: 1.45;
+}
+@media (max-width: 360px) {
+  .stage-top {
+    gap: 4px;
+  }
+}
+
+/* The old frosted strip now belongs to the unfolded body; the container itself is just a holder. */
+.showcase > .chips {
+  grid-column: auto;
+  grid-row: auto;
+  z-index: 4;
+  align-self: auto;
+  margin: 0;
+  gap: 6px;
+  padding: 0;
+  border-radius: 0;
+  overflow: visible;
+  pointer-events: auto;
+  background: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  box-shadow: none;
+}
+.showcase > .chips .chips-body {
+  padding: 3px 0;
+  border-radius: 16px;
+  overflow: hidden;
+  background:
+    linear-gradient(160deg, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0.03) 60%),
+    rgba(12, 16, 26, 0.72);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.12),
+    0 8px 20px rgba(0, 0, 0, 0.32);
+  gap: 0;
+}
+.showcase > .chips .chip {
+  animation: none;
+}
+@media (max-width: 360px) {
+  .showcase > .chips {
+    align-self: auto;
+    margin-bottom: 0;
+  }
+}
+
+/* ===== Duel: a small, quiet preview of the opponent's game ===== */
+#oppWrap {
+  top: 108px;
+  right: 6px;
+  opacity: 0.78;
+  border-radius: 12px;
+  box-shadow: 0 0 0 1.5px rgba(255, 255, 255, 0.22);
+}
+#oppWrap canvas {
+  filter: grayscale(0.85) brightness(0.9);
+}
+/* The name and the score are already in the bar at the top. */
+.opp-label {
+  display: none;
+}
+body.wide .opp-label {
+  display: flex;
+}
+body.hide-opp #oppWrap {
+  display: none !important;
+}
+
+.profile-look {
+  margin: 0 0 10px;
+  padding: 8px 10px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.06);
+  font-size: 12px;
+  line-height: 1.4;
+}
+.profile-look b {
+  display: block;
+  margin-bottom: 2px;
+  font-size: 12px;
+  color: var(--ink-dim);
+}
+.profile-look p {
+  margin: 0;
+}
+
+.duel-look {
+  flex: none;
+  width: 46px;
+  height: 40px;
+  margin: -4px -6px -4px 0;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.duel-side.opp {
+  padding-left: 10px;
+  padding-right: 8px;
+  gap: 6px;
+}
+.duel-look {
+  width: 38px;
+  height: 34px;
+  margin: -2px -2px -2px 0;
+}
+
+/* ===== Premium tab: things for VK votes ===== */
+.tabs.tabs-2 {
+  grid-template-columns: repeat(2, 1fr);
+  margin-bottom: 10px;
+}
+.premium-tab {
+  color: #ffe58a;
+}
+.premium-card {
+  margin: 12px 0;
+  padding: 12px;
+  border-radius: 18px;
+  background:
+    linear-gradient(160deg, rgba(255, 224, 120, 0.14), rgba(127, 232, 255, 0.08) 60%),
+    rgba(18, 22, 34, 0.9);
+  box-shadow:
+    inset 0 0 0 1.5px rgba(255, 214, 90, 0.55),
+    0 10px 28px rgba(0, 0, 0, 0.35);
+}
+.premium-stage {
+  position: relative;
+  height: 250px;
+  margin-bottom: 8px;
+  border-radius: 14px;
+  background: radial-gradient(circle at 50% 70%, rgba(255, 230, 150, 0.22), rgba(20, 26, 44, 0.6) 70%);
+  overflow: hidden;
+}
+.premium-stage.small {
+  height: 120px;
+}
+.premium-stage canvas {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.premium-info h3 {
+  margin: 0 0 4px;
+  font-size: 18px;
+}
+.premium-info p {
+  margin: 6px 0;
+  font-size: 13px;
+  line-height: 1.45;
+}
+.price-badge {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 10px;
+  background: linear-gradient(90deg, #ffd640, #ffb12e);
+  color: #3a2a00;
+  font-size: 12px;
+  font-weight: 900;
+}
+.perks {
+  margin: 6px 0 8px;
+  padding-left: 18px;
+  font-size: 13px;
+  line-height: 1.45;
+  color: #ffe58a;
+}
+.part-icons {
+  display: flex;
+  gap: 6px;
+  margin: 8px 0 10px;
+}
+.part-icons canvas {
+  flex: 1;
+  min-width: 0;
+  height: 48px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.07);
+}
+.buy-btn {
+  width: 100%;
+  background: linear-gradient(90deg, #ffd640, #ffb12e) !important;
+  color: #2a1c00 !important;
+  box-shadow: 0 0 0 2px rgba(255, 240, 180, 0.4), 0 6px 18px rgba(255, 190, 40, 0.35);
+}
+.owned-note {
+  font-weight: 800;
+  color: #8ff0a8;
+}
+.style-card.premium-locked {
+  cursor: pointer;
+  box-shadow: inset 0 0 0 1.5px rgba(255, 214, 90, 0.5);
+}
+.style-card.premium-locked span {
+  color: #ffe58a;
 }

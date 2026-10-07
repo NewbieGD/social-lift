@@ -3,8 +3,8 @@
 // No filters or shadowBlur: shading is done with gradients.
 
 import { bodyGradient, edge, fist3d, hand3d, limb3d, spec, tone, torch3d } from './shade3d';
-import { armColor, armScale, drawStyleArm, drawStyleBack, drawStyleFoot, drawStyleHead, drawStyleLeg, drawStyleTorso, handColor, legColors as styleLegColors, skinFor, torsoColor } from './styleArt';
-import { wornStyles, type StyleLoadout, type WornStyles } from './styles';
+import { armColor, armScale, drawSeraphAura, drawSeraphWings, drawStyleArm, drawStyleBack, drawStyleFoot, drawStyleHead, drawStyleLeg, drawStyleTorch, drawStyleTorso, handColor, legColors as styleLegColors, skinFor, torsoColor } from './styleArt';
+import { fullSeraph, wornStyles, type StyleLoadout, type WornStyles } from './styles';
 
 export type Face = 'normal' | 'grin' | 'scared' | 'squint';
 export type Gesture = 'none' | 'scratch' | 'pocket' | 'tie' | 'wave';
@@ -516,9 +516,9 @@ function drawHead(ctx: CanvasRenderingContext2D, rig: Rig, o: Outfit, tier: numb
   ctx.rotate(rig.headTilt);
   const face = rig.face;
 
-  const coversHair = !!w?.head && ['helmet', 'cowl', 'mask', 'brute'].includes(w.head.kind);
-  // Back hair mass behind the head.
-  if (!coversHair) {
+  const coversHair = !!w?.head && ['helmet', 'cowl', 'mask', 'brute', 'beanie', 'seraphHelm'].includes(w.head.kind);
+  // Back hair mass behind the head (a knitted cap leaves the hair at the back visible).
+  if (!coversHair || w?.head?.kind === 'beanie') {
     ctx.fillStyle = HAIR;
     ctx.beginPath();
     ctx.ellipse(-2.4, -1.5, 9.6, 9.8, 0, 0, Math.PI * 2);
@@ -990,7 +990,7 @@ function drawArm(ctx: CanvasRenderingContext2D, l: Limb3, o: Outfit, back: boole
     drawStyleArm(ctx, w.arms, l, back);
     return;
   }
-  if (w?.torso && ['hoodie', 'tunic', 'suit', 'wraps', 'web'].includes(w.torso.kind)) {
+  if (w?.torso && ['hoodie', 'tunic', 'suit', 'wraps', 'web', 'seraphArmor'].includes(w.torso.kind)) {
     // Sleeves of the worn top, when the arms have no style of their own.
     const kk = back ? 0.14 : 0;
     const col = shade(torsoColor(w.torso), kk);
@@ -1044,6 +1044,22 @@ export function drawHeroBody(ctx: CanvasRenderingContext2D, pose: HeroPose, give
     ctx.restore();
   }
 
+  // The premium set: the glow of the full set, and wings that open while he jumps.
+  if (w.torso && fullSeraph(w)) {
+    ctx.save();
+    ctx.translate(rig.hip.x, rig.hip.y);
+    drawSeraphAura(ctx, w.torso, t, -rig.torsoLen * 0.6);
+    ctx.restore();
+  }
+  if (w.torso?.kind === 'seraphArmor') {
+    const air = pose.dead ? 0 : 1 - Math.exp(-pose.sinceLand * 14);
+    const spread = pose.dead ? 0.15 : Math.max(0.2, Math.min(1, (0.28 + Math.max(0, pose.vy) / 700 + (pose.vy < 0 ? 0.22 : 0)) * (0.4 + 0.6 * air)));
+    ctx.save();
+    ctx.translate(rig.hip.x, rig.hip.y);
+    ctx.rotate(rig.lean);
+    drawSeraphWings(ctx, w.torso, rig.torsoLen, 'side', spread, t);
+    ctx.restore();
+  }
   if (w.torso && (w.torso.kind === 'tunic' || w.torso.kind === 'suit' || w.torso.kind === 'wraps')) {
     // Capes and the shell hang behind the whole body.
     ctx.save();
@@ -1137,7 +1153,8 @@ export function drawHeroBody(ctx: CanvasRenderingContext2D, pose: HeroPose, give
   ctx.save();
   ctx.translate(rig.held.x, rig.held.y);
   ctx.rotate(rig.held.rot);
-  drawTorch(ctx, o, pose.light);
+  if (w.torch) drawStyleTorch(ctx, w.torch, 9.5, 1.1, t);
+  else drawTorch(ctx, o, pose.light);
   drawGrip(ctx, handSkin);
   ctx.restore();
   void t;
