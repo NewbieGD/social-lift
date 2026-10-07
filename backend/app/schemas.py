@@ -63,13 +63,13 @@ class LoadoutIn(Strict):
 
 
 class DecorIn(Strict):
-    # {bg|frame|fx: item_id | null, props: {left|right|wall: item_id | null}}
+    # {bg|frame|fx|pet: item_id | null, props: [{id, x, y, r}]} (x, y in 0..1 of the stage)
     decor: dict = Field(default_factory=dict)
 
     @field_validator("decor")
     @classmethod
     def small(cls, v: dict) -> dict:
-        if len(v) > 6 or len(v.get("props") or {}) > 4:
+        if len(v) > 6 or len(v.get("props") or []) > 8:
             raise ValueError("too many places")
         return v
 

@@ -434,17 +434,29 @@ async def test_decor_rules_and_purchase(client, monkeypatch):
     await client.post("/api/session/bootstrap", headers=headers(92))
     ok = await client.put("/api/decor", json={"decor": {"bg": "bg_dusk"}}, headers=headers(92))
     assert ok.status_code == 200 and ok.json()["decor"] == {"bg": "bg_dusk"}
-    # Wrong kind and unknown spot are rejected.
+    # Wrong kind, bad positions, duplicates and unowned objects are rejected.
     assert (await client.put("/api/decor", json={"decor": {"bg": "prop_cup"}}, headers=headers(92))).status_code == 400
-    assert (await client.put("/api/decor", json={"decor": {"props": {"top": "prop_cup"}}}, headers=headers(92))).json()["error"]["code"] == "unknown_spot"
-    # Buying a priced object, then placing it; placing it elsewhere moves it.
+    bad = await client.put("/api/decor", json={"decor": {"props": [{"id": "prop_cup", "x": 1.5, "y": 0.5, "r": 0}]}}, headers=headers(92))
+    assert bad.json()["error"]["code"] == "not_owned"  # not bought yet
+    # Buying a priced object, then placing it anywhere on the screen and turning it.
     buy = await client.post("/api/shop/buy", json={"item_id": "prop_cup"}, headers=headers(92))
     assert buy.status_code == 200 and buy.json()["coins"] == 1100
-    placed = await client.put("/api/decor", json={"decor": {"props": {"left": "prop_cup"}}}, headers=headers(92))
-    assert placed.json()["decor"] == {"bg": "bg_dusk", "props": {"left": "prop_cup"}}
-    moved = await client.put("/api/decor", json={"decor": {"props": {"wall": "prop_cup"}}}, headers=headers(92))
-    assert moved.json()["decor"]["props"] == {"wall": "prop_cup"}
-    cleared = await client.put("/api/decor", json={"decor": {"bg": None, "props": {"wall": None}}}, headers=headers(92))
+    off = await client.put("/api/decor", json={"decor": {"props": [{"id": "prop_cup", "x": 1.5, "y": 0.5, "r": 0}]}}, headers=headers(92))
+    assert off.json()["error"]["code"] == "bad_position"
+    turned = await client.put("/api/decor", json={"decor": {"props": [{"id": "prop_cup", "x": 0.3, "y": 0.8, "r": 45}]}}, headers=headers(92))
+    assert turned.json()["error"]["code"] == "bad_position"
+    twice = await client.put(
+        "/api/decor",
+        json={"decor": {"props": [{"id": "prop_cup", "x": 0.3, "y": 0.8, "r": 0}, {"id": "prop_cup", "x": 0.6, "y": 0.8, "r": 0}]}},
+        headers=headers(92),
+    )
+    assert twice.json()["error"]["code"] == "duplicate_item"
+    placed = await client.put("/api/decor", json={"decor": {"props": [{"id": "prop_cup", "x": 0.3, "y": 0.8, "r": 90}]}}, headers=headers(92))
+    assert placed.json()["decor"] == {"bg": "bg_dusk", "props": [{"id": "prop_cup", "x": 0.3, "y": 0.8, "r": 90}]}
+    # Moving it replaces the list; an empty list takes everything away.
+    moved = await client.put("/api/decor", json={"decor": {"props": [{"id": "prop_cup", "x": 0.7, "y": 0.9, "r": 270}]}}, headers=headers(92))
+    assert moved.json()["decor"]["props"] == [{"id": "prop_cup", "x": 0.7, "y": 0.9, "r": 270}]
+    cleared = await client.put("/api/decor", json={"decor": {"bg": None, "props": []}}, headers=headers(92))
     assert cleared.json()["decor"] == {}
     boot = (await client.post("/api/session/bootstrap", headers=headers(92))).json()
     assert boot["shop"]["decor"] == {} and "prop_cup" in boot["shop"]["owned"]
@@ -502,3 +514,22 @@ async def test_privacy_switch_and_public_profile(client):
         user.profile_deactivated = True
         await s.commit()
     assert (await client.get("/api/players/95", headers=headers(94))).status_code == 404
+
+
+async def test_five_or_more_objects_can_be_placed(client):
+    await ready_player(client, 96)
+    async with SessionLocal() as s:
+        user = await s.get(User, 96)
+        user.best_all = 800
+        user.coins = 100000
+        await s.commit()
+    await client.post("/api/session/bootstrap", headers=headers(96))
+    for item in ("prop_lamp", "prop_bat", "prop_cup", "prop_sword", "prop_tv"):
+        assert (await client.post("/api/shop/buy", json={"item_id": item}, headers=headers(96))).status_code == 200
+    ids = ["prop_football", "prop_basketball", "prop_lamp", "prop_bat", "prop_cup", "prop_sword", "prop_tv"]
+    placement = [{"id": i, "x": 0.1 + 0.1 * n, "y": 0.8, "r": 0} for n, i in enumerate(ids)]
+    ok = await client.put("/api/decor", json={"decor": {"props": placement}}, headers=headers(96))
+    assert ok.status_code == 200 and len(ok.json()["decor"]["props"]) == 7
+    # An old client that still sends the three fixed places keeps working.
+    legacy = await client.put("/api/decor", json={"decor": {"props": {"left": "prop_cup", "wall": "prop_tv"}}}, headers=headers(96))
+    assert [p["id"] for p in legacy.json()["decor"]["props"]] == ["prop_cup", "prop_tv"]

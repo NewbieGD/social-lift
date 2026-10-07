@@ -20,8 +20,6 @@ SLOTS = ("head", "torso", "arms", "legs", "feet")
 # What an item is. Styles are worn on the hero (one per body slot); the rest decorate the main
 # screen: backgrounds, objects standing near the hero, frames and effects.
 KINDS = ("style", "bg", "prop", "frame", "fx", "pet")
-# Places for objects near the hero.
-PROP_SPOTS = ("left", "right", "wall")
 
 
 @dataclass(frozen=True)
@@ -166,22 +164,63 @@ def validate_loadout(loadout: dict, owned: set[str]) -> str | None:
     return None
 
 
+# Objects on the main screen can be placed anywhere (up to this many) and turned.
+PROP_MAX = 8
+PROP_ROTATIONS = (0, 90, 270)
+# Old clients and old data kept objects in three fixed places: they move to these positions.
+_LEGACY_SPOTS = {"left": (0.12, 0.88, 0), "right": (0.9, 0.9, 0), "wall": (0.14, 0.45, 0)}
+
+
+def _legacy_props(props: dict) -> list[dict]:
+    out = []
+    for spot, item_id in props.items():
+        if spot in _LEGACY_SPOTS and isinstance(item_id, str):
+            x, y, r = _LEGACY_SPOTS[spot]
+            out.append({"id": item_id, "x": x, "y": y, "r": r})
+    return out
+
+
+def _clean_placements(raw, owned: set[str]) -> list[dict]:
+    """Valid placements only: an owned object, once, with a position on the screen and a turn."""
+    if isinstance(raw, dict):
+        raw = _legacy_props(raw)
+    out: list[dict] = []
+    seen: set[str] = set()
+    for p in raw if isinstance(raw, list) else []:
+        if not isinstance(p, dict):
+            continue
+        item = ITEMS.get(p.get("id")) if isinstance(p.get("id"), str) else None
+        x, y, r = p.get("x"), p.get("y"), p.get("r", 0)
+        if (
+            item is None
+            or item.kind != "prop"
+            or item.id not in owned
+            or item.id in seen
+            or isinstance(x, bool)
+            or isinstance(y, bool)
+            or not isinstance(x, (int, float))
+            or not isinstance(y, (int, float))
+            or not (0 <= x <= 1 and 0 <= y <= 1)
+            or r not in PROP_ROTATIONS
+        ):
+            continue
+        seen.add(item.id)
+        out.append({"id": item.id, "x": round(float(x), 3), "y": round(float(y), 3), "r": int(r)})
+        if len(out) >= PROP_MAX:
+            break
+    return out
+
+
 def clean_decor(decor: dict, owned: set[str]) -> dict:
-    """Keeps only valid decor: owned items of the right kind, known spots."""
+    """Keeps only valid decor: owned items of the right kind, valid object placements."""
     out: dict = {}
     for key in ("bg", "frame", "fx", "pet"):
         item = ITEMS.get(decor.get(key)) if isinstance(decor.get(key), str) else None
         if item is not None and item.kind == key and item.id in owned:
             out[key] = item.id
-    props = {}
-    for spot, item_id in (decor.get("props") or {}).items():
-        item = ITEMS.get(item_id) if isinstance(item_id, str) else None
-        if spot in PROP_SPOTS and item is not None and item.kind == "prop" and item.id in owned:
-            props[spot] = item.id
+    props = _clean_placements(decor.get("props"), owned)
     if props:
-        # One object cannot stand in two places.
-        seen: set[str] = set()
-        out["props"] = {k: v for k, v in props.items() if not (v in seen or seen.add(v))}
+        out["props"] = props
     return out
 
 
@@ -201,20 +240,33 @@ def validate_decor(change: dict, owned: set[str]) -> str | None:
             if value not in owned:
                 return "not_owned"
         elif key == "props":
-            if not isinstance(value, dict):
+            raw = _legacy_props(value) if isinstance(value, dict) else value
+            if not isinstance(raw, list) or len(raw) > PROP_MAX:
                 return "decor_invalid"
-            for spot, item_id in value.items():
-                if spot not in PROP_SPOTS:
-                    return "unknown_spot"
-                if item_id is None:
-                    continue
-                item = ITEMS.get(item_id) if isinstance(item_id, str) else None
+            ids: set[str] = set()
+            for p in raw:
+                if not isinstance(p, dict):
+                    return "decor_invalid"
+                item = ITEMS.get(p.get("id")) if isinstance(p.get("id"), str) else None
                 if item is None:
                     return "unknown_item"
                 if item.kind != "prop":
                     return "wrong_kind"
-                if item_id not in owned:
+                if item.id not in owned:
                     return "not_owned"
+                if item.id in ids:
+                    return "duplicate_item"
+                ids.add(item.id)
+                x, y = p.get("x"), p.get("y")
+                if (
+                    isinstance(x, bool)
+                    or isinstance(y, bool)
+                    or not isinstance(x, (int, float))
+                    or not isinstance(y, (int, float))
+                    or not (0 <= x <= 1 and 0 <= y <= 1)
+                    or p.get("r", 0) not in PROP_ROTATIONS
+                ):
+                    return "bad_position"
         else:
             return "decor_invalid"
     return None

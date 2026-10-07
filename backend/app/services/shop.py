@@ -123,15 +123,8 @@ async def set_decor(session: AsyncSession, user: User, change: dict) -> dict:
             else:
                 current[key] = change[key]
     if "props" in change:
-        props = dict(current.get("props") or {})
-        for spot, item_id in change["props"].items():
-            if item_id is None:
-                props.pop(spot, None)
-            else:
-                # The same object cannot stand in two places: it moves.
-                for other in [k for k, v in props.items() if v == item_id]:
-                    props.pop(other)
-                props[spot] = item_id
+        # The whole list of placed objects is replaced.
+        props = cosmetics._clean_placements(change["props"], owned)
         if props:
             current["props"] = props
         else:
