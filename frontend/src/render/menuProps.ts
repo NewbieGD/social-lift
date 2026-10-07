@@ -6,8 +6,6 @@ import { bodyGradient, edge, sphere, spec } from './shade3d';
 
 type Ctx = CanvasRenderingContext2D;
 
-export type PropSpot = 'left' | 'right' | 'wall';
-
 export const PROP_IDS = [
   'prop_football',
   'prop_basketball',
@@ -259,6 +257,28 @@ export function drawProp(g: Ctx, id: string, t: number, tv?: (g: Ctx, w: number,
     }
     default:
       break;
+  }
+}
+
+/** Half of the width of an object in hero units. */
+export function propHalfWidth(id: string): number {
+  switch (id) {
+    case 'prop_football':
+      return 4.2;
+    case 'prop_basketball':
+      return 4.9;
+    case 'prop_lamp':
+      return 5;
+    case 'prop_bat':
+      return 3;
+    case 'prop_cup':
+      return 6;
+    case 'prop_sword':
+      return 4;
+    case 'prop_tv':
+      return 6.4;
+    default:
+      return 5;
   }
 }
 

@@ -41,7 +41,14 @@ export interface CatalogItem {
 }
 
 /** Coins, owned cosmetics, what is worn, and the catalog of rules (all from the server). */
-export type PropSpot = 'left' | 'right' | 'wall';
+/** An object standing on the main screen: where (0..1 of the stage) and how it is turned. */
+export interface PropPlacement {
+  id: string;
+  x: number;
+  y: number;
+  /** 0 = standing, 90 / 270 = lying on its side. */
+  r: 0 | 90 | 270;
+}
 
 /** The main-screen decoration chosen by the player (ids of owned items). */
 export interface Decor {
@@ -50,7 +57,7 @@ export interface Decor {
   bg?: string;
   frame?: string;
   fx?: string;
-  props?: Partial<Record<PropSpot, string>>;
+  props?: PropPlacement[];
 }
 
 export interface ShopState {
@@ -432,7 +439,7 @@ export class Session {
   }
 
   /** Changes the main-screen decoration; a null clears a place. Returns what the server saved. */
-  async setDecor(change: { pet?: string | null; bg?: string | null; frame?: string | null; fx?: string | null; props?: Partial<Record<PropSpot, string | null>> }): Promise<Decor | null> {
+  async setDecor(change: { pet?: string | null; bg?: string | null; frame?: string | null; fx?: string | null; props?: PropPlacement[] }): Promise<Decor | null> {
     if (!this.data?.shop) return null;
     try {
       const res = await api<{ decor: Decor }>('PUT', '/decor', { decor: change });

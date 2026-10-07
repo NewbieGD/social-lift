@@ -375,7 +375,7 @@ function decorRequirement(c: CatalogItem | undefined): string {
   return ru.styles.requireNone;
 }
 
-export function decorView(shop: ShopState | null, tab: DecorTab, spot: 'left' | 'right' | 'wall'): string {
+export function decorView(shop: ShopState | null, tab: DecorTab, selected: string | null): string {
   if (!shop) {
     return `${header(ru.decor.title)}<div class="panel flat"><p class="status warn">${ru.duel.offline}</p></div>`;
   }
@@ -385,7 +385,7 @@ export function decorView(shop: ShopState | null, tab: DecorTab, spot: 'left' | 
   const ids = tab === 'bg' ? BG_IDS : tab === 'prop' ? PROP_LIST : tab === 'frame' ? FRAME_LIST : FX_LIST;
   const isChosen = (id: string): boolean => {
     if (tab === 'bg') return (decor.bg ?? 'bg_default') === id;
-    if (tab === 'prop') return Object.values(decor.props ?? {}).includes(id);
+    if (tab === 'prop') return (decor.props ?? []).some((p) => p.id === id);
     return (tab === 'frame' ? decor.frame : decor.fx) === id;
   };
   const cards = ids
@@ -396,11 +396,10 @@ export function decorView(shop: ShopState | null, tab: DecorTab, spot: 'left' | 
       const chosen = isChosen(id);
       const priced = !has && c?.price !== null && c?.price !== undefined;
       const action = has ? `data-action="decorPick" data-arg="${id}"` : priced ? `data-action="askBuy" data-arg="${id}"` : 'disabled';
-      const where = tab === 'prop' && chosen ? Object.entries(decor.props ?? {}).find(([, v]) => v === id)?.[0] : undefined;
       const note = has
         ? chosen
-          ? where
-            ? `${ru.decor.chosen} · ${ru.decor.spots[where]}`
+          ? tab === 'prop'
+            ? ru.decor.onScreen
             : ru.decor.chosen
           : tab === 'prop'
             ? ru.decor.place
@@ -426,11 +425,14 @@ export function decorView(shop: ShopState | null, tab: DecorTab, spot: 'left' | 
   const tabs = (['bg', 'prop', 'frame', 'fx'] as DecorTab[])
     .map((k) => `<button role="tab" class="${k === tab ? 'on' : ''}" aria-selected="${k === tab}" data-action="decorTab" data-arg="${k}">${ru.decor.tabs[k]}</button>`)
     .join('');
+  const count = decor.props?.length ?? 0;
+  const hasSel = !!selected && (decor.props ?? []).some((p) => p.id === selected);
   const spots =
     tab === 'prop'
-      ? `<div class="spot-row"><span>${ru.decor.spotHint}</span>${(['left', 'right', 'wall'] as const)
-          .map((s) => `<button class="mini-btn ${s === spot ? 'on' : ''}" data-action="decorSpot" data-arg="${s}">${ru.decor.spots[s]}</button>`)
-          .join('')}${decor.props?.[spot] ? `<button class="mini-btn" data-action="decorClear" data-arg="${spot}">${ru.decor.remove}</button>` : ''}</div>`
+      ? `<div class="spot-row"><span>${hasSel ? esc(ru.decor.names[selected!] ?? '') : ru.decor.dragHint}</span>
+          <button class="mini-btn" data-action="decorTurn" ${hasSel ? '' : 'disabled'}>${ru.decor.turn}</button>
+          <button class="mini-btn" data-action="decorRemove" ${hasSel ? '' : 'disabled'}>${ru.decor.remove}</button>
+          <span class="spot-count">${ru.decor.count(count, 8)}</span></div>`
       : '';
   return `${header(ru.decor.title)}<div class="scroll styles-screen">
     <div class="decor-stage"><canvas id="decorHero" aria-hidden="true"></canvas></div>

@@ -4895,3 +4895,32 @@ body.reduced .buff.pop {
     font-size: 14px;
   }
 }
+
+/* Decoration editor: the same proportions as the main screen stage, so objects land where you put them. */
+.decor-stage {
+  height: auto;
+  aspect-ratio: 320 / 430;
+  max-height: 440px;
+  margin-left: auto;
+  margin-right: auto;
+  touch-action: none;
+}
+.decor-stage canvas {
+  touch-action: none;
+}
+.spot-count {
+  margin-left: auto;
+  font-weight: 800;
+}
+.mini-btn:disabled {
+  opacity: 0.4;
+}
+
+/* The stage previews are sized by script to the proportions of the main screen stage. */
+.decor-stage,
+.profile-stage {
+  height: auto;
+  max-height: none;
+  margin-left: auto;
+  margin-right: auto;
+}

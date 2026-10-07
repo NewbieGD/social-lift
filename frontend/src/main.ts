@@ -9,7 +9,7 @@ import type { SimEvent } from './core/types';
 import { ru } from './i18n/ru';
 import { DEFAULT_KEYS, InputController, keyLabel, STEER_CODES } from './input/input';
 import { ApiError } from './net/api';
-import { Session, type Decor, type CrownNotice, type RunTicket, type Stats } from './net/session';
+import { Session, type Decor, type PropPlacement, type CrownNotice, type RunTicket, type Stats } from './net/session';
 import { haptic, hapticsSupported, initHaptics } from './platform/haptics';
 import { ads, DEFAULT_ADS, type AdsConfig } from './platform/ads';
 import { canShare, initShare, shareStory, shareWall } from './platform/share';
@@ -17,11 +17,12 @@ import { lockGestures } from './platform/gestures';
 import { askNotifications, initVk } from './platform/vk';
 import { DuelClient, type ChatMsg, type ChatUser, type DuelMsg, type DuelPlayer } from './net/duel';
 import { scenes } from './render/palette';
+import { buffIcon } from './ui/buffIcons';
 import { drawItem, ITEM_BY_TIER, itemCount, outfitFromMask, type Item } from './render/hero';
 import { fullscreenSupported, onFullscreenChange, toggleFullscreen } from './platform/fullscreen';
 import { StageWind, stageLayout } from './render/ground';
 import { drawMenuBackdrop } from './render/menuBackdrops';
-import { drawFrame, drawFx, drawProp, propHeight, type PropSpot } from './render/menuProps';
+import { drawFrame, drawFx, drawProp, propHalfWidth, propHeight } from './render/menuProps';
 import { ReplayTv, saveReplay } from './render/replayTv';
 import { PetWalker } from './render/petMotion';
 import { drawPet, PET_IDS, petHeight } from './render/pets';
@@ -217,19 +218,6 @@ let captionTimer = 0;
 // ---------- Buff icons: bonus items that count but are not drawn (their slot holds a style) ----------
 
 let buffMask = 0;
-
-function buffIcon(tier: number): HTMLCanvasElement {
-  const c = document.createElement('canvas');
-  const dpr = Math.min(2, window.devicePixelRatio || 1);
-  c.width = Math.round(30 * dpr);
-  c.height = Math.round(30 * dpr);
-  const g = c.getContext('2d')!;
-  g.scale(dpr, dpr);
-  g.translate(15, 15);
-  g.scale(1.05, 1.05);
-  drawItem(g, ITEM_BY_TIER[tier] as Item);
-  return c;
-}
 
 function renderBuffs(): void {
   buffsEl.replaceChildren();
@@ -949,6 +937,106 @@ function paintStagePet(g: CanvasRenderingContext2D, walker: PetWalker, kind: 'ca
   g.restore();
 }
 
+/** Proportions of the main screen stage (the editor and profiles copy them). */
+let menuAspect = 320 / 430;
+let menuSideFrac = 0.4;
+
+/** Sizes a preview stage like the main screen stage, as large as the screen allows. */
+function fitStage(root: HTMLElement, selector: string): void {
+  const stage = root.querySelector<HTMLElement>(selector);
+  const box = stage?.parentElement;
+  if (!stage || !box) return;
+  const maxH = window.innerHeight * 0.56;
+  const w = Math.max(160, Math.min(box.clientWidth, maxH * menuAspect));
+  stage.style.width = `${Math.round(w)}px`;
+  stage.style.aspectRatio = String(menuAspect);
+}
+
+/** Where each placed object was drawn on a canvas (for dragging them in the editor). */
+interface PropBox {
+  id: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+const propBoxes = new Map<string, PropBox[]>();
+/** The object selected in the decoration editor. */
+let decorSelected: string | null = null;
+
+function paintStageProps(
+  g: CanvasRenderingContext2D,
+  props: PropPlacement[],
+  canvasId: string,
+  w: number,
+  h: number,
+  L: { wallBase: number },
+  scale: number,
+  t: number,
+  base: number,
+  layer: 'back' | 'front',
+  mode: 'view' | 'edit',
+): void {
+  if (layer === 'back') propBoxes.set(canvasId, []);
+  const boxes = propBoxes.get(canvasId) ?? [];
+  let tvShown = false;
+  for (const p of [...props].sort((a, b) => a.y - b.y)) {
+    const py = p.y * h;
+    const inFront = py > base + 1 * scale;
+    if ((layer === 'front') !== inFront) {
+      if (p.id === 'prop_tv' && !stageOverride) tvShown = true;
+      continue;
+    }
+    const px = p.x * w;
+    const hw = propHalfWidth(p.id);
+    const ph = propHeight(p.id);
+    g.save();
+    g.translate(px, py);
+    // A lying object rests on the floor: lift it by half of its thickness.
+    if (p.r) g.translate(0, -hw * scale);
+    if (p.r) g.rotate((p.r * Math.PI) / 180);
+    g.scale(scale, scale);
+    if (p.y * h < L.wallBase - 2 * scale && !p.r) {
+      // On the wall: a little shelf under the object.
+      g.fillStyle = '#6B4A2E';
+      g.fillRect(-hw - 2, 0, hw * 2 + 4, 1.6);
+      g.fillStyle = 'rgba(0,0,0,0.3)';
+      g.fillRect(-hw - 2, 1.6, hw * 2 + 4, 0.8);
+    }
+    // Another player's TV shows no signal (their last run lives on their device).
+    drawProp(g, p.id, t, p.id === 'prop_tv' ? (gg, ww, hh) => (stageOverride ? tv.paintNoSignal(gg, ww, hh) : tv.paint(gg, ww, hh)) : undefined);
+    g.restore();
+    if (p.id === 'prop_tv' && !stageOverride) tvShown = true;
+    // Bounds on the canvas (for picking the object up with a finger).
+    const lenS = ph * scale;
+    const thick = hw * 2 * scale;
+    const box: PropBox =
+      p.r === 0
+        ? { id: p.id, x: px - thick / 2, y: py - lenS, w: thick, h: lenS }
+        : p.r === 90
+          ? { id: p.id, x: px, y: py - thick, w: lenS, h: thick }
+          : { id: p.id, x: px - lenS, y: py - thick, w: lenS, h: thick };
+    boxes.push(box);
+    if (mode === 'edit' && decorSelected === p.id) {
+      g.save();
+      g.strokeStyle = '#ffd640';
+      g.lineWidth = 1.6;
+      g.setLineDash([5, 4]);
+      g.strokeRect(box.x - 4, box.y - 4, box.w + 8, box.h + 8);
+      g.restore();
+    }
+  }
+  propBoxes.set(canvasId, boxes);
+  if (layer === 'front') {
+    if (tvShown) {
+      const dtTv = tvLast < 0 ? 0 : Math.min(0.1, Math.max(0, t - tvLast));
+      tvLast = t;
+      tv.setStyles(heroLoadout());
+      tv.update(dtTv);
+    } else tvLast = -1;
+  }
+}
+
 const tv = new ReplayTv();
 tv.reload();
 let tvLast = -1;
@@ -987,7 +1075,14 @@ function drawStageHero(c: HTMLCanvasElement, _tier: number, t: number, _silhouet
     wind.draw(g, 0, scale);
   }
   // On the main screen the stats panel stands at the right: the hero is centered in the free part.
-  const side = c.id === 'menuHero' ? (document.querySelector('.menu2 .chips') as HTMLElement | null)?.offsetWidth ?? 0 : 0;
+  // The editor and the profile reserve the same room (and have the same proportions) as the
+  // main screen stage, so objects stand where they do there.
+  let side = 0;
+  if (c.id === 'menuHero') {
+    side = (document.querySelector('.menu2 .chips') as HTMLElement | null)?.offsetWidth ?? 0;
+    menuAspect = w / h;
+    menuSideFrac = side / w;
+  } else if (c.id === 'decorHero' || c.id === 'profileHero') side = Math.round(w * menuSideFrac);
   const cx = side ? (w - side - 8) / 2 : w / 2;
   if (c.id === 'menuHero') {
     // The "tap the hero" hint sits exactly over the hero.
@@ -1008,38 +1103,26 @@ function drawStageHero(c: HTMLCanvasElement, _tier: number, t: number, _silhouet
       hit.style.height = `${base - top + 2 * scale}px`;
     }
   }
-  // Objects stand on both sides of the hero, or on a shelf on the wall.
-  if (decorOn && decor.props) {
-    const spots: Record<PropSpot, { x: number; y: number }> = {
-      left: { x: cx - 19 * scale, y: base + 1.5 * scale },
-      right: { x: cx + 19 * scale, y: base + 1.5 * scale },
-      wall: { x: cx - 19 * scale, y: base - 50 * scale },
-    };
-    let tvShown = false;
-    for (const spot of ['wall', 'left', 'right'] as PropSpot[]) {
-      const id = decor.props[spot];
-      if (!id) continue;
-      g.save();
-      g.translate(spots[spot].x, spots[spot].y);
-      g.scale(scale, scale);
-      if (spot === 'wall') {
-        // A little shelf under the object.
-        g.fillStyle = '#6B4A2E';
-        g.fillRect(-8, 0, 16, 1.6);
-        g.fillStyle = 'rgba(0,0,0,0.3)';
-        g.fillRect(-8, 1.6, 16, 0.8);
-      }
-      // Another player's TV shows no signal (their last run lives on their device).
-      drawProp(g, id, t, id === 'prop_tv' ? (gg, ww, hh) => (stageOverride ? tv.paintNoSignal(gg, ww, hh) : tv.paint(gg, ww, hh)) : undefined);
-      g.restore();
-      if (id === 'prop_tv' && !stageOverride) tvShown = true;
-    }
-    if (tvShown) {
-      const dtTv = tvLast < 0 ? 0 : Math.min(0.1, Math.max(0, t - tvLast));
-      tvLast = t;
-      tv.setStyles(heroLoadout());
-      tv.update(dtTv);
-    } else tvLast = -1;
+  // Objects stand wherever the player put them. Those behind the hero's feet line are drawn
+  // first, those in front of him after the hero, so nothing is hidden by mistake.
+  const placed = decorOn && Array.isArray(decor.props) ? decor.props : [];
+  const propLayer = c.id === 'decorHero' ? 'edit' : 'view';
+  if (decorOn) paintStageProps(g, placed, c.id, w, h, L, scale, t, base, 'back', propLayer);
+  if (c.id === 'decorHero' && decorTab === 'prop') {
+    // Where the statistics cards cover the main screen.
+    g.save();
+    g.fillStyle = 'rgba(8,10,16,0.35)';
+    g.strokeStyle = 'rgba(255,255,255,0.35)';
+    g.setLineDash([4, 4]);
+    g.beginPath();
+    g.roundRect(w - side, h * 0.06, side - 4, h * 0.4, 8);
+    g.fill();
+    g.stroke();
+    g.fillStyle = 'rgba(255,255,255,0.7)';
+    g.font = '600 11px sans-serif';
+    g.textAlign = 'center';
+    g.fillText(ru.decor.statsZone, w - side / 2 - 2, h * 0.26);
+    g.restore();
   }
   // The pet wanders around on the floor, sometimes behind the hero, sometimes in front of him.
   const petKind = decorOn && decor.pet ? PET_IDS[decor.pet] : undefined;
@@ -1065,6 +1148,7 @@ function drawStageHero(c: HTMLCanvasElement, _tier: number, t: number, _silhouet
     drawCrown(g, t, settingsStore.get().reducedFx);
   }
   g.restore();
+  if (decorOn) paintStageProps(g, placed, c.id, w, h, L, scale, t, base, 'front', propLayer);
   if (walker && petKind && walker.lane === 'front') paintStagePet(g, walker, petKind, base, scale, t);
   wind?.draw(g, 1, scale);
   if (decorOn && decor.fx) drawFx(g, decor.fx, w, h, t, cx, base);
@@ -1165,7 +1249,6 @@ function drawPetIcons(root: HTMLElement): void {
 // ---------- Decoration screen ----------
 
 let decorTab: V.DecorTab = 'bg';
-let decorSpot: 'left' | 'right' | 'wall' = 'left';
 let buyTarget: string | null = null;
 
 /** Paints the cards of the decoration screen: background thumbnails, objects, frames, effects. */
@@ -1215,10 +1298,10 @@ function drawDecorIcons(root: HTMLElement): void {
 }
 
 /** Applies a decoration change at once and lets the server confirm it. */
-function applyDecor(change: Parameters<Session['setDecor']>[0]): void {
+function applyDecor(change: Parameters<Session['setDecor']>[0], save = true): void {
   const shop = session.data?.shop;
   if (!shop) return;
-  const next: Decor = { ...(shop.decor ?? {}), props: { ...(shop.decor?.props ?? {}) } };
+  const next: Decor = { ...(shop.decor ?? {}) };
   for (const key of ['bg', 'frame', 'fx', 'pet'] as const) {
     if (key in change) {
       if (change[key]) next[key] = change[key] as string;
@@ -1226,23 +1309,149 @@ function applyDecor(change: Parameters<Session['setDecor']>[0]): void {
     }
   }
   if (change.props) {
-    for (const [spot, id] of Object.entries(change.props)) {
-      if (id) {
-        // The same object cannot stand in two places: it moves.
-        for (const [other, v] of Object.entries(next.props ?? {})) if (v === id) delete (next.props as Record<string, string>)[other];
-        (next.props as Record<string, string>)[spot] = id;
-      } else delete (next.props as Record<string, string>)[spot];
-    }
+    if (change.props.length) next.props = change.props;
+    else delete next.props;
   }
-  if (next.props && !Object.keys(next.props).length) delete next.props;
   shop.decor = next;
   tvLast = -1;
+  if (!save) return;
   if (router.top === 'decor') router.refresh();
   void session.setDecor(change).then((saved) => {
     if (saved) return;
     void session.refreshShop().then(() => router.top === 'decor' && router.refresh());
   });
 }
+
+// ---------- Objects: place, drag, turn, remove ----------
+
+const MAX_PROPS = 8;
+
+function currentProps(): PropPlacement[] {
+  const list = session.data?.shop?.decor?.props;
+  return Array.isArray(list) ? list.map((p) => ({ ...p })) : [];
+}
+
+/** A free spot for a new object: far from the hero and from the objects already placed. */
+function defaultPlacement(existing: PropPlacement[]): { x: number; y: number } {
+  // The hero fills the middle-left of the stage (x about 0.15 to 0.45), so new objects start
+  // beside him: along the right edge, the left edge and the back of the floor.
+  const candidates = [
+    [0.92, 0.93], [0.64, 0.96], [0.9, 0.72], [0.66, 0.76], [0.8, 0.58], [0.06, 0.92], [0.06, 0.62], [0.64, 0.56], [0.78, 0.84], [0.06, 0.45],
+  ];
+  const obstacles: [number, number][] = existing.map((p) => [p.x, p.y] as [number, number]);
+  let best = candidates[0];
+  let bestD = -1;
+  for (const c of candidates) {
+    const d = Math.min(...obstacles.map(([ox, oy]) => Math.hypot(c[0] - ox, (c[1] - oy) * 1.4)));
+    if (d > bestD) {
+      bestD = d;
+      best = c;
+    }
+  }
+  return { x: best[0], y: best[1] };
+}
+
+function placeProp(id: string): void {
+  const props = currentProps();
+  const at = props.findIndex((p) => p.id === id);
+  if (at >= 0) {
+    // Tapping a placed object in the list takes it away.
+    props.splice(at, 1);
+    if (decorSelected === id) decorSelected = null;
+    applyDecor({ props });
+    return;
+  }
+  if (props.length >= MAX_PROPS) {
+    toast(ru.decor.tooMany(MAX_PROPS), 2200);
+    return;
+  }
+  const pos = defaultPlacement(props);
+  props.push({ id, x: pos.x, y: pos.y, r: 0 });
+  decorSelected = id;
+  applyDecor({ props });
+}
+
+function turnSelected(): void {
+  const props = currentProps();
+  const p = props.find((q) => q.id === decorSelected);
+  if (!p) return;
+  p.r = p.r === 0 ? 90 : p.r === 90 ? 270 : 0;
+  applyDecor({ props });
+}
+
+function removeSelected(): void {
+  if (!decorSelected) return;
+  const id = decorSelected;
+  decorSelected = null;
+  applyDecor({ props: currentProps().filter((p) => p.id !== id) });
+}
+
+/** Updates the object buttons without rebuilding the screen (it must stay put during a drag). */
+function syncDecorControls(): void {
+  const has = !!decorSelected && currentProps().some((p) => p.id === decorSelected);
+  for (const sel of ['[data-action="decorTurn"]', '[data-action="decorRemove"]']) {
+    const b = document.querySelector<HTMLButtonElement>(sel);
+    if (b) b.disabled = !has;
+  }
+  const label = document.querySelector<HTMLElement>('.spot-row > span:first-child');
+  if (label) label.textContent = has && decorSelected ? ru.decor.names[decorSelected] ?? '' : ru.decor.dragHint;
+}
+
+/** Dragging objects in the editor preview with a finger or the mouse. */
+function setupPropDragging(): void {
+  let drag: { id: string; dx: number; dy: number; moved: boolean } | null = null;
+  const canvasOf = (e: PointerEvent): HTMLCanvasElement | null => {
+    const c = e.target as HTMLElement | null;
+    return c && c.id === 'decorHero' ? (c as HTMLCanvasElement) : null;
+  };
+  document.addEventListener('pointerdown', (e) => {
+    const c = canvasOf(e);
+    if (!c || decorTab !== 'prop') return;
+    const r = c.getBoundingClientRect();
+    const px = e.clientX - r.left;
+    const py = e.clientY - r.top;
+    const boxes = propBoxes.get('decorHero') ?? [];
+    // The object drawn last (lowest on the screen) is on top.
+    const hit = [...boxes].reverse().find((b) => px >= b.x - 6 && px <= b.x + b.w + 6 && py >= b.y - 6 && py <= b.y + b.h + 6);
+    if (!hit) {
+      decorSelected = null;
+      syncDecorControls();
+      return;
+    }
+    const p = currentProps().find((q) => q.id === hit.id);
+    if (!p) return;
+    decorSelected = hit.id;
+    drag = { id: hit.id, dx: p.x * c.clientWidth - px, dy: p.y * c.clientHeight - py, moved: false };
+    c.setPointerCapture(e.pointerId);
+    e.preventDefault();
+    syncDecorControls();
+  });
+  document.addEventListener('pointermove', (e) => {
+    if (!drag) return;
+    const c = document.getElementById('decorHero') as HTMLCanvasElement | null;
+    if (!c) return;
+    const r = c.getBoundingClientRect();
+    const x = Math.max(0.03, Math.min(0.97, (e.clientX - r.left + drag.dx) / c.clientWidth));
+    const y = Math.max(0.06, Math.min(0.99, (e.clientY - r.top + drag.dy) / c.clientHeight));
+    const props = currentProps();
+    const p = props.find((q) => q.id === drag!.id);
+    if (!p) return;
+    p.x = Math.round(x * 1000) / 1000;
+    p.y = Math.round(y * 1000) / 1000;
+    drag.moved = true;
+    // Smooth on screen, saved when the finger lifts.
+    applyDecor({ props }, false);
+  });
+  const end = (): void => {
+    if (!drag) return;
+    const moved = drag.moved;
+    drag = null;
+    if (moved) applyDecor({ props: currentProps() });
+  };
+  document.addEventListener('pointerup', end);
+  document.addEventListener('pointercancel', end);
+}
+setupPropDragging();
 
 /** The live preview of the hero in the styles screen. */
 function drawStylesPreview(t: number): void {
@@ -1404,9 +1613,12 @@ router.register('pets', {
   mount: (root) => requestAnimationFrame(() => drawPetIcons(root)),
 });
 router.register('decor', {
-  html: () => V.decorView(session.data?.shop ?? null, decorTab, decorSpot),
+  html: () => V.decorView(session.data?.shop ?? null, decorTab, decorSelected),
   cls: 'solid',
-  mount: (root) => requestAnimationFrame(() => drawDecorIcons(root)),
+  mount: (root) => {
+    fitStage(root, '.decor-stage');
+    requestAnimationFrame(() => drawDecorIcons(root));
+  },
 });
 router.register('buyConfirm', {
   html: () => {
@@ -1503,6 +1715,7 @@ router.register('profileChoice', {
 router.register('profile', {
   html: () => V.profileView(profileData, profileState),
   cls: 'solid',
+  mount: (root) => fitStage(root, '.profile-stage'),
 });
 router.register('moreMenu', { html: () => V.moreMenuView(), modal: true });
 router.register('share', { html: () => V.shareView(canShare()), modal: true });
@@ -1724,11 +1937,8 @@ const actions: Record<string, (arg: string, el: HTMLElement) => void> = {
     decorTab = tab as V.DecorTab;
     router.refresh();
   },
-  decorSpot: (spot) => {
-    decorSpot = spot as 'left' | 'right' | 'wall';
-    router.refresh();
-  },
-  decorClear: (spot) => applyDecor({ props: { [spot]: null } }),
+  decorTurn: () => turnSelected(),
+  decorRemove: () => removeSelected(),
   decorPick: (id) => {
     const decor = session.data?.shop?.decor ?? {};
     if (id === 'frame_none') applyDecor({ frame: null });
@@ -1736,10 +1946,7 @@ const actions: Record<string, (arg: string, el: HTMLElement) => void> = {
     else if (id.startsWith('bg_')) applyDecor({ bg: id === 'bg_default' || decor.bg === id ? null : id });
     else if (id.startsWith('frame_')) applyDecor({ frame: decor.frame === id ? null : id });
     else if (id.startsWith('fx_')) applyDecor({ fx: decor.fx === id ? null : id });
-    else if (id.startsWith('prop_')) {
-      // Tap again on the same spot to take the object away.
-      applyDecor({ props: { [decorSpot]: decor.props?.[decorSpot] === id ? null : id } });
-    }
+    else if (id.startsWith('prop_')) placeProp(id);
   },
   askBuy: (id) => {
     buyTarget = id;
