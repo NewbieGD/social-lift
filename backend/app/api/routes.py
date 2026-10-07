@@ -12,8 +12,8 @@ from ..config import settings
 from ..core import aware, utcnow
 from ..db import get_session
 from ..deps import ApiError, Caller, current_user, enforce_limit
-from ..schemas import BuyIn, ConsentIn, EventIn, LoadoutIn, RunFinishIn, SettingsIn
-from ..services import crown, game, shop
+from ..schemas import BuyIn, ConsentIn, DecorIn, EventIn, LoadoutIn, PrivacyIn, RunFinishIn, SettingsIn
+from ..services import crown, game, public, shop
 from ..services.profiles import refresh_profiles
 
 router = APIRouter(prefix="/api")
@@ -43,6 +43,7 @@ async def bootstrap(
     stats["crown"] = crown_info["crown"]
     return {
         "shop": await shop.state(session, user),
+        "privacy": {"hide_vk_link": bool(user.hide_vk_link)},
         "crown": crown_info,
         "profile": game.profile_dict(user),
         "flags": {
@@ -140,6 +141,41 @@ async def put_loadout(
     enforce_limit(f"u:{caller.user_id}:shop", gc.LIMIT_DEFAULT)
     user = await game.require_user(session, caller, lock=True)
     return {"loadout": await shop.set_loadout(session, user, body.loadout)}
+
+
+@router.put("/privacy")
+async def put_privacy(
+    body: PrivacyIn,
+    caller: Caller = Depends(current_user),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    enforce_limit(f"u:{caller.user_id}:privacy", gc.LIMIT_DEFAULT)
+    user = await game.require_user(session, caller, lock=True)
+    user.hide_vk_link = body.hide_vk_link
+    await session.commit()
+    return {"hide_vk_link": user.hide_vk_link}
+
+
+@router.get("/players/{user_id}")
+async def get_player(
+    user_id: int,
+    caller: Caller = Depends(current_user),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    enforce_limit(f"u:{caller.user_id}:players", gc.LIMIT_DEFAULT)
+    await game.require_user(session, caller)
+    return await public.public_profile(session, user_id)
+
+
+@router.put("/decor")
+async def put_decor(
+    body: DecorIn,
+    caller: Caller = Depends(current_user),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    enforce_limit(f"u:{caller.user_id}:shop", gc.LIMIT_DEFAULT)
+    user = await game.require_user(session, caller, lock=True)
+    return {"decor": await shop.set_decor(session, user, body.decor)}
 
 
 @router.post("/shop/buy")

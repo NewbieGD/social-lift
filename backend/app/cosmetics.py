@@ -17,6 +17,13 @@ from dataclasses import dataclass
 SLOTS = ("head", "torso", "arms", "legs", "feet")
 
 
+# What an item is. Styles are worn on the hero (one per body slot); the rest decorate the main
+# screen: backgrounds, objects standing near the hero, frames and effects.
+KINDS = ("style", "bg", "prop", "frame", "fx", "pet")
+# Places for objects near the hero.
+PROP_SPOTS = ("left", "right", "wall")
+
+
 @dataclass(frozen=True)
 class Item:
     id: str
@@ -31,6 +38,7 @@ class Item:
     price: int | None = None
     # May drop on a platform during a run.
     drop: bool = False
+    kind: str = "style"
 
 
 def _set(set_id: str, parts: tuple[str, ...], **how) -> list[Item]:
@@ -63,6 +71,33 @@ ITEMS: dict[str, Item] = {
     )
 }
 
+# Main-screen decorations (and pets). For these items `slot` is the kind. The PRICES ARE PLACEHOLDERS (coins):
+# change them here. The default background (the brick alley) is free and is not an item.
+DECOR: tuple[Item, ...] = (
+    Item("bg_dusk", "bg", kind="bg", record=100),
+    Item("bg_roof", "bg", kind="bg", price=600),
+    Item("bg_metro", "bg", kind="bg", price=800),
+    Item("bg_neon", "bg", kind="bg", price=1200),
+    Item("bg_winter", "bg", kind="bg", price=1500),
+    Item("bg_space", "bg", kind="bg", price=2500),
+    Item("prop_football", "prop", kind="prop", record=700),
+    Item("prop_basketball", "prop", kind="prop", record=700),
+    Item("prop_lamp", "prop", kind="prop", price=200),
+    Item("prop_bat", "prop", kind="prop", price=300),
+    Item("prop_cup", "prop", kind="prop", price=400),
+    Item("prop_sword", "prop", kind="prop", price=800),
+    Item("prop_tv", "prop", kind="prop", price=1000),
+    Item("frame_gold", "frame", kind="frame", price=500),
+    Item("frame_neon", "frame", kind="frame", price=900),
+    Item("fx_sparks", "fx", kind="fx", price=400),
+    Item("fx_snow", "fx", kind="fx", price=700),
+    # Pets are decoration too: they walk on the main screen and run or fly beside the hero in a run.
+    Item("pet_cat", "pet", kind="pet", record=1300),
+    Item("pet_dog", "pet", kind="pet", record=1300),
+    Item("pet_parrot", "pet", kind="pet", record=1300),
+)
+ITEMS.update({i.id: i for i in DECOR})
+
 # Run drops: chance that a run has a drop at all, and the least score a run needs to claim it.
 DROP_CHANCE = 0.35
 DROP_MIN_SCORE = 100
@@ -79,6 +114,7 @@ def catalog_public() -> list[dict]:
             "duel_streak": i.duel_streak,
             "price": i.price,
             "drop": i.drop,
+            "kind": i.kind,
         }
         for i in ITEMS.values()
     ]
@@ -98,7 +134,7 @@ def unlocked_by_streak(best_streak: int, owned: set[str]) -> list[str]:
 
 def droppable(owned: set[str]) -> list[str]:
     """Items that can still drop for a player (not owned yet)."""
-    return [i.id for i in ITEMS.values() if i.drop and i.id not in owned]
+    return [i.id for i in ITEMS.values() if i.drop and i.kind == "style" and i.id not in owned]
 
 
 def clean_loadout(loadout: dict, owned: set[str]) -> dict[str, str]:
@@ -106,7 +142,7 @@ def clean_loadout(loadout: dict, owned: set[str]) -> dict[str, str]:
     out: dict[str, str] = {}
     for slot, item_id in (loadout or {}).items():
         item = ITEMS.get(item_id) if isinstance(item_id, str) else None
-        if slot in SLOTS and item is not None and item.slot == slot and item_id in owned:
+        if slot in SLOTS and item is not None and item.kind == "style" and item.slot == slot and item_id in owned:
             out[slot] = item_id
     return out
 
@@ -123,8 +159,62 @@ def validate_loadout(loadout: dict, owned: set[str]) -> str | None:
         item = ITEMS.get(item_id) if isinstance(item_id, str) else None
         if item is None:
             return "unknown_item"
-        if item.slot != slot:
+        if item.kind != "style" or item.slot != slot:
             return "wrong_slot"
         if item_id not in owned:
             return "not_owned"
+    return None
+
+
+def clean_decor(decor: dict, owned: set[str]) -> dict:
+    """Keeps only valid decor: owned items of the right kind, known spots."""
+    out: dict = {}
+    for key in ("bg", "frame", "fx", "pet"):
+        item = ITEMS.get(decor.get(key)) if isinstance(decor.get(key), str) else None
+        if item is not None and item.kind == key and item.id in owned:
+            out[key] = item.id
+    props = {}
+    for spot, item_id in (decor.get("props") or {}).items():
+        item = ITEMS.get(item_id) if isinstance(item_id, str) else None
+        if spot in PROP_SPOTS and item is not None and item.kind == "prop" and item.id in owned:
+            props[spot] = item.id
+    if props:
+        # One object cannot stand in two places.
+        seen: set[str] = set()
+        out["props"] = {k: v for k, v in props.items() if not (v in seen or seen.add(v))}
+    return out
+
+
+def validate_decor(change: dict, owned: set[str]) -> str | None:
+    """Error code for a decor change request, or None. A null value clears that place."""
+    if not isinstance(change, dict):
+        return "decor_invalid"
+    for key, value in change.items():
+        if key in ("bg", "frame", "fx", "pet"):
+            if value is None:
+                continue
+            item = ITEMS.get(value) if isinstance(value, str) else None
+            if item is None:
+                return "unknown_item"
+            if item.kind != key:
+                return "wrong_kind"
+            if value not in owned:
+                return "not_owned"
+        elif key == "props":
+            if not isinstance(value, dict):
+                return "decor_invalid"
+            for spot, item_id in value.items():
+                if spot not in PROP_SPOTS:
+                    return "unknown_spot"
+                if item_id is None:
+                    continue
+                item = ITEMS.get(item_id) if isinstance(item_id, str) else None
+                if item is None:
+                    return "unknown_item"
+                if item.kind != "prop":
+                    return "wrong_kind"
+                if item_id not in owned:
+                    return "not_owned"
+        else:
+            return "decor_invalid"
     return None

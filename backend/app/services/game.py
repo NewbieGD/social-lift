@@ -528,6 +528,8 @@ async def _top_rows(session: AsyncSession, scope: str, wid: str) -> list[dict]:
                 "name": u.display_name,
                 "photo": None if u.profile_deactivated else u.photo_url,
                 "deactivated": bool(u.profile_deactivated),
+                # Whether the game may offer a link to this player's VK page.
+                "link": not u.hide_vk_link,
                 "score": int(score),
                 "_synced": synced.timestamp() if synced else None,
             }

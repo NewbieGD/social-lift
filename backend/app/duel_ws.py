@@ -50,6 +50,8 @@ class Conn:
     msgs: list[float] = field(default_factory=list)
     in_chat: bool = False
     chat_rank: int | None = None
+    # Others may be offered a link to this player's VK page.
+    link: bool = True
     last_chat: float = -1e9
 
 
@@ -87,7 +89,7 @@ def public(c: Conn) -> dict:
 
 def chat_user(c: Conn) -> dict:
     """Public data of a chat member: avatar, name and place in the all-time leaderboard."""
-    return {"id": c.user_id, "name": c.name, "photo": c.photo, "rank": c.chat_rank}
+    return {"id": c.user_id, "name": c.name, "photo": c.photo, "rank": c.chat_rank, "link": c.link}
 
 
 def chat_members() -> list[Conn]:
@@ -221,7 +223,13 @@ async def duel_socket(ws: WebSocket) -> None:
         if user is None or not game.consent_ok(user):
             await ws.close(code=4403, reason="consent")
             return
-        me = Conn(ws=ws, user_id=user.id, name=user.display_name, photo=None if user.profile_deactivated else user.photo_url)
+        me = Conn(
+            ws=ws,
+            user_id=user.id,
+            name=user.display_name,
+            photo=None if user.profile_deactivated else user.photo_url,
+            link=not user.hide_vk_link,
+        )
     old = conns.get(me.user_id)
     if old is not None:
         try:

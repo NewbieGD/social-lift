@@ -281,7 +281,7 @@ async def test_record_opens_starter_items_and_loadout(client):
     assert boot["shop"]["owned"] == [] and len(boot["shop"]["catalog"]) >= 4
     # A single run of 500+ opens all four starter items.
     r = (await _big_run(client, 82)).json()
-    assert sorted(r["new_items"]) == ["starter_feet", "starter_head", "starter_legs", "starter_torso"]
+    assert sorted(r["new_items"]) == ["bg_dusk", "starter_feet", "starter_head", "starter_legs", "starter_torso"]
     # A second record does not grant them again.
     r = (await _big_run(client, 82, score=620)).json()
     assert r["new_items"] == []
@@ -314,7 +314,9 @@ async def test_existing_player_gets_items_on_next_start(client):
         user.best_all = 700  # a player who passed the threshold before the shop existed
         await s.commit()
     boot = (await client.post("/api/session/bootstrap", headers=headers(84))).json()
-    assert sorted(boot["shop"]["owned"]) == ["starter_feet", "starter_head", "starter_legs", "starter_torso"]
+    assert sorted(boot["shop"]["owned"]) == [
+        "bg_dusk", "prop_basketball", "prop_football", "starter_feet", "starter_head", "starter_legs", "starter_torso",
+    ]
 
 
 async def test_buy_with_coins(client, monkeypatch):
@@ -416,3 +418,87 @@ async def test_duel_win_streak_opens_ninja_parts(client):
         assert winner.duel_streak == 2 and winner.best_duel_streak == 2 and loser.duel_streak == 0
     shop = (await client.get("/api/shop", headers=headers(90))).json()
     assert shop["owned"] == ["ninja_head"] and shop["duel_streak"] == 2
+
+
+async def test_decor_rules_and_purchase(client, monkeypatch):
+    await ready_player(client, 92)
+    # Nothing is owned yet: a background cannot be used.
+    bad = await client.put("/api/decor", json={"decor": {"bg": "bg_dusk"}}, headers=headers(92))
+    assert bad.status_code == 400 and bad.json()["error"]["code"] == "not_owned"
+    # A score of 150 opens the dusk background.
+    async with SessionLocal() as s:
+        user = await s.get(User, 92)
+        user.best_all = 150
+        user.coins = 1500
+        await s.commit()
+    await client.post("/api/session/bootstrap", headers=headers(92))
+    ok = await client.put("/api/decor", json={"decor": {"bg": "bg_dusk"}}, headers=headers(92))
+    assert ok.status_code == 200 and ok.json()["decor"] == {"bg": "bg_dusk"}
+    # Wrong kind and unknown spot are rejected.
+    assert (await client.put("/api/decor", json={"decor": {"bg": "prop_cup"}}, headers=headers(92))).status_code == 400
+    assert (await client.put("/api/decor", json={"decor": {"props": {"top": "prop_cup"}}}, headers=headers(92))).json()["error"]["code"] == "unknown_spot"
+    # Buying a priced object, then placing it; placing it elsewhere moves it.
+    buy = await client.post("/api/shop/buy", json={"item_id": "prop_cup"}, headers=headers(92))
+    assert buy.status_code == 200 and buy.json()["coins"] == 1100
+    placed = await client.put("/api/decor", json={"decor": {"props": {"left": "prop_cup"}}}, headers=headers(92))
+    assert placed.json()["decor"] == {"bg": "bg_dusk", "props": {"left": "prop_cup"}}
+    moved = await client.put("/api/decor", json={"decor": {"props": {"wall": "prop_cup"}}}, headers=headers(92))
+    assert moved.json()["decor"]["props"] == {"wall": "prop_cup"}
+    cleared = await client.put("/api/decor", json={"decor": {"bg": None, "props": {"wall": None}}}, headers=headers(92))
+    assert cleared.json()["decor"] == {}
+    boot = (await client.post("/api/session/bootstrap", headers=headers(92))).json()
+    assert boot["shop"]["decor"] == {} and "prop_cup" in boot["shop"]["owned"]
+
+
+async def test_pets_open_at_1300_and_can_be_chosen(client):
+    await ready_player(client, 93)
+    async with SessionLocal() as s:
+        user = await s.get(User, 93)
+        user.best_all = 1200
+        await s.commit()
+    boot = (await client.post("/api/session/bootstrap", headers=headers(93))).json()
+    assert not any(i.startswith("pet_") for i in boot["shop"]["owned"])
+    assert (await client.put("/api/decor", json={"decor": {"pet": "pet_cat"}}, headers=headers(93))).json()["error"]["code"] == "not_owned"
+    async with SessionLocal() as s:
+        user = await s.get(User, 93)
+        user.best_all = 1300
+        await s.commit()
+    boot = (await client.post("/api/session/bootstrap", headers=headers(93))).json()
+    assert {"pet_cat", "pet_dog", "pet_parrot"} <= set(boot["shop"]["owned"])
+    ok = await client.put("/api/decor", json={"decor": {"pet": "pet_parrot"}}, headers=headers(93))
+    assert ok.status_code == 200 and ok.json()["decor"]["pet"] == "pet_parrot"
+    # A pet is not a background and a background is not a pet.
+    assert (await client.put("/api/decor", json={"decor": {"bg": "pet_cat"}}, headers=headers(93))).json()["error"]["code"] == "wrong_kind"
+    assert (await client.put("/api/decor", json={"decor": {"pet": "bg_dusk"}}, headers=headers(93))).json()["error"]["code"] == "wrong_kind"
+    cleared = await client.put("/api/decor", json={"decor": {"pet": None}}, headers=headers(93))
+    assert "pet" not in cleared.json()["decor"]
+
+
+async def test_privacy_switch_and_public_profile(client):
+    await ready_player(client, 94)
+    await ready_player(client, 95)
+    async with SessionLocal() as s:
+        user = await s.get(User, 95)
+        user.best_all = 900
+        user.display_name = "Тест П."
+        await s.commit()
+    await client.post("/api/session/bootstrap", headers=headers(95))  # grants cosmetics for the record
+    # Another player sees the in-game profile, with a link offered by default.
+    prof = (await client.get("/api/players/95", headers=headers(94))).json()
+    assert prof["id"] == 95 and prof["link"] is True and prof["stats"]["best_all"] == 900
+    assert prof["styles_total"] >= 28 and prof["collection_owned"] >= 5 and prof["loadout"] == {}
+    # Hiding the link is respected in the profile and in the leaderboard rows.
+    off = await client.put("/api/privacy", json={"hide_vk_link": True}, headers=headers(95))
+    assert off.status_code == 200 and off.json()["hide_vk_link"] is True
+    assert (await client.get("/api/players/95", headers=headers(94))).json()["link"] is False
+    boot = (await client.post("/api/session/bootstrap", headers=headers(95))).json()
+    assert boot["privacy"]["hide_vk_link"] is True
+    lb = (await client.get("/api/leaderboard?scope=all", headers=headers(94))).json()
+    assert [r["link"] for r in lb["rows"] if r["user_id"] == 95] == [False]
+    # Unknown players and deactivated profiles are not available.
+    assert (await client.get("/api/players/123456", headers=headers(94))).status_code == 404
+    async with SessionLocal() as s:
+        user = await s.get(User, 95)
+        user.profile_deactivated = True
+        await s.commit()
+    assert (await client.get("/api/players/95", headers=headers(94))).status_code == 404

@@ -62,6 +62,22 @@ class LoadoutIn(Strict):
     loadout: dict[str, str | None] = Field(default_factory=dict, max_length=8)
 
 
+class DecorIn(Strict):
+    # {bg|frame|fx: item_id | null, props: {left|right|wall: item_id | null}}
+    decor: dict = Field(default_factory=dict)
+
+    @field_validator("decor")
+    @classmethod
+    def small(cls, v: dict) -> dict:
+        if len(v) > 6 or len(v.get("props") or {}) > 4:
+            raise ValueError("too many places")
+        return v
+
+
+class PrivacyIn(Strict):
+    hide_vk_link: bool
+
+
 class BuyIn(Strict):
     item_id: str = Field(min_length=1, max_length=40)
 

@@ -85,6 +85,7 @@ async def state(session: AsyncSession, user: User) -> dict:
         "coins": user.coins or 0,
         "owned": sorted(owned),
         "loadout": cosmetics.clean_loadout(user.loadout or {}, owned),
+        "decor": cosmetics.clean_decor(user.decor or {}, owned),
         "duel_streak": user.duel_streak or 0,
         "best_duel_streak": user.best_duel_streak or 0,
         "catalog": cosmetics.catalog_public(),
@@ -104,6 +105,38 @@ async def set_loadout(session: AsyncSession, user: User, loadout: dict) -> dict:
         else:
             current[slot] = item_id
     user.loadout = current
+    await session.commit()
+    return current
+
+
+async def set_decor(session: AsyncSession, user: User, change: dict) -> dict:
+    """Changes the main-screen decoration. A null clears a place; places not mentioned stay."""
+    owned = await owned_ids(session, user.id)
+    error = cosmetics.validate_decor(change, owned)
+    if error:
+        raise ApiError(400, error, "Cannot use this")
+    current = cosmetics.clean_decor(user.decor or {}, owned)
+    for key in ("bg", "frame", "fx", "pet"):
+        if key in change:
+            if change[key] is None:
+                current.pop(key, None)
+            else:
+                current[key] = change[key]
+    if "props" in change:
+        props = dict(current.get("props") or {})
+        for spot, item_id in change["props"].items():
+            if item_id is None:
+                props.pop(spot, None)
+            else:
+                # The same object cannot stand in two places: it moves.
+                for other in [k for k, v in props.items() if v == item_id]:
+                    props.pop(other)
+                props[spot] = item_id
+        if props:
+            current["props"] = props
+        else:
+            current.pop("props", None)
+    user.decor = current
     await session.commit()
     return current
 

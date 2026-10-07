@@ -58,6 +58,10 @@ class User(Base):
     coins: Mapped[int] = mapped_column(Integer, default=0)
     # Worn cosmetics: {slot: item_id}.
     loadout: Mapped[dict] = mapped_column(JsonType, default=dict)
+    # The player does not want others to be offered a link to their VK page in the game.
+    hide_vk_link: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Main-screen decoration: {bg, frame, fx, pet, props: {spot: item_id}}.
+    decor: Mapped[dict] = mapped_column(JsonType, default=dict)
     # Duel wins in a row now, and the best such streak ever (it opens cosmetics).
     duel_streak: Mapped[int] = mapped_column(Integer, default=0)
     best_duel_streak: Mapped[int] = mapped_column(Integer, default=0)
