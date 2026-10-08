@@ -1894,54 +1894,72 @@ function seraphLantern(ctx: CanvasRenderingContext2D, d: StyleDef, len: number, 
   glowDot(ctx, len + 3, 0, 11 * pulse, p.accent, 0.55);
 }
 
-/** The glow of the full premium set: a soft aura, a ring and sparks circling the hero. Hero frame. */
+/** A small feather: a soft pointed leaf with a light vein. Drawn at 0,0 pointing up. */
+function featherShape(ctx: CanvasRenderingContext2D, len: number, w: number): void {
+  ctx.beginPath();
+  ctx.moveTo(0, 0);
+  ctx.bezierCurveTo(-w, -len * 0.3, -w * 0.9, -len * 0.75, 0, -len);
+  ctx.bezierCurveTo(w * 0.9, -len * 0.75, w, -len * 0.3, 0, 0);
+  ctx.closePath();
+}
+
+/**
+ * The glow of the full premium set: a soft light that breathes, slow curved ribbons of light
+ * and white-gold feathers that drift up and sway. Light and airy, with no round dots. Hero frame.
+ */
 export function drawSeraphAura(ctx: CanvasRenderingContext2D, d: StyleDef, t: number, cy = -30): void {
   const p = d.palette;
-  const pulse = 0.9 + 0.1 * Math.sin(t * 2.4);
+  const breathe = 0.92 + 0.08 * Math.sin(t * 1.6);
   ctx.save();
   ctx.globalCompositeOperation = 'lighter';
-  const g = ctx.createRadialGradient(0, cy, 4, 0, cy, 50 * pulse);
-  g.addColorStop(0, 'rgba(255,236,160,0.5)');
-  g.addColorStop(0.45, 'rgba(127,232,255,0.22)');
-  g.addColorStop(1, 'rgba(127,232,255,0)');
+  // A wide soft halo and a taller, fainter column of light.
+  const g = ctx.createRadialGradient(0, cy, 6, 0, cy, 54 * breathe);
+  g.addColorStop(0, 'rgba(255,240,190,0.34)');
+  g.addColorStop(0.5, 'rgba(160,235,255,0.13)');
+  g.addColorStop(1, 'rgba(160,235,255,0)');
   ctx.fillStyle = g;
-  ctx.fillRect(-56, cy - 56, 112, 112);
-  // Slow rays.
-  ctx.rotate(0);
-  for (let i = 0; i < 8; i++) {
-    const a = (i / 8) * Math.PI * 2 + t * 0.35;
-    ctx.save();
-    ctx.translate(0, cy);
-    ctx.rotate(a);
-    const rg = ctx.createLinearGradient(0, 0, 0, -48);
-    rg.addColorStop(0, 'rgba(255,240,190,0.22)');
-    rg.addColorStop(1, 'rgba(255,240,190,0)');
-    ctx.fillStyle = rg;
+  ctx.fillRect(-60, cy - 60, 120, 120);
+  const col = ctx.createLinearGradient(0, cy + 44, 0, cy - 52);
+  col.addColorStop(0, 'rgba(255,236,170,0)');
+  col.addColorStop(0.5, 'rgba(255,244,205,0.12)');
+  col.addColorStop(1, 'rgba(255,236,170,0)');
+  ctx.fillStyle = col;
+  ctx.beginPath();
+  ctx.ellipse(0, cy, 22 * breathe, 52, 0, 0, Math.PI * 2);
+  ctx.fill();
+  // Ribbons: thin curves of light that sway slowly around the hero.
+  ctx.lineCap = 'round';
+  for (let i = 0; i < 4; i++) {
+    const side = i % 2 ? 1 : -1;
+    const sw = Math.sin(t * 0.7 + i * 1.9);
+    const x0 = side * (16 + (i >> 1) * 8);
+    const rg = ctx.createLinearGradient(0, cy + 34, 0, cy - 38);
+    rg.addColorStop(0, 'rgba(255,238,180,0)');
+    rg.addColorStop(0.5, `rgba(255,248,215,${0.3 + 0.1 * sw})`);
+    rg.addColorStop(1, 'rgba(180,240,255,0)');
+    ctx.strokeStyle = rg;
+    ctx.lineWidth = 1.6 - (i >> 1) * 0.5;
     ctx.beginPath();
-    ctx.moveTo(-1.6, 0);
-    ctx.lineTo(1.6, 0);
-    ctx.lineTo(0.4, -48);
-    ctx.lineTo(-0.4, -48);
-    ctx.closePath();
+    ctx.moveTo(x0 * 0.6, cy + 34);
+    ctx.bezierCurveTo(x0 * 1.7 + sw * 6, cy + 14, x0 * 0.4 - sw * 7, cy - 12, x0 + sw * 4, cy - 38);
+    ctx.stroke();
+  }
+  // Feathers rising and turning gently, fading in and out.
+  for (let i = 0; i < 9; i++) {
+    const ph = (t * 0.16 + i * 0.113) % 1;
+    const x = Math.sin(i * 2.3) * 20 + Math.sin(t * 0.9 + i * 1.4) * 5;
+    const y = cy + 30 - ph * 66;
+    const a = Math.sin(ph * Math.PI);
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(Math.sin(t * 0.8 + i) * 0.6 + (i % 2 ? 0.3 : -0.3));
+    featherShape(ctx, 6 + (i % 3) * 1.6, 1.7);
+    const fg = ctx.createLinearGradient(0, 0, 0, -9);
+    fg.addColorStop(0, `rgba(255,255,255,${0.75 * a})`);
+    fg.addColorStop(1, `rgba(255,226,140,${0.55 * a})`);
+    ctx.fillStyle = fg;
     ctx.fill();
     ctx.restore();
-  }
-  // A thin ring that breathes, and sparks orbiting on it.
-  ctx.strokeStyle = 'rgba(255,236,160,0.28)';
-  ctx.lineWidth = 0.8;
-  ctx.beginPath();
-  ctx.ellipse(0, cy + 2, 30 * pulse, 40 * pulse, 0, 0, Math.PI * 2);
-  ctx.stroke();
-  for (let i = 0; i < 12; i++) {
-    const a = t * (0.8 + (i % 3) * 0.25) + i * 0.52;
-    const x = Math.cos(a) * 30 * pulse;
-    const y = cy + 2 + Math.sin(a) * 40 * pulse;
-    const tw = 0.4 + 0.6 * Math.abs(Math.sin(t * 3 + i));
-    const sg = ctx.createRadialGradient(x, y, 0, x, y, 3.4);
-    sg.addColorStop(0, `rgba(255,252,220,${0.95 * tw})`);
-    sg.addColorStop(1, 'rgba(255,220,120,0)');
-    ctx.fillStyle = sg;
-    ctx.fillRect(x - 3.4, y - 3.4, 6.8, 6.8);
   }
   ctx.restore();
   void p;
@@ -2015,7 +2033,7 @@ export function drawLegionFx(ctx: CanvasRenderingContext2D, d: StyleDef, t: numb
  * Wings grown from the armor, drawn behind the body in the torso frame (hip at 0,0). `spread`
  * is 0 (folded) to 1 (wide open): they open while the hero jumps up.
  */
-export function drawSeraphWings(ctx: CanvasRenderingContext2D, d: StyleDef, len: number, view: View, spread: number, t: number): void {
+export function drawSeraphWings(ctx: CanvasRenderingContext2D, d: StyleDef, len: number, view: View, spread: number, t: number, detach = 0): void {
   const p = d.palette;
   const sh = { x: 0, y: -len + 3.4 };
   const feather = (ang: number, flen: number, dark: boolean): void => {
@@ -2051,23 +2069,57 @@ export function drawSeraphWings(ctx: CanvasRenderingContext2D, d: StyleDef, len:
   };
   ctx.save();
   if (view === 'front') {
-    // One wing on each side of the back.
+    // One wing on each side of the back. When the hero jumps they come away from the body (a thread
+    // of light still joins them to the shoulders) and come back to it as he lands.
     for (const sd of [-1, 1]) {
       ctx.save();
-      ctx.translate(sd * 4.2, 0);
+      ctx.globalAlpha = 1 - 0.18 * detach;
+      ctx.translate(sd * (4.2 + detach * 10), -detach * 6);
+      ctx.rotate(sd * detach * 0.12);
       fan(sd, 0.1, false, 0);
+      ctx.restore();
+    }
+    if (detach > 0.15) {
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.strokeStyle = `rgba(190,245,255,${0.5 * detach})`;
+      ctx.lineWidth = 0.9;
+      ctx.lineCap = 'round';
+      for (const sd of [-1, 1]) {
+        ctx.beginPath();
+        ctx.moveTo(sd * 3, -len + 3.4);
+        ctx.quadraticCurveTo(sd * (4 + detach * 5), -len + 1 - detach * 4, sd * (4.2 + detach * 10), -len + 3.4 - detach * 6);
+        ctx.stroke();
+      }
       ctx.restore();
     }
   } else {
     // Seen from the side: both wings sweep back (to the left), the far one slightly higher.
     ctx.save();
-    ctx.translate(-1.5, -1.5);
+    ctx.globalAlpha = 1 - 0.2 * detach;
+    ctx.translate(-1.5 - detach * 8, -1.5 - detach * 4);
+    ctx.rotate(-detach * 0.1);
     fan(-1, 0.3, true, 0);
     ctx.restore();
     ctx.save();
-    ctx.translate(-2, 1);
+    ctx.globalAlpha = 1 - 0.15 * detach;
+    ctx.translate(-2 - detach * 12, 1 - detach * 6);
+    ctx.rotate(-detach * 0.14);
     fan(-1, 0.22, false, 0);
     ctx.restore();
+    if (detach > 0.15) {
+      // A thread of light from the shoulder to the wing that came away.
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.strokeStyle = `rgba(190,245,255,${0.5 * detach})`;
+      ctx.lineWidth = 0.9;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(0, -len + 3.4);
+      ctx.quadraticCurveTo(-3 - detach * 5, -len + 2 - detach * 3, -2 - detach * 12, -len + 4.4 - detach * 6);
+      ctx.stroke();
+      ctx.restore();
+    }
   }
   ctx.restore();
   // A soft glow at the roots.

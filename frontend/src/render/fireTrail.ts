@@ -25,8 +25,12 @@ const COLORS: Record<number, [string, string, string]> = {
   4: ['235,252,255', '120,210,255', '60,110,255'],
 };
 
+/** The trail is switched off for now (the first version looked too heavy and sat behind the hero). */
+export const FIRE_TRAIL_ENABLED = false;
+
 /** Level of the trail for a score multiplier (0 = none). */
 export function comboLevel(multiplier: number): number {
+  if (!FIRE_TRAIL_ENABLED) return 0;
   if (multiplier >= 3) return 4;
   if (multiplier >= 2.5) return 3;
   if (multiplier >= 2) return 2;

@@ -27,6 +27,7 @@ import { ReplayTv, saveReplay } from './render/replayTv';
 import { PetWalker } from './render/petMotion';
 import { LiveReplica } from './render/liveReplica';
 import { perf } from './core/perf';
+import { markSeen, unseen } from './ui/seen';
 import { drawDayTint, drawWeather, weatherFor, weatherForced, type WeatherKind } from './render/menuWeather';
 import { menuState } from './render/menuState';
 import { drawPet, PET_IDS, petHeight, type PetKind } from './render/pets';
@@ -102,6 +103,10 @@ function isWide(): boolean {
 }
 
 function layout(): void {
+  // On a phone the on-screen keyboard shrinks the page: the field would be measured as tiny, and
+  // the screens (the chat) would shrink with it. While a text field has focus the size is kept.
+  const typing = document.activeElement;
+  if (typing && (typing.tagName === 'INPUT' || typing.tagName === 'TEXTAREA') && mode !== 'run' && mode !== 'tutorial') return;
   const wide = isWide();
   if (document.body.classList.contains('wide') !== wide) {
     document.body.classList.toggle('wide', wide);
@@ -120,7 +125,8 @@ function layout(): void {
   const cssH = Math.floor(viewH * scale);
   board.style.width = `${cssW}px`;
   // Screens keep their content inside the play column (desktop shows side margins).
-  document.documentElement.style.setProperty('--board-w', `${cssW}px`);
+  // Never narrower than a phone's chat needs (the keyboard can still make the measured field small).
+  document.documentElement.style.setProperty('--board-w', `${Math.max(cssW, Math.min(300, window.innerWidth - 16))}px`);
   board.style.height = `${cssH}px`;
   renderer.resize(cssW, cssH, scale);
   input.scale = scale;
@@ -348,11 +354,25 @@ function showPress(outlet: string, title: string, kind: 'news' | 'cover'): void 
 }
 
 let toastTimer = 0;
+/** A second toast that lives above the screens (menus, chat): the board's own toast is under them. */
+let toastTopEl: HTMLElement | null = null;
+
 function toast(text: string, ms = 1600): void {
-  toastEl.textContent = text;
-  toastEl.classList.add('on');
+  let el = toastEl;
+  if (router.top !== null) {
+    if (!toastTopEl) {
+      toastTopEl = document.createElement('div');
+      toastTopEl.className = 'toast toast-top';
+      document.body.appendChild(toastTopEl);
+    }
+    el = toastTopEl;
+    // Only one of them is visible at a time.
+    toastEl.classList.remove('on');
+  } else toastTopEl?.classList.remove('on');
+  el.textContent = text;
+  el.classList.add('on');
   clearTimeout(toastTimer);
-  toastTimer = window.setTimeout(() => toastEl.classList.remove('on'), ms);
+  toastTimer = window.setTimeout(() => el.classList.remove('on'), ms);
 }
 
 function handleUiEvents(events: SimEvent[]): void {
@@ -994,6 +1014,93 @@ const stageWinds = new Map<string, { wind: StageWind; last: number }>();
 const petWalkers = new Map<string, PetWalker>();
 const petLast = new Map<string, number>();
 
+/** The hero of the main screen is being carried (hold and drag). */
+let heroDragging = false;
+let lastHeroDragEnd = -1e9;
+/** Pixels per hero unit on the main screen (to place the hero under the finger). */
+let menuScale = 3;
+
+/**
+ * Before a purchase the player sees the thing on his own hero (and in his own room): the item is
+ * added to what he wears or has on the stage, only on the screen.
+ */
+function drawBuyPreview(t: number): void {
+  const c = document.getElementById('buyPreview') as HTMLCanvasElement | null;
+  const shop = session.data?.shop;
+  const item = buyTarget ? shop?.catalog.find((x) => x.id === buyTarget) : undefined;
+  if (!c || !shop || !item) return;
+  const decor: Decor = { ...(shop.decor ?? {}) };
+  const loadout = { ...(shop.loadout ?? {}) } as Record<string, string>;
+  if (item.kind === 'style') loadout[item.slot] = item.id;
+  else if (item.kind === 'bg') decor.bg = item.id;
+  else if (item.kind === 'frame') decor.frame = item.id;
+  else if (item.kind === 'fx') decor.fx = item.id;
+  else if (item.kind === 'pet') decor.pet = item.id;
+  else if (item.kind === 'prop') decor.props = [...(Array.isArray(decor.props) ? decor.props.filter((p) => p.id !== item.id) : []), { id: item.id, x: 0.78, y: 0.9, r: 0 }];
+  stageOverride = { decor, loadout: loadout as StyleLoadout, mask: ownedMask(), crown: hasCrown() };
+  drawStageHero(c, 0, t);
+  stageOverride = null;
+}
+
+/** Hold the hero for a moment, then drag him to any place on the stage; a short tap still opens the wardrobe. */
+function setupHeroDrag(): void {
+  let timer = 0;
+  let start: { x: number; y: number; id: number; el: HTMLElement } | null = null;
+  const place = (e: PointerEvent): void => {
+    const c = document.getElementById('menuHero') as HTMLCanvasElement | null;
+    if (!c) return;
+    const r = c.getBoundingClientRect();
+    // The finger holds the hero at about the middle of his body.
+    menuState.hero = {
+      x: Math.max(0.04, Math.min(0.96, (e.clientX - r.left) / r.width)),
+      y: Math.max(0.3, Math.min(0.99, (e.clientY - r.top + 30 * menuScale) / r.height)),
+    };
+  };
+  document.addEventListener('pointerdown', (e) => {
+    const el = e.target as HTMLElement | null;
+    if (!el || !el.classList.contains('hero-hit')) return;
+    start = { x: e.clientX, y: e.clientY, id: e.pointerId, el };
+    window.clearTimeout(timer);
+    timer = window.setTimeout(() => {
+      if (!start) return;
+      heroDragging = true;
+      start.el.setPointerCapture?.(start.id);
+      if (settingsStore.get().vibration) haptic('light');
+      audio.play('click');
+    }, 380);
+  });
+  document.addEventListener('pointermove', (e) => {
+    if (!start) return;
+    if (heroDragging) {
+      place(e);
+      return;
+    }
+    // Moving before the hold is long enough is a swipe, not a carry.
+    if (Math.hypot(e.clientX - start.x, e.clientY - start.y) > 12) {
+      window.clearTimeout(timer);
+      start = null;
+    }
+  });
+  const end = (e: PointerEvent): void => {
+    window.clearTimeout(timer);
+    if (heroDragging) {
+      place(e);
+      menuState.save();
+      heroDragging = false;
+      lastHeroDragEnd = performance.now();
+      e.preventDefault();
+    }
+    start = null;
+  };
+  document.addEventListener('pointerup', end);
+  document.addEventListener('pointercancel', end);
+  // The long press must not open the system menu of the browser.
+  document.addEventListener('contextmenu', (e) => {
+    if ((e.target as HTMLElement | null)?.classList?.contains('hero-hit')) e.preventDefault();
+  });
+}
+setupHeroDrag();
+
 /** When the player last tapped the pet on a canvas (seconds on the page clock). */
 const petReactions = new Map<string, number>();
 /** Where the pet of the main screen was drawn (for taps). */
@@ -1183,9 +1290,9 @@ function drawStageHero(c: HTMLCanvasElement, _tier: number, t: number, _silhouet
   // The hero stands on the street in front of a brick wall; the soles are on the `feet` line.
   const L = stageLayout(h);
   const scale = Math.min(w / 58, (L.feet - 6) / (hasCrown() ? 124 : 96));
-  const base = L.feet;
-  // The main screen and the decoration preview wear the chosen decoration.
-  const decorOn = c.id === 'menuHero' || c.id === 'decorHero' || c.id === 'petsHero' || c.id === 'profileHero';
+  let base = L.feet;
+  // The main screen, the wardrobe and the previews wear the chosen decoration.
+  const decorOn = c.id === 'menuHero' || c.id === 'decorHero' || c.id === 'petsHero' || c.id === 'profileHero' || c.id === 'wardHero' || c.id === 'buyPreview';
   const decor = decorOn ? heroDecor() : ({} as Decor);
   drawMenuBackdrop(g, decor.bg, w, h, L, scale, t);
   // The living main screen: the time of day, a darker room with the lamp off, and the weather.
@@ -1224,7 +1331,15 @@ function drawStageHero(c: HTMLCanvasElement, _tier: number, t: number, _silhouet
   if (c.id === 'menuHero') {
     menuAspect = w / h;
   } else if (c.id === 'decorHero' || c.id === 'profileHero') side = Math.round(w * menuSideFrac);
-  const cx = side ? (w - side - 8) / 2 : w / 2;
+  let cx = side ? (w - side - 8) / 2 : w / 2;
+  if (c.id === 'menuHero') {
+    // The player can put the hero anywhere on the stage (hold him and drag).
+    if (menuState.hero) {
+      cx = Math.max(10 * scale, Math.min(w - 10 * scale, menuState.hero.x * w));
+      base = Math.max(L.wallBase + 8 * scale, Math.min(h - 2 * scale, menuState.hero.y * h));
+    }
+    menuScale = scale;
+  }
   if (c.id === 'menuHero') {
     // The "tap the hero" hint sits exactly over the hero.
     const hint = c.parentElement?.querySelector<HTMLElement>('.tap-hint');
@@ -1278,7 +1393,8 @@ function drawStageHero(c: HTMLCanvasElement, _tier: number, t: number, _silhouet
     if (walker.lane === 'back') paintStagePet(g, walker, petKind, base, scale, t, c.id);
   }
   g.save();
-  g.translate(cx, base);
+  // While he is being carried he is lifted a little above the ground.
+  g.translate(cx, base - (c.id === 'menuHero' && heroDragging ? 5 * scale : 0));
   g.scale(scale, scale);
   const outfit = outfitFromMask(visibleMask(mask));
   drawHeroFront(g, outfit, t, still ? 'hips' : 'idle', !still && t % 6 < 2.2 ? 'grin' : 'normal', heroLoadout());
@@ -1462,6 +1578,34 @@ function drawPetIcons(root: HTMLElement): void {
 
 let decorTab: V.DecorTab = 'bg';
 let buyTarget: string | null = null;
+/** The item shown in the "new thing!" card after a purchase. */
+let revealId: string | null = null;
+
+/** Items found, bought or earned since the player last looked: highlighted once in their screen. */
+const shopNew = { styles: new Set<string>(), decor: new Set<string>(), pets: new Set<string>() };
+type ShopArea = 'styles' | 'decor' | 'pets';
+const AREA_KINDS: Record<ShopArea, string[]> = { styles: ['style'], decor: ['bg', 'prop', 'frame', 'fx'], pets: ['pet'] };
+
+/** The unseen owned items of each area (nothing is marked as seen here). */
+function unseenByArea(): Record<ShopArea, Set<string>> {
+  const shop = session.data?.shop;
+  const out = { styles: new Set<string>(), decor: new Set<string>(), pets: new Set<string>() };
+  if (!shop) return out;
+  const fresh = unseen(shop.owned);
+  for (const id of fresh) {
+    const kind = shop.catalog.find((c) => c.id === id)?.kind;
+    if (!kind) continue;
+    for (const area of Object.keys(AREA_KINDS) as ShopArea[]) if (AREA_KINDS[area].includes(kind)) out[area].add(id);
+  }
+  return out;
+}
+
+/** The player opens Styles, Decoration or Pets: what is new there is highlighted now, and counted as seen. */
+function enterShopArea(area: ShopArea): void {
+  const fresh = unseenByArea()[area];
+  shopNew[area] = fresh;
+  markSeen(fresh);
+}
 
 /** Paints the cards of the decoration screen: background thumbnails, objects, frames, effects. */
 function drawDecorIcons(root: HTMLElement): void {
@@ -1855,12 +1999,12 @@ router.register('declined', { html: () => V.declinedView(), cls: 'solid' });
 router.register('doc', { html: () => V.docView(docKind), cls: 'solid' });
 router.register('rules', { html: () => V.docView('rules'), cls: 'solid' });
 router.register('pets', {
-  html: () => V.petsView(session.data?.shop ?? null),
+  html: () => V.petsView(session.data?.shop ?? null, shopNew.pets),
   cls: 'solid',
   mount: (root) => requestAnimationFrame(() => drawPetIcons(root)),
 });
 router.register('decor', {
-  html: () => V.decorView(session.data?.shop ?? null, decorTab, decorSelected),
+  html: () => V.decorView(session.data?.shop ?? null, decorTab, decorSelected, shopNew.decor),
   cls: 'solid',
   mount: (root) => {
     fitStage(root, '.decor-stage');
@@ -1871,12 +2015,29 @@ router.register('buyConfirm', {
   html: () => {
     const target = buyTarget ? session.data?.shop?.catalog.find((c) => c.id === buyTarget) : undefined;
     const label = target ? ru.decor.names[target.id] ?? ru.styles.parts[target.id] ?? ru.pets.names[target.id] ?? target.id : '';
-    return target ? V.buyConfirmView(label, target.price ?? 0, session.data?.shop?.coins ?? 0) : '';
+    return target ? V.buyConfirmView(label, target.price ?? 0, session.data?.shop?.coins ?? 0, target) : '';
   },
   modal: true,
 });
+router.register('reveal', {
+  html: () => {
+    const c = revealId ? session.data?.shop?.catalog.find((x) => x.id === revealId) : undefined;
+    if (!c) return '';
+    const name = ru.decor.names[c.id] ?? ru.styles.parts[c.id] ?? ru.pets.names[c.id] ?? c.id;
+    const attr = c.kind === 'style' ? `data-style="${c.id}"` : c.kind === 'pet' ? `data-pet="${c.id}"` : `data-decor="${c.id}" data-kind="${c.kind}"`;
+    const action = c.kind === 'style' ? ru.shop.wear : c.kind === 'prop' ? ru.shop.place : ru.shop.choose;
+    return V.revealView(c, name, attr, action);
+  },
+  modal: true,
+  mount: (root) =>
+    requestAnimationFrame(() => {
+      drawStyleIcons(root);
+      drawDecorIcons(root);
+      drawPetIcons(root);
+    }),
+});
 router.register('styles', {
-  html: () => V.stylesView(session.data?.shop ?? null, stylesTab, canPay(), !isIOS()),
+  html: () => V.stylesView(session.data?.shop ?? null, stylesTab, canPay(), !isIOS(), shopNew.styles),
   cls: 'solid',
   mount: (root) => requestAnimationFrame(() => drawStyleIcons(root)),
 });
@@ -1894,6 +2055,10 @@ router.register('menu', {
     V.menuView({
       stats: session.data?.stats ?? localStats(),
       statsOpen,
+      newDots: (() => {
+        const u = unseenByArea();
+        return { styles: u.styles.size > 0, decor: u.decor.size > 0, pets: u.pets.size > 0 };
+      })(),
       coins: session.mode === 'online' && session.data?.shop ? session.data.shop.coins : null,
       mode: session.mode,
     }),
@@ -1941,9 +2106,14 @@ router.register('duels', {
       stake: duelStake(),
     }),
   cls: 'solid',
-  mount: () => {
+  mount: (root) => {
     if (session.mode === 'online') duelClient.connect();
     void loadDuelLeaders();
+    // The icons of the reward card.
+    requestAnimationFrame(() => {
+      drawStyleIcons(root);
+      drawPetIcons(root);
+    });
   },
 });
 /** Watching a duel (spectator): the list of running duels and the two live copies. */
@@ -1970,6 +2140,10 @@ router.register('spectate', {
   cls: 'solid',
 });
 router.register('msgMenu', { html: () => (chat.menuMsg ? V.chatMsgMenuView(chat.menuMsg) : ''), modal: true });
+router.register('chatWarn', {
+  html: () => V.chatWarnView(chatWarn.removed, chatWarn.text),
+  modal: true,
+});
 router.register('reportReason', { html: () => V.reportReasonView(), modal: true });
 router.register('blockConfirm', {
   html: () => (chat.menuMsg ? V.blockConfirmView(chat.menuMsg.user.name || ru.leaders.player) : ''),
@@ -2002,7 +2176,7 @@ router.register('profile', {
   cls: 'solid',
   mount: (root) => fitStage(root, '.profile-stage'),
 });
-router.register('moreMenu', { html: () => V.moreMenuView(), modal: true });
+router.register('moreMenu', { html: () => V.moreMenuView(!!menuState.hero), modal: true });
 router.register('coinsInfo', { html: () => V.coinsInfoView(session.data?.shop?.coins ?? 0, session.data?.tunables?.points_per_coin ?? 10), modal: true });
 router.register('share', { html: () => V.shareView(canShare()), modal: true });
 router.register('tutorialDone', { html: () => V.tutorialDoneView(), modal: true });
@@ -2174,7 +2348,16 @@ const actions: Record<string, (arg: string, el: HTMLElement) => void> = {
     router.back();
     window.setTimeout(showCrownNotice, 350);
   },
+  heroReset: () => {
+    menuState.hero = null;
+    menuState.save();
+    toast(ru.menu.heroReset, 2000);
+    router.back();
+  },
   open: (arg) => {
+    if (arg === 'styles' || arg === 'decor' || arg === 'pets') enterShopArea(arg);
+    // A hold-and-drag of the hero ends with a click: it must not open the wardrobe.
+    if (arg === 'wardrobe' && performance.now() - lastHeroDragEnd < 600) return;
     if (arg === 'confirmDelete') deleteError = null;
     router.open(arg);
   },
@@ -2290,14 +2473,27 @@ const actions: Record<string, (arg: string, el: HTMLElement) => void> = {
     buyTarget = id;
     router.open('buyConfirm');
   },
+  // The button of the "new thing" card: wear it, choose it or put it on the stage.
+  revealUse: () => {
+    const id = revealId;
+    router.back();
+    if (!id) return;
+    const kind = session.data?.shop?.catalog.find((c) => c.id === id)?.kind;
+    if (kind === 'style') actions.wearStyle?.(id, document.body);
+    else if (kind === 'pet') actions.petPick?.(id, document.body);
+    else actions.decorPick?.(id, document.body);
+  },
   confirmBuy: () => {
     const id = buyTarget;
     if (!id) return;
     void session.buy(id).then((res) => {
       router.back();
       if (res.ok) {
-        toast(ru.decor.bought(ru.decor.names[id] ?? ru.styles.parts[id] ?? id), 2200);
         audio.play('unlock');
+        // The card of the new thing opens (it counts as seen: the player has just looked at it).
+        markSeen([id]);
+        revealId = id;
+        router.open('reveal');
       } else toast(res.code === 'not_enough_coins' ? ru.decor.notEnough : ru.decor.failed, 2200);
       if (router.top === 'decor' || router.top === 'styles') router.refresh();
     });
@@ -2386,6 +2582,7 @@ const actions: Record<string, (arg: string, el: HTMLElement) => void> = {
     box?.querySelector('.stats-toggle')?.setAttribute('aria-expanded', String(statsOpen));
   },
   openFromMore: (arg) => {
+    if (arg === 'styles' || arg === 'decor' || arg === 'pets') enterShopArea(arg);
     router.back();
     setTimeout(() => router.open(arg), 60);
   },
@@ -2614,6 +2811,9 @@ function duelStake(): number {
   return session.data?.tunables?.duel_stake ?? 500;
 }
 
+/** What the "somebody complained about your message" window shows. */
+const chatWarn = { removed: false, text: '' };
+
 const chat = {
   blocked: [] as BlockedPlayer[],
   /** The message whose menu is open (complaint / block). */
@@ -2791,6 +2991,16 @@ function onChatMessage(m: DuelMsg): void {
       break;
     case 'report_ok':
       toast(ru.chat.reportSent, 2600);
+      break;
+    case 'chat_warned':
+      // Somebody complained about this player's message. In a run only a toast, never a window.
+      if (mode === 'run' || mode === 'tutorial') {
+        toast(m.removed ? ru.chat.warnRemovedTitle : ru.chat.warnTitle, 3200);
+        break;
+      }
+      chatWarn.removed = m.removed;
+      chatWarn.text = m.text;
+      router.open('chatWarn');
       break;
     case 'report_err':
       toast(m.code === 'gone' ? ru.chat.reportGone : m.code === 'too_many' ? ru.chat.reportMany : ru.chat.reportFail, 3200);
@@ -3287,6 +3497,7 @@ function frame(now: number): void {
       document.getElementById('specBOut')?.classList.toggle('hidden', !m.b.dead);
     }
   }
+  if (router.top === 'buyConfirm') drawBuyPreview(now / 1000);
   if (router.top === 'pets') {
     const pc = document.getElementById('petsHero') as HTMLCanvasElement | null;
     if (pc) drawStageHero(pc, lastTier(), now / 1000);

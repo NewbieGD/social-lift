@@ -46,6 +46,7 @@ export type DuelMsg =
   | { t: 'chat_err'; code: 'empty' | 'link' | 'words' | 'cooldown' | 'muted'; wait?: number }
   | { t: 'chat_remove'; id: number }
   | { t: 'report_ok' }
+  | { t: 'chat_warned'; removed: boolean; text: string }
   | { t: 'report_err'; code: 'gone' | 'too_many' }
   | { t: 'stake_short'; need: number; have: number; who: 'me' | 'them'; name?: string | null }
   | { t: 'chat_cd'; wait: number }

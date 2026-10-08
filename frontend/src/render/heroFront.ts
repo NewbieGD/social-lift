@@ -144,7 +144,8 @@ export function drawHeroFront(
   if (w.torso?.kind === 'seraphArmor') {
     ctx.save();
     ctx.translate(0, ty + 21);
-    drawSeraphWings(ctx, w.torso, 21, 'front', 0.5 + 0.1 * Math.sin(t * 2), t);
+    // In the menu the wings drift a little away from the body and back.
+    drawSeraphWings(ctx, w.torso, 21, 'front', 0.5 + 0.1 * Math.sin(t * 2), t, 0.14 + 0.1 * Math.sin(t * 1.3));
     ctx.restore();
   }
   // Capes and the shell hang behind the whole body.

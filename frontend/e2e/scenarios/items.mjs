@@ -31,8 +31,14 @@ console.log('torch replaced:', JSON.stringify(loadout));
 // buy the phone for coins
 await p.click('[data-action="askBuy"][data-arg="phone_torch"]'); await p.waitForTimeout(500);
 console.log('confirm screen:', await top(), '| text:', (await p.locator('.panel p').first().textContent()));
+console.log('buy preview canvas:', await p.locator('#buyPreview').count());
+await p.screenshot({path:`${OUT}/items_preview_${W}.png`});
 await p.click('[data-action="confirmBuy"]'); await p.waitForTimeout(1000);
 console.log('bought phone:', owned.includes('phone_torch'), 'coins', coins, '| wear btn now:', await p.locator('[data-action="wearStyle"][data-arg="phone_torch"]').count());
+// A purchase opens the card of the new thing; the confirmation shows the thing on the hero first.
+console.log('after the purchase the screen is:', await top(), '| reveal canvas:', await p.locator('.reveal-stage canvas').count(), '| rarity class:', await p.evaluate(()=>document.querySelector('.reveal-panel')?.className.match(/rarity-\w+/)?.[0]));
+await p.screenshot({path:`${OUT}/items_reveal_${W}.png`});
+await p.click('[data-action="back"]'); await p.waitForTimeout(500);
 // scroll to see all torch cards
 await p.evaluate(()=>{ const s=document.querySelector('.styles-screen'); s && s.scrollTo(0, s.scrollHeight); }); await p.waitForTimeout(400);
 await p.screenshot({path:`${OUT}/it_2_${W}.png`});

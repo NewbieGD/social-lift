@@ -6,16 +6,18 @@ const KEY = 'sl_menu_state';
 interface Saved {
   tvOn: boolean;
   lampOn: boolean;
+  /** Where the hero was put on the main screen (fractions of the stage); null = the default place. */
+  hero: { x: number; y: number } | null;
 }
 
 function load(): Saved {
   try {
     const raw = localStorage.getItem(KEY);
-    if (raw) return { tvOn: true, lampOn: true, ...(JSON.parse(raw) as Partial<Saved>) };
+    if (raw) return { tvOn: true, lampOn: true, hero: null, ...(JSON.parse(raw) as Partial<Saved>) };
   } catch {
     /* blocked storage: the defaults apply */
   }
-  return { tvOn: true, lampOn: true };
+  return { tvOn: true, lampOn: true, hero: null };
 }
 
 export const menuState = {
@@ -24,7 +26,7 @@ export const menuState = {
   touched: new Map<string, number>(),
   save(): void {
     try {
-      localStorage.setItem(KEY, JSON.stringify({ tvOn: this.tvOn, lampOn: this.lampOn }));
+      localStorage.setItem(KEY, JSON.stringify({ tvOn: this.tvOn, lampOn: this.lampOn, hero: this.hero }));
     } catch {
       /* ignore */
     }

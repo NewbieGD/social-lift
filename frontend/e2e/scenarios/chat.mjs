@@ -8,6 +8,7 @@ await ctx.addInitScript(() => {
     constructor() { this.readyState = 0; window.__ws = this; window.__sent = []; setTimeout(() => { this.readyState = 1; this.onopen && this.onopen({}); this.emit({t:'online', n: 3}); }, 50); }
     emit(m) { this.onmessage && this.onmessage({ data: JSON.stringify(m) }); }
     send(raw) { const m = JSON.parse(raw); window.__sent.push(m);
+      if (m.t === 'report') this.emit({t:'report_ok'});
       if (m.t === 'chat_join') { const now = Date.now(); const u = (id,name,rank)=>({id,name,photo:null,rank,link:true});
         this.emit({t:'chat_hist', wait:0, users:[u(5,'Я',9),u(201,'Грубиян Г.',3),u(202,'Добрый Д.',4)], msgs:[
           {id:11, ts: now-60000, user:u(201,'Грубиян Г.',3), text:'ты ничтожество, не умеешь играть'},
@@ -33,7 +34,7 @@ const top = () => p.evaluate(()=>document.querySelector('#screens .screen:not(.l
 await p.goto(`${BASE}/index.html?vk_user_id=5&vk_app_id=7&vk_platform=mobile_android&sign=x`); await p.waitForTimeout(1500);
 // duels: stake note and the disabled button with 120 coins
 await p.click('[data-arg="duels"]'); await p.waitForTimeout(900);
-console.log('duels: stake note:', (await p.locator('.stake-note').first().textContent()).replace(/\s+/g,' ').slice(0,110), '| find disabled:', await p.locator('[data-action="duelFind"]').isDisabled());
+console.log('duels: stake note:', (await p.locator('.duel-card.stake').first().textContent()).replace(/\s+/g,' ').slice(0,110), '| find disabled:', await p.locator('[data-action="duelFind"]').isDisabled());
 await p.screenshot({path:`${OUT}/ch_duels_${W}.png`});
 await p.click('[data-action="back"]'); await p.waitForTimeout(500);
 // chat
@@ -45,6 +46,8 @@ console.log('menu screen:', await top());
 await p.screenshot({path:`${OUT}/ch_menu_${W}.png`});
 await p.click('[data-action="reportAsk"]'); await p.waitForTimeout(400);
 await p.click('[data-action="reportSend"][data-arg="abuse"]'); await p.waitForTimeout(500);
+const toastTop = await p.evaluate(()=>{ const t=document.querySelector('.toast-top'); if(!t) return 'no toast-top'; const z=(el)=>Number(getComputedStyle(el).zIndex)||0; const layer=document.getElementById('screens'); return (t.classList.contains('on')?'shown':'hidden')+', z-index '+z(t)+' above the screens '+z(layer)+': '+(z(t)>z(layer)?'ok':'BEHIND'); });
+console.log('report toast:', toastTop);
 console.log('report sent:', JSON.stringify(await p.evaluate(()=>window.__sent.filter(m=>m.t==='report'))), 'screen:', await top());
 // block the author of the first message
 await p.locator('.chat-more').first().click(); await p.waitForTimeout(400);
@@ -65,5 +68,14 @@ console.log('blocked rows:', await p.locator('.blocked-row').count());
 await p.screenshot({path:`${OUT}/ch_blocked_${W}.png`});
 await p.click('[data-action="unblock"]'); await p.waitForTimeout(700);
 console.log('after unblock rows:', await p.locator('.blocked-row').count());
+// The author of a reported message is warned.
+await p.evaluate(()=>window.__ws.emit({t:'chat_warned', removed:false, text:'ты ничтожество'})); await p.waitForTimeout(400);
+console.log('warning window:', await top(), '|', (await p.locator('.msg-menu h2').first().textContent()));
+await p.click('[data-action="back"]'); await p.waitForTimeout(300);
+if ((await top()) === 'blocked') { await p.click('[data-action="back"]'); await p.waitForTimeout(400); }
+// The phone keyboard shrinks the page: the chat must keep a usable width.
+await p.focus('#chatInput, .chat-compose input, input[type="text"]'); await p.setViewportSize({width: W, height: Math.round(H*0.45)}); await p.waitForTimeout(500);
+const wInput = await p.evaluate(()=>{ const i=document.querySelector('#chatInput, .chat-compose input, input[type="text"]'); return Math.round(i.getBoundingClientRect().width); });
+console.log('input width with the keyboard open:', wInput, wInput >= 150 ? 'ok' : 'TOO SMALL');
 console.log('hscroll', await p.evaluate(()=>document.documentElement.scrollWidth>innerWidth+1), 'errors', errs);
 await b.close();

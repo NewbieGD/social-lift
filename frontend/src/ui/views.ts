@@ -3,6 +3,7 @@ import { AGE_LABEL } from '../config';
 import { legal, ru, type DocSection } from '../i18n/ru';
 import type { ChatMsg, ChatUser } from '../net/duel';
 import type { SpecRow } from '../net/duel';
+import { cardClass, rarityOf, type Rarity } from './rarity';
 import type { BlockedPlayer, CatalogItem, FinishResult, Leaderboard, LeaderRow, PublicProfile, ShopState, Stats } from '../net/session';
 import { STYLE_SETS } from '../render/styles';
 import { esc } from './dom';
@@ -122,6 +123,8 @@ export interface MenuData {
   stats: Stats | null;
   /** The statistics cards are unfolded. */
   statsOpen: boolean;
+  /** Something new (not seen yet) in Styles, Decoration or Pets. */
+  newDots: { styles: boolean; decor: boolean; pets: boolean };
   /** Coin balance; null when there is no server (offline, outside VK). */
   coins: number | null;
   mode: 'loading' | 'online' | 'offline' | 'outside';
@@ -185,7 +188,7 @@ export function menuView(d: MenuData): string {
   return `<div class="menu2">
     <div class="showcase">
       <div class="stage-top">
-        <button class="top-btn more-btn" data-action="open" data-arg="moreMenu" aria-label="${ru.menu.more}" title="${ru.menu.more}">${MORE_ICON}</button>
+        <button class="top-btn more-btn" data-action="open" data-arg="moreMenu" aria-label="${ru.menu.more}" title="${ru.menu.more}">${MORE_ICON}<span>${ru.menu.more}</span></button>
         ${fullscreenSupported() ? `<button class="top-btn fs-btn" data-action="fullscreen" aria-label="${ru.menu.fullscreen}" title="${ru.menu.fullscreen}">${FS_ICON}</button>` : ''}
         ${d.coins === null ? '' : `<button class="coin-pill" data-action="open" data-arg="coinsInfo" title="${ru.menu.coins}" aria-label="${ru.menu.coins}: ${d.coins}">${COIN_ICON}<b>${d.coins}</b></button>`}
       </div>
@@ -208,9 +211,9 @@ export function menuView(d: MenuData): string {
         <button class="tile accent duel-tile" data-action="open" data-arg="duels">${ICON.swords}<span>${ru.menu.duels}</span></button>
         <button class="tile accent chat-tile" data-action="open" data-arg="chat">${ICON.chat}<span>${ru.menu.chat}</span></button>
         <button class="tile" data-action="open" data-arg="leaders">${ICON.crown}<span>${ru.menu.leaders}</span></button>
-        <button class="tile accent styles-tile" data-action="open" data-arg="styles">${STYLES_ICON}<span>${ru.menu.styles}</span></button>
-        <button class="tile accent decor-tile" data-action="open" data-arg="decor">${DECOR_ICON}<span>${ru.menu.decor}</span></button>
-        <button class="tile accent pets-tile" data-action="open" data-arg="pets">${PETS_ICON}<span>${ru.menu.pets}</span></button>
+        <button class="tile accent styles-tile" data-action="open" data-arg="styles">${STYLES_ICON}<span>${ru.menu.styles}</span>${d.newDots.styles ? `<i class="new-dot">${ru.shop.newBadge}</i>` : ''}</button>
+        <button class="tile accent decor-tile" data-action="open" data-arg="decor">${DECOR_ICON}<span>${ru.menu.decor}</span>${d.newDots.decor ? `<i class="new-dot">${ru.shop.newBadge}</i>` : ''}</button>
+        <button class="tile accent pets-tile" data-action="open" data-arg="pets">${PETS_ICON}<span>${ru.menu.pets}</span>${d.newDots.pets ? `<i class="new-dot">${ru.shop.newBadge}</i>` : ''}</button>
       </div>
       ${status}
     </div>
@@ -233,13 +236,14 @@ export function coinsInfoView(coins: number, perCoin = 10): string {
 }
 
 /** The rest of the menu: rules, settings and the developer contact. */
-export function moreMenuView(): string {
+export function moreMenuView(heroMoved = false): string {
   return `<div class="panel more-menu">
     <button class="icon-btn close" data-action="back" aria-label="${ru.chat.close}">${CLOSE_ICON}</button>
     <h2>${ru.moreMenu.title}</h2>
     <button class="secondary menu-row" data-action="openFromMore" data-arg="rules">${ICON.book}<span>${ru.menu.rules}</span></button>
     <button class="secondary menu-row" data-action="openFromMore" data-arg="settings">${ICON.gear}<span>${ru.menu.settings}</span></button>
     <button class="secondary menu-row" data-action="openFromMore" data-arg="contact">${ICON.mail}<span>${ru.menu.contactShort}</span></button>
+    ${heroMoved ? `<button class="link-btn" data-action="heroReset">${ru.menu.heroReset}</button>` : ''}
   </div>`;
 }
 
@@ -334,7 +338,7 @@ function requirementText(c: CatalogItem | undefined, shop?: ShopState): string {
   return ru.styles.requireNone;
 }
 
-export function stylesView(shop: ShopState | null, tab: 'mine' | 'premium' = 'mine', canBuy = true, showPremiumTab = true): string {
+export function stylesView(shop: ShopState | null, tab: 'mine' | 'premium' = 'mine', canBuy = true, showPremiumTab = true, newIds: Set<string> = new Set()): string {
   if (!shop) {
     return `${header(ru.styles.title)}<div class="panel flat"><p class="status warn">${ru.duel.offline}</p></div>`;
   }
@@ -370,9 +374,9 @@ export function stylesView(shop: ShopState | null, tab: 'mine' | 'premium' = 'mi
         const premiumLocked = !isOwned && !!c.product && showPremiumTab;
         // Priced items (not premium ones) are bought for coins: a tap opens the confirmation.
         const buyable = !isOwned && !c.product && c.price !== null && c.price !== undefined;
-        return `<button class="style-card ${isOwned ? 'owned' : 'locked'} ${isWorn ? 'worn' : ''} ${premiumLocked ? 'premium-locked' : ''} ${buyable ? 'buyable' : ''}" ${isOwned ? `data-action="wearStyle" data-arg="${id}"` : premiumLocked ? 'data-action="stylesTab" data-arg="premium"' : buyable ? `data-action="askBuy" data-arg="${id}"` : 'disabled'} aria-label="${esc(ru.styles.parts[id])}">
+        return `<button class="style-card ${cardClass(c, newIds.has(id))} ${isOwned ? 'owned' : 'locked'} ${isWorn ? 'worn' : ''} ${premiumLocked ? 'premium-locked' : ''} ${buyable ? 'buyable' : ''}" ${isOwned ? `data-action="wearStyle" data-arg="${id}"` : premiumLocked ? 'data-action="stylesTab" data-arg="premium"' : buyable ? `data-action="askBuy" data-arg="${id}"` : 'disabled'} aria-label="${esc(ru.styles.parts[id])}">
           <canvas data-style="${id}" data-locked="${isOwned ? '0' : '1'}" aria-hidden="true"></canvas>
-          <b>${esc(ru.styles.parts[id])}</b>
+          <b>${esc(ru.styles.parts[id])}</b>${rarityTag(c, newIds.has(id))}
           <span>${esc(isOwned ? ru.styles.slots[c.slot] + ' · ' + note : note)}</span>
           ${isWorn ? '<i class="tick" aria-hidden="true">✓</i>' : ''}
         </button>`;
@@ -387,8 +391,10 @@ export function stylesView(shop: ShopState | null, tab: 'mine' | 'premium' = 'mi
       <div class="style-grid">${cards}</div>
     </section>`;
   }).join('');
+  const styleItems = shop.catalog.filter((c) => c.kind === 'style');
   return `${header(ru.styles.title)}<div class="scroll styles-screen">
     ${tabs}
+    ${collectionBar(styleItems.filter((c) => owned.has(c.id)).length, styleItems.length)}
     <div class="styles-top">
       <div class="styles-stage"><span class="stage-glow" aria-hidden="true"></span><canvas id="stylesHero" aria-hidden="true"></canvas></div>
       <div class="slot-chips">${slotChips}</div>
@@ -396,6 +402,18 @@ export function stylesView(shop: ShopState | null, tab: 'mine' | 'premium' = 'mi
     <p class="muted small">${ru.styles.lead}</p>
     ${sets}
   </div>`;
+}
+
+/** Small labels of a card: NEW and (for rare things) the rarity name. */
+function rarityTag(c: CatalogItem | undefined, isNew: boolean): string {
+  const r: Rarity = rarityOf(c);
+  return `${isNew ? `<i class="new-badge">${ru.shop.newBadge}</i>` : ''}${r === 'common' ? '' : `<i class="rar-tag">${ru.shop.rarity[r]}</i>`}`;
+}
+
+/** A progress bar of a collection: how many of the items of this kind the player has. */
+export function collectionBar(owned: number, total: number): string {
+  const pct = total ? Math.round((owned * 100) / total) : 0;
+  return `<div class="collection-bar"><span>${ru.shop.collection}: <b>${owned}</b> ${ru.shop.of} ${total}</span><div class="bar"><i style="width:${pct}%"></i></div></div>`;
 }
 
 /** The premium tab: things sold for VK votes (the set and the pet), with previews and buy buttons. */
@@ -457,7 +475,7 @@ function decorRequirement(c: CatalogItem | undefined): string {
   return ru.styles.requireNone;
 }
 
-export function decorView(shop: ShopState | null, tab: DecorTab, selected: string | null): string {
+export function decorView(shop: ShopState | null, tab: DecorTab, selected: string | null, newIds: Set<string> = new Set()): string {
   if (!shop) {
     return `${header(ru.decor.title)}<div class="panel flat"><p class="status warn">${ru.duel.offline}</p></div>`;
   }
@@ -489,9 +507,9 @@ export function decorView(shop: ShopState | null, tab: DecorTab, selected: strin
         : priced
           ? `${ru.decor.buy} · ${c!.price}`
           : decorRequirement(c);
-      return `<button class="style-card decor-card ${has ? 'owned' : 'locked'} ${chosen ? 'worn' : ''}" ${action} aria-label="${esc(ru.decor.names[id])}">
+      return `<button class="style-card decor-card ${cardClass(c, newIds.has(id))} ${has ? 'owned' : 'locked'} ${chosen ? 'worn' : ''}" ${action} aria-label="${esc(ru.decor.names[id])}">
         <canvas data-decor="${id}" data-kind="${tab}" data-locked="${has ? '0' : '1'}" aria-hidden="true"></canvas>
-        <b>${esc(ru.decor.names[id])}</b>
+        <b>${esc(ru.decor.names[id])}</b>${rarityTag(c, newIds.has(id))}
         <span>${esc(note)}</span>
         ${chosen ? '<i class="tick" aria-hidden="true">✓</i>' : ''}
       </button>`;
@@ -519,6 +537,7 @@ export function decorView(shop: ShopState | null, tab: DecorTab, selected: strin
   return `${header(ru.decor.title)}<div class="scroll styles-screen">
     <div class="decor-stage"><canvas id="decorHero" aria-hidden="true"></canvas></div>
     <div class="tabs tabs-4" role="tablist">${tabs}</div>
+    ${collectionBar(shop.catalog.filter((c) => c.kind === tab && owned.has(c.id)).length + (tab === 'bg' ? 1 : 0), shop.catalog.filter((c) => c.kind === tab).length + (tab === 'bg' ? 1 : 0))}
     ${spots}
     ${tab === 'prop' ? `<p class="muted small">${ru.decor.tvHint}: ${ru.decor.names.prop_tv}.</p>` : ''}
     <div class="style-grid decor-grid">${extra}${cards}</div>
@@ -526,7 +545,7 @@ export function decorView(shop: ShopState | null, tab: DecorTab, selected: strin
   </div>`;
 }
 
-export function petsView(shop: ShopState | null): string {
+export function petsView(shop: ShopState | null, newIds: Set<string> = new Set()): string {
   if (!shop) {
     return `${header(ru.pets.title)}<div class="panel flat"><p class="status warn">${ru.duel.offline}</p></div>`;
   }
@@ -541,9 +560,9 @@ export function petsView(shop: ShopState | null): string {
       const premium = !!c?.product;
       const votes = shop.products?.find((q) => q.id === c?.product)?.votes ?? 10;
       const note = has ? (chosen ? ru.pets.chosen : ru.pets.pick) : premium ? ru.pets.premiumNote(votes) : c?.record != null ? ru.pets.requireRecord(c.record) : c?.duel_streak != null ? ru.pets.streakNote(c.duel_streak) : ru.styles.requireNone;
-      return `<button class="style-card decor-card ${has ? 'owned' : 'locked'} ${chosen ? 'worn' : ''} ${premium && !has ? 'premium-locked' : ''}" ${has ? `data-action="petPick" data-arg="${id}"` : premium ? 'data-action="openPremium"' : 'disabled'} aria-label="${esc(ru.pets.names[id])}">
+      return `<button class="style-card decor-card ${cardClass(c, newIds.has(id))} ${has ? 'owned' : 'locked'} ${chosen ? 'worn' : ''} ${premium && !has ? 'premium-locked' : ''}" ${has ? `data-action="petPick" data-arg="${id}"` : premium ? 'data-action="openPremium"' : 'disabled'} aria-label="${esc(ru.pets.names[id])}">
         <canvas data-pet="${id}" data-locked="${has ? '0' : '1'}" aria-hidden="true"></canvas>
-        <b>${esc(ru.pets.names[id])}</b>
+        <b>${esc(ru.pets.names[id])}</b>${rarityTag(c, newIds.has(id))}
         <span>${esc(note)}</span>
         ${chosen ? '<i class="tick" aria-hidden="true">✓</i>' : ''}
       </button>`;
@@ -554,15 +573,18 @@ export function petsView(shop: ShopState | null): string {
     </button>`;
   return `${header(ru.pets.title)}<div class="scroll styles-screen">
     <div class="decor-stage"><canvas id="petsHero" aria-hidden="true"></canvas></div>
+    ${collectionBar(shop.catalog.filter((c) => c.kind === 'pet' && owned.has(c.id)).length, shop.catalog.filter((c) => c.kind === 'pet').length)}
     <div class="style-grid decor-grid">${none}${cards}</div>
     <p class="muted small">${ru.pets.lead}</p>
   </div>`;
 }
 
-export function buyConfirmView(name: string, price: number, coins: number): string {
+export function buyConfirmView(name: string, price: number, coins: number, c?: CatalogItem): string {
   const ok = coins >= price;
-  return `<div class="panel">
+  return `<div class="panel buy-panel ${cardClass(c)}">
     <h2>${ru.decor.buyTitle}</h2>
+    <div class="buy-stage"><canvas id="buyPreview" aria-hidden="true"></canvas></div>
+    <p class="muted small">${ru.shop.previewNote}</p>
     <p>${esc(ru.decor.buyText(name, price))}</p>
     <p class="muted">${ru.decor.balance(coins)}</p>
     ${ok ? '' : `<p class="status warn">${ru.decor.notEnough}</p>`}
@@ -845,10 +867,21 @@ export function duelsView(d: DuelView): string {
   const canFind = (d.status === 'idle' || d.status === 'none' || d.status === 'declined') && !poor;
   return `${header(ru.duel.title)}<div class="scroll duel-scroll"><div class="panel flat duel-panel">
     <div class="duel-hero" aria-hidden="true"><i class="spark s1"></i><i class="spark s2"></i><i class="spark s3"></i><i class="spark s4"></i>${ICON.swords}</div>
-    <p>${ru.duel.lead}</p>
-    <p class="stake-note"><b>${ru.duel.stake(d.stake)}</b>${d.coins !== null ? `<br />${ru.duel.balance(d.coins)}` : ''}</p>
-    <p class="muted">${ru.duel.rulesNote}</p>
-    <p class="muted small">${ru.duel.streakNote}</p>
+    <div class="duel-how">${ru.duel.how
+      .map(([h, t], i) => `<div class="how-card"><span class="how-ico">${[ICON.swords, ICON.crown, COIN_ICON][i]}</span><b>${h}</b><small>${t}</small></div>`)
+      .join('')}</div>
+    <div class="duel-card stake">
+      <span class="stake-coin">${COIN_ICON}<b>${d.stake}</b></span>
+      <div><h4>${ru.duel.stakeTitle}</h4><p>${ru.duel.stakeBody}</p>${d.coins !== null ? `<span class="balance-pill ${d.coins < d.stake ? 'low' : ''}">${ru.duel.balance(d.coins)}</span>` : ''}</div>
+    </div>
+    <div class="duel-card warn">
+      <span class="warn-ico">⏸</span>
+      <div><h4>${ru.duel.warnTitle}</h4><p>${ru.duel.warnBody}</p></div>
+    </div>
+    <div class="duel-card reward">
+      <div class="reward-icons"><canvas data-style="legion_head" data-locked="0" aria-hidden="true"></canvas><canvas data-pet="pet_trophy" data-locked="0" aria-hidden="true"></canvas></div>
+      <div><h4>${ru.duel.rewardTitle}</h4><p>${ru.duel.rewardBody}</p><small>${ru.duel.rewardNote}</small></div>
+    </div>
     ${d.status !== 'offline' && d.status !== 'connecting' ? `<p class="duel-online"><span class="dot"></span>${ru.duel.online(d.online)}</p>` : ''}
     ${status ? `<p class="status ${d.status === 'waiting' ? '' : 'warn'}">${esc(status)}</p>` : ''}
     ${poor && d.status !== 'waiting' ? `<p class="status warn">${esc(ru.duel.needCoins(d.stake, d.coins ?? 0))}</p>` : ''}
@@ -862,6 +895,20 @@ export function duelsView(d: DuelView): string {
     <div class="duel-lb" id="duelLbList">${d.leadersHtml?.rows ?? '<div class="lb-row skeleton"><span></span><span></span><span></span></div>'}</div>
     <div class="me-card" id="duelLbMe">${d.leadersHtml?.me ?? ''}</div>
   </div></div>`;
+}
+
+/** The card that opens after a purchase: the new thing in the color of its rarity, with sparkles. */
+export function revealView(c: CatalogItem | undefined, name: string, canvasAttr: string, action: string): string {
+  const r: Rarity = rarityOf(c);
+  const sparks = Array.from({ length: 14 }, (_, i) => `<i style="--a:${Math.round((i / 14) * 360)}deg;--d:${(i % 5) * 0.05}s"></i>`).join('');
+  return `<div class="panel reveal-panel ${cardClass(c)}">
+    <h2>${ru.shop.revealTitle}</h2>
+    <div class="reveal-stage"><span class="reveal-rays"></span><canvas ${canvasAttr} aria-hidden="true"></canvas><span class="reveal-sparks">${sparks}</span></div>
+    <h3 class="reveal-name">${esc(name)}</h3>
+    ${r === 'common' ? '' : `<p class="reveal-rarity">${ru.shop.rarity[r]}</p>`}
+    ${action ? `<button class="primary" data-action="revealUse">${action}</button>` : ''}
+    <button class="secondary" data-action="back">${ru.shop.great}</button>
+  </div>`;
 }
 
 export function specListView(rows: SpecRow[] | null): string {
@@ -1105,6 +1152,17 @@ export function chatMsgMenuView(m: ChatMsg): string {
     <button class="secondary" data-action="reportAsk">${ru.chat.report}</button>
     <button class="secondary danger" data-action="blockAsk">${ru.chat.block}</button>
     <button class="link-btn" data-action="player" data-arg="${m.user.id}">${ru.profileChoice.title}</button>
+  </div>`;
+}
+
+/** The player is told that somebody complained about his message (and what happens next). */
+export function chatWarnView(removed: boolean, text: string): string {
+  return `<div class="panel msg-menu">
+    <h2>${removed ? ru.chat.warnRemovedTitle : ru.chat.warnTitle}</h2>
+    ${text ? `<p class="muted small">«${esc(text)}»</p>` : ''}
+    <p>${removed ? ru.chat.warnRemovedText : ru.chat.warnText}</p>
+    <button class="primary" data-action="back">${ru.chat.warnOk}</button>
+    <button class="link-btn" data-action="open" data-arg="chatRules">${ru.chat.rulesLink}</button>
   </div>`;
 }
 

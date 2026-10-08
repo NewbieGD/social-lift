@@ -5717,3 +5717,420 @@ body.reduced .coins-line svg {
 .cap-items {
   font-size: 12.5px;
 }
+
+/* A toast above the screens (the board's own toast sits under them). */
+.toast.toast-top {
+  position: fixed;
+  z-index: 80;
+  top: calc(64px + env(safe-area-inset-top, 0px));
+  left: 50%;
+  max-width: calc(100% - 24px);
+  white-space: normal;
+  text-align: center;
+}
+
+/* Hold the hero to carry him: no scrolling or text selection starts from his figure. */
+.hero-hit {
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+/* ===== Showcase: rarity frames, NEW marks, collection bars, buy preview, reveal ===== */
+.style-card {
+  --rar: #8a94a6;
+  position: relative;
+}
+.style-card.rarity-rare {
+  --rar: #4da3ff;
+}
+.style-card.rarity-epic {
+  --rar: #b36bff;
+}
+.style-card.rarity-legendary {
+  --rar: #ffc93c;
+}
+.style-card.rarity-common:not(.worn) {
+  box-shadow: inset 0 0 0 1.5px rgba(138, 148, 166, 0.5);
+}
+.style-card.rarity-rare:not(.worn),
+.style-card.rarity-epic:not(.worn),
+.style-card.rarity-legendary:not(.worn) {
+  box-shadow:
+    inset 0 0 0 1.5px var(--rar),
+    0 0 12px color-mix(in srgb, var(--rar) 40%, transparent);
+}
+.style-card.worn {
+  box-shadow:
+    inset 0 0 0 2.5px var(--rar),
+    0 0 14px color-mix(in srgb, var(--rar) 50%, transparent);
+}
+/* A glint that sweeps over rare things now and then. */
+.style-card.rarity-rare::after,
+.style-card.rarity-epic::after,
+.style-card.rarity-legendary::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(105deg, transparent 38%, rgba(255, 255, 255, 0.38) 50%, transparent 62%);
+  transform: translateX(-130%);
+  pointer-events: none;
+  animation: card-glint 4.5s ease-in-out infinite;
+}
+.style-card.rarity-epic::after {
+  animation-duration: 3.8s;
+}
+.style-card.rarity-legendary::after {
+  animation-duration: 3s;
+}
+@keyframes card-glint {
+  0%,
+  55% {
+    transform: translateX(-130%);
+  }
+  100% {
+    transform: translateX(130%);
+  }
+}
+.rar-tag {
+  display: block;
+  margin-top: 1px;
+  font-style: normal;
+  font-size: 9.5px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--rar);
+}
+.style-card.is-new {
+  animation: new-pulse 1.6s ease-in-out infinite;
+}
+@keyframes new-pulse {
+  50% {
+    box-shadow:
+      inset 0 0 0 2px #ffe27a,
+      0 0 22px rgba(255, 226, 122, 0.85);
+  }
+}
+.new-badge {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  padding: 2px 6px;
+  border-radius: 8px;
+  background: linear-gradient(90deg, #ff4a5a, #ff8a3c);
+  color: #fff;
+  font-style: normal;
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: 0.05em;
+  box-shadow: 0 2px 8px rgba(255, 74, 90, 0.6);
+}
+.new-dot {
+  position: absolute;
+  top: 4px;
+  right: 6px;
+  padding: 1px 5px;
+  border-radius: 7px;
+  background: #ff3b4a;
+  color: #fff;
+  font-style: normal;
+  font-size: 8px;
+  font-weight: 900;
+  animation: new-dot 1.4s ease-in-out infinite;
+}
+@keyframes new-dot {
+  50% {
+    transform: scale(1.15);
+  }
+}
+.menu-grid .tile {
+  position: relative;
+}
+.collection-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 6px 0 10px;
+  font-size: 12px;
+  color: var(--ink-dim);
+}
+.collection-bar span {
+  white-space: nowrap;
+}
+.collection-bar b {
+  color: #ffe58a;
+}
+.collection-bar .bar {
+  flex: 1;
+  height: 6px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.1);
+  overflow: hidden;
+}
+.collection-bar .bar i {
+  display: block;
+  height: 100%;
+  border-radius: 4px;
+  background: linear-gradient(90deg, #4da3ff, #b36bff, #ffc93c);
+}
+/* The preview of a thing before it is bought. */
+.buy-panel {
+  text-align: center;
+}
+.buy-stage {
+  margin: 8px auto;
+  width: min(100%, 260px);
+  aspect-ratio: 260 / 250;
+  border-radius: 14px;
+  overflow: hidden;
+  box-shadow:
+    inset 0 0 0 2px var(--rar, #8a94a6),
+    0 0 16px color-mix(in srgb, var(--rar, #8a94a6) 40%, transparent);
+}
+.buy-stage canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.buy-panel.rarity-rare {
+  --rar: #4da3ff;
+}
+.buy-panel.rarity-epic {
+  --rar: #b36bff;
+}
+.buy-panel.rarity-legendary {
+  --rar: #ffc93c;
+}
+/* The card that opens after a purchase. */
+.reveal-panel {
+  --rar: #8a94a6;
+  text-align: center;
+  overflow: hidden;
+  position: relative;
+  isolation: isolate;
+}
+.reveal-panel.rarity-rare {
+  --rar: #4da3ff;
+}
+.reveal-panel.rarity-epic {
+  --rar: #b36bff;
+}
+.reveal-panel.rarity-legendary {
+  --rar: #ffc93c;
+}
+.reveal-stage {
+  position: relative;
+  width: 160px;
+  height: 160px;
+  margin: 6px auto;
+}
+.reveal-stage canvas {
+  position: relative;
+  z-index: 2;
+  width: 100%;
+  height: 100%;
+  animation: reveal-pop 0.7s cubic-bezier(0.2, 1.6, 0.4, 1) 0.15s both;
+}
+@keyframes reveal-pop {
+  from {
+    opacity: 0;
+    transform: scale(0.2) rotate(-12deg);
+  }
+}
+.reveal-rays {
+  position: absolute;
+  inset: -90px;
+  background: repeating-conic-gradient(from 0deg, color-mix(in srgb, var(--rar) 55%, transparent) 0 8deg, transparent 8deg 24deg);
+  -webkit-mask-image: radial-gradient(circle, #000 10%, transparent 68%);
+  mask-image: radial-gradient(circle, #000 10%, transparent 68%);
+  animation: rays-spin 14s linear infinite, rays-in 0.7s ease-out both;
+}
+.reveal-sparks i {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 7px;
+  height: 7px;
+  margin: -3px;
+  border-radius: 50%;
+  background: var(--rar);
+  box-shadow: 0 0 8px var(--rar);
+  animation: spark-out 1s ease-out var(--d) both;
+}
+@keyframes spark-out {
+  from {
+    opacity: 1;
+    transform: rotate(var(--a)) translateY(0);
+  }
+  to {
+    opacity: 0;
+    transform: rotate(var(--a)) translateY(-110px);
+  }
+}
+.reveal-name {
+  margin: 4px 0 0;
+  font-size: 20px;
+}
+.reveal-rarity {
+  margin: 2px 0 8px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--rar);
+}
+.reveal-panel .primary,
+.reveal-panel .secondary {
+  width: 100%;
+  margin-top: 8px;
+}
+body.reduced .style-card::after,
+body.reduced .style-card.is-new,
+body.reduced .reveal-rays,
+body.reduced .reveal-sparks i {
+  animation: none;
+}
+
+/* ===== Duels: the description as cards ===== */
+.duel-how {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin: 10px 0;
+}
+.how-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  padding: 10px 6px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.06);
+  text-align: center;
+}
+.how-ico svg {
+  width: 26px;
+  height: 26px;
+}
+.how-card b {
+  font-size: 12px;
+}
+.how-card small {
+  font-size: 10.5px;
+  line-height: 1.25;
+  color: var(--ink-dim);
+}
+.duel-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 8px 0;
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.06);
+}
+.duel-card h4 {
+  margin: 0 0 2px;
+  font-size: 14px;
+}
+.duel-card p {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--ink-dim);
+}
+.duel-card small {
+  display: block;
+  margin-top: 3px;
+  font-size: 11px;
+  color: #ffe58a;
+}
+.duel-card.stake {
+  background: linear-gradient(135deg, rgba(255, 214, 64, 0.2), rgba(255, 160, 40, 0.1));
+  box-shadow: inset 0 0 0 1px rgba(255, 214, 64, 0.55);
+}
+.stake-coin {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  flex: none;
+  min-width: 56px;
+  font-size: 22px;
+  font-weight: 900;
+  color: #ffe58a;
+}
+.stake-coin svg {
+  width: 34px;
+  height: 34px;
+}
+.balance-pill {
+  display: inline-block;
+  margin-top: 5px;
+  padding: 2px 9px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.12);
+  font-size: 11px;
+  font-weight: 800;
+  color: #fff;
+}
+.balance-pill.low {
+  background: rgba(255, 90, 90, 0.3);
+  color: #ffd0d0;
+}
+.duel-card.warn {
+  box-shadow: inset 0 0 0 1px rgba(255, 138, 138, 0.35);
+}
+.warn-ico {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  background: rgba(255, 90, 90, 0.2);
+  font-size: 20px;
+}
+.duel-card.reward {
+  background: linear-gradient(135deg, rgba(179, 107, 255, 0.2), rgba(255, 201, 60, 0.12));
+  box-shadow: inset 0 0 0 1px rgba(255, 201, 60, 0.5);
+}
+.reward-icons {
+  display: flex;
+  flex: none;
+  gap: 4px;
+}
+.reward-icons canvas {
+  width: 52px;
+  height: 56px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.07);
+}
+
+/* ===== The Menu button: easy to find ===== */
+.top-btn.more-btn {
+  width: auto;
+  gap: 6px;
+  padding: 0 12px 0 9px;
+  font: 800 13px/1 var(--font);
+  background: linear-gradient(90deg, #2c4a86, #3a62b8);
+  box-shadow:
+    inset 0 0 0 1.5px rgba(255, 255, 255, 0.6),
+    0 4px 14px rgba(50, 110, 220, 0.55);
+  animation: menu-attention 2.4s ease-in-out infinite;
+}
+.top-btn.more-btn svg {
+  width: 18px;
+  height: 18px;
+}
+@keyframes menu-attention {
+  50% {
+    box-shadow:
+      inset 0 0 0 1.5px rgba(255, 255, 255, 0.9),
+      0 0 20px rgba(90, 160, 255, 0.95);
+  }
+}
+body.reduced .top-btn.more-btn {
+  animation: none;
+}
