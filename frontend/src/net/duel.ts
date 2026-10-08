@@ -34,14 +34,18 @@ export type DuelMsg =
   | { t: 'chat'; msg: ChatMsg }
   | { t: 'chat_users'; users: ChatUser[] }
   | { t: 'chat_user'; action: 'join'; user: ChatUser }
-  | { t: 'chat_err'; code: 'empty' | 'link' | 'words' | 'cooldown'; wait?: number }
+  | { t: 'chat_err'; code: 'empty' | 'link' | 'words' | 'cooldown' | 'muted'; wait?: number }
+  | { t: 'chat_remove'; id: number }
+  | { t: 'report_ok' }
+  | { t: 'report_err'; code: 'gone' | 'too_many' }
+  | { t: 'stake_short'; need: number; have: number; who: 'me' | 'them'; name?: string | null }
   | { t: 'chat_cd'; wait: number }
   | { t: 'busy'; who: 'me' | 'them'; name?: string | null }
   | { t: 'online'; n: number }
   | { t: 'none'; n: number }
   | { t: 'waiting'; to: DuelPlayer; timeout: number }
   | { t: 'declined' }
-  | { t: 'invite'; from: DuelPlayer; timeout: number }
+  | { t: 'invite'; from: DuelPlayer; timeout: number; stake?: number }
   | { t: 'invite_cancel' }
   | {
       t: 'start';
@@ -50,11 +54,12 @@ export type DuelMsg =
       start_at: number;
       ticket: { run_id: string; seed: number; started_at: number; token: string };
       opponent: DuelPlayer;
+      stake?: number;
     }
   | { t: 'inputs'; upto: number; log: number[][] }
   | { t: 'opp_dead'; score: number }
   | { t: 'opp_left' }
-  | { t: 'result'; duel: string; outcome: 'win' | 'loss' | 'draw' };
+  | { t: 'result'; duel: string; outcome: 'win' | 'loss' | 'draw'; coins?: number };
 
 export class DuelClient {
   online = 0;

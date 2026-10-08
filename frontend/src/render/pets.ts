@@ -6,7 +6,7 @@ import { bodyGradient, edge, limb3d, sphere, spec, tone } from './shade3d';
 
 type Ctx = CanvasRenderingContext2D;
 
-export type PetKind = 'cat' | 'dog' | 'parrot' | 'spark';
+export type PetKind = 'cat' | 'dog' | 'parrot' | 'spark' | 'trophy';
 export type PetMode = 'sit' | 'walk' | 'jump' | 'perch' | 'fly';
 
 export interface PetPose {
@@ -16,7 +16,7 @@ export interface PetPose {
   phase: number;
 }
 
-export const PET_IDS: Record<string, PetKind> = { pet_cat: 'cat', pet_dog: 'dog', pet_parrot: 'parrot', pet_spark: 'spark' };
+export const PET_IDS: Record<string, PetKind> = { pet_cat: 'cat', pet_dog: 'dog', pet_parrot: 'parrot', pet_spark: 'spark', pet_trophy: 'trophy' };
 
 function hash(n: number): number {
   const s = Math.sin(n * 127.1 + 311.7) * 43758.5453;
@@ -164,6 +164,63 @@ function tube(g: Ctx, pts: Pt[], w0: number, w1: number, base: string, stripes =
   edge(g, base, 0.6);
 }
 
+/**
+ * A front leg of a sitting pet: a smooth column that melts into the chest (no outline on top), a
+ * rounded bottom and outlines only along the sides. A paw (pawFwd) goes over its foot.
+ */
+function rgba(c: string, a: number): string {
+  const m = c.match(/\d+/g);
+  return m ? `rgba(${m[0]},${m[1]},${m[2]},${a})` : c;
+}
+
+function sitLeg(g: Ctx, x: number, w: number, topY: number, col: string): void {
+  const l = x - w / 2;
+  const r = x + w / 2;
+  g.beginPath();
+  g.moveTo(l, topY);
+  g.lineTo(l, -1.8);
+  g.quadraticCurveTo(l, -0.7, l + 0.9, -0.7);
+  g.lineTo(r - 0.9, -0.7);
+  g.quadraticCurveTo(r, -0.7, r, -1.8);
+  g.lineTo(r, topY);
+  g.closePath();
+  // The top fades into the chest so no edge shows where the leg starts.
+  const gr = g.createLinearGradient(0, topY, 0, -0.7);
+  gr.addColorStop(0, rgba(tone(col, 0), 0));
+  gr.addColorStop(0.3, rgba(tone(col, 0), 1));
+  gr.addColorStop(1, rgba(tone(col, -0.24), 1));
+  g.fillStyle = gr;
+  g.fill();
+  g.beginPath();
+  g.moveTo(l, topY + (-0.7 - topY) * 0.45);
+  g.lineTo(l, -1.8);
+  g.quadraticCurveTo(l, -0.7, l + 0.9, -0.7);
+  g.lineTo(r - 0.9, -0.7);
+  g.quadraticCurveTo(r, -0.7, r, -1.8);
+  g.lineTo(r, topY + (-0.7 - topY) * 0.45);
+  g.strokeStyle = tone(col, -0.58);
+  g.lineWidth = 0.7;
+  g.lineJoin = 'round';
+  g.stroke();
+}
+
+/** A paw seen from the side: a flat oval lying on the ground that points forward (to the right). */
+function pawFwd(g: Ctx, x: number, y: number, w: number, col: string): void {
+  g.beginPath();
+  g.ellipse(x, y - 0.5, w, w * 0.42, 0, 0, Math.PI * 2);
+  g.fillStyle = col;
+  g.fill();
+  edge(g, col, 0.5);
+  g.strokeStyle = 'rgba(80,50,30,0.35)';
+  g.lineWidth = 0.35;
+  for (const dx of [0.35, 0.8]) {
+    g.beginPath();
+    g.moveTo(x + w * dx, y - 0.9);
+    g.lineTo(x + w * dx, y - 0.1);
+    g.stroke();
+  }
+}
+
 function paw(g: Ctx, x: number, y: number, w: number, col: string): void {
   g.beginPath();
   g.ellipse(x, y - 0.3, w, w * 0.5, 0, 0, Math.PI * 2);
@@ -273,12 +330,16 @@ function cat(g: Ctx, p: PetPose): void {
 
   // Tail first, behind the body.
   if (sit) {
-    tube(g, [[-4.2, -1.2], [-6.4, -0.6], [-5.2, 0.5], [-1, 0.9], [3.2, 0.7], [5.4, 0.2]], 2.3, 1.5, col, true);
+    // The tail curls up behind the haunch.
+    tube(g, [[-4.6, -1.8], [-6.8, -1.4], [-7.6, -3.2], [-6.8, -5.2], [-5.6, -5.8]], 2.4, 1.5, col, true);
   } else {
     tube(g, [[-5.4, -6.6 - bob], [-7.6, -8.4], [-8.6 + sway * 0.5, -11], [-8.2 + sway, -13.6], [-6.8 + sway * 1.3, -15]], 2.3, 1.4, col, true);
   }
 
   if (sit) {
+    // The far front leg stands behind the chest, a little to the left and in shade.
+    sitLeg(g, 1.7, 2.6, -7, tone(col, -0.2));
+    pawFwd(g, 2.7, 0, 2.1, tone(light, -0.2));
     // Sitting loaf: a smooth teardrop with a round haunch and two straight front legs.
     fur(
       g,
@@ -291,7 +352,7 @@ function cat(g: Ctx, p: PetPose): void {
       },
       [-6, -10, 5, 0],
       col,
-      { color: light, build: (c) => c.ellipse(3.6, -3.6, 1.8, 3.8, 0.1, 0, Math.PI * 2) },
+      { color: light, build: (c) => c.ellipse(3.9, -4.6, 1.5, 2.6, 0.1, 0, Math.PI * 2) },
     );
     fur(
       g,
@@ -304,10 +365,11 @@ function cat(g: Ctx, p: PetPose): void {
       [-6, -6, 1, 0],
       tone(col, -0.06),
     );
-    tube(g, [[2.2, -6.2], [2.6, -3.4], [2.7, -0.8]], 2.1, 1.7, col);
-    paw(g, 2.9, 0, 1.5, light);
-    tube(g, [[3.6, -6], [4, -3.4], [4, -0.8]], 2, 1.6, tone(col, 0.05));
-    paw(g, 4.3, 0, 1.5, light);
+    // The near front leg stands in front of the chest and the hind foot peeks out under the haunch;
+    // all paws point forward.
+    pawFwd(g, -0.8, 0, 2.5, tone(light, -0.1));
+    sitLeg(g, 3.8, 2.9, -7, col);
+    pawFwd(g, 4.9, 0, 2.4, light);
     catHead(g, 2.4, -13.2, t, col, light, 0);
     return;
   }
@@ -455,6 +517,8 @@ function dog(g: Ctx, p: PetPose): void {
   };
 
   if (sit) {
+    sitLeg(g, 1.7, 2.8, -7.4, tone(col, -0.22));
+    pawFwd(g, 2.8, 0, 2.4, tone(cream, -0.2));
     fur(
       g,
       (c) => {
@@ -479,10 +543,9 @@ function dog(g: Ctx, p: PetPose): void {
       [-7, -6.5, 1, 0],
       tone(col, -0.06),
     );
-    tube(g, [[2.4, -6.6], [2.8, -3.6], [2.9, -0.8]], 2.4, 1.9, col);
-    paw(g, 3.2, 0, 1.8, cream);
-    tube(g, [[4, -6.4], [4.4, -3.6], [4.4, -0.8]], 2.3, 1.9, tone(col, 0.05));
-    paw(g, 4.8, 0, 1.8, cream);
+    pawFwd(g, -0.9, 0, 2.8, tone(cream, -0.1));
+    sitLeg(g, 4, 3.1, -7.4, col);
+    pawFwd(g, 5.2, 0, 2.6, cream);
     head(3.4, -14.2, 0.05);
     return;
   }
@@ -745,10 +808,109 @@ function spark(g: Ctx, p: PetPose): void {
   g.restore();
 }
 
+// ===========================================================================
+// Winged trophy (a reward): a golden cup with feathered wings, floating and sparkling
+// ===========================================================================
+
+function trophy(g: Ctx, p: PetPose): void {
+  const { t } = p;
+  const cy = -10 + Math.sin(t * 3.2) * 0.9;
+  shadow(g, 4.4, 10);
+  const flap = Math.sin(t * 9);
+  // Wings first, so the cup is in front of their roots.
+  for (const side of [-1, 1]) {
+    for (let i = 0; i < 4; i++) {
+      g.save();
+      g.translate(side * 3.6, cy - 1.4);
+      g.rotate(side * (0.5 + i * 0.26 + flap * 0.14));
+      g.beginPath();
+      g.moveTo(0, 0);
+      g.bezierCurveTo(-1.1, -2, -0.9, -4, 0.2, -(5.4 + i * 1.1));
+      g.bezierCurveTo(1.5, -3.8, 1.4, -2, 0, 0);
+      g.closePath();
+      const wg = g.createLinearGradient(0, 0, 0, -10);
+      wg.addColorStop(0, '#FFFFFF');
+      wg.addColorStop(0.65, '#FFF0C0');
+      wg.addColorStop(1, '#F2C94C');
+      g.fillStyle = wg;
+      g.fill();
+      g.strokeStyle = 'rgba(190,130,20,0.85)';
+      g.lineWidth = 0.4;
+      g.stroke();
+      g.restore();
+    }
+  }
+  // The cup.
+  g.save();
+  g.translate(0, cy);
+  const gold = g.createLinearGradient(-4, 0, 4, 0);
+  gold.addColorStop(0, '#FFF1A8');
+  gold.addColorStop(0.45, '#F2C94C');
+  gold.addColorStop(1, '#B9831A');
+  // Base and stem.
+  g.fillStyle = '#7A4F12';
+  g.fillRect(-3, 4.2, 6, 1.8);
+  g.fillStyle = gold;
+  g.fillRect(-0.9, 1.6, 1.8, 3);
+  g.beginPath();
+  g.ellipse(0, 1.8, 2, 0.7, 0, 0, Math.PI * 2);
+  g.fill();
+  // The bowl.
+  g.beginPath();
+  g.moveTo(-4.4, -5.6);
+  g.lineTo(4.4, -5.6);
+  g.quadraticCurveTo(4.2, 0.6, 0, 1.6);
+  g.quadraticCurveTo(-4.2, 0.6, -4.4, -5.6);
+  g.closePath();
+  g.fillStyle = gold;
+  g.fill();
+  edge(g, '#C99A2E', 0.5);
+  // Handles.
+  g.strokeStyle = '#E6B83A';
+  g.lineWidth = 0.9;
+  for (const side of [-1, 1]) {
+    g.beginPath();
+    g.moveTo(side * 4.2, -4.6);
+    g.bezierCurveTo(side * 7.4, -4.6, side * 7.4, -0.6, side * 3, -0.4);
+    g.stroke();
+  }
+  // A star on the bowl and a shine.
+  g.fillStyle = '#FFFBE0';
+  g.beginPath();
+  for (let i = 0; i < 10; i++) {
+    const a = (i / 10) * Math.PI * 2 - Math.PI / 2;
+    const r = i % 2 ? 0.8 : 1.8;
+    g.lineTo(Math.cos(a) * r, -2.6 + Math.sin(a) * r);
+  }
+  g.closePath();
+  g.fill();
+  g.fillStyle = 'rgba(255,255,255,0.55)';
+  g.beginPath();
+  g.ellipse(-2.4, -3, 0.7, 2.2, 0.1, 0, Math.PI * 2);
+  g.fill();
+  g.restore();
+  // Sparkles around it.
+  g.save();
+  g.globalCompositeOperation = 'lighter';
+  for (let i = 0; i < 6; i++) {
+    const a = t * 1.4 + i * 1.05;
+    const x = Math.cos(a) * (6 + (i % 2) * 2);
+    const y = cy - 2 + Math.sin(a * 1.3) * 5;
+    const tw = 0.4 + 0.6 * Math.abs(Math.sin(t * 4 + i));
+    const sg = g.createRadialGradient(x, y, 0, x, y, 2);
+    sg.addColorStop(0, `rgba(255,248,200,${0.95 * tw})`);
+    sg.addColorStop(1, 'rgba(255,210,90,0)');
+    g.fillStyle = sg;
+    g.fillRect(x - 2, y - 2, 4, 4);
+  }
+  g.restore();
+}
+
 export function drawPet(g: Ctx, kind: PetKind, pose: PetPose): void {
   g.save();
   if (kind === 'cat') cat(g, pose);
   else if (kind === 'dog') dog(g, pose);
+  else if (kind === 'trophy') trophy(g, pose);
   else if (kind === 'spark') spark(g, pose);
   else parrot(g, pose);
   g.restore();
@@ -756,5 +918,5 @@ export function drawPet(g: Ctx, kind: PetKind, pose: PetPose): void {
 
 /** Approximate height of a pet in units (for icons). */
 export function petHeight(kind: PetKind): number {
-  return kind === 'dog' ? 20 : kind === 'cat' ? 19 : kind === 'spark' ? 20 : 15;
+  return kind === 'dog' ? 20 : kind === 'cat' ? 19 : kind === 'spark' || kind === 'trophy' ? 20 : 15;
 }

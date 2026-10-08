@@ -101,9 +101,9 @@ export const gameConfig = {
     bounce: 0.45,
   },
   death: {
-    hitStopMs: 120,
-    slowMoSec: 0.6,
-    slowMoScale: 0.35,
+    hitStopMs: 150,
+    slowMoSec: 1.2,
+    slowMoScale: 0.3,
   },
   input: {
     /** Drag sensitivity multiplier (1 = finger moves hero 1:1 in world units). */

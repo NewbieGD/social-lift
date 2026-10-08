@@ -17,6 +17,12 @@ export function vkPlatform(): string {
   return new URLSearchParams(launchParamsRaw()).get('vk_platform') ?? '';
 }
 
+/** Opened inside the VK app for Android or iPhone (not in a browser). */
+export function isNativeVkApp(): boolean {
+  const p = vkPlatform();
+  return p.startsWith('mobile_android') || p.startsWith('mobile_iphone');
+}
+
 /** On iPhone digital goods cannot be sold inside the app (Apple's rule), so purchases are hidden. */
 export function isIOS(): boolean {
   return vkPlatform().startsWith('mobile_iphone');
@@ -46,25 +52,36 @@ export async function askNotifications(): Promise<boolean> {
   }
 }
 
+/**
+ * Settings of the VK app around the game. The iPhone "swipe back" gesture must not fire while the
+ * player steers by swiping. Some clients ignore the call when it comes too early, so it is repeated.
+ */
+function applyViewSettings(): void {
+  quiet('VKWebAppSetSwipeSettings', { history: false });
+  // Dark bars that match the game instead of the light VK chrome.
+  quiet('VKWebAppSetViewSettings', {
+    status_bar_style: 'light',
+    action_bar_color: '#151D23',
+    navigation_bar_color: '#151D23',
+  });
+}
+
 export function initVk(handlers: { onHide: () => void; onRestore?: () => void }): void {
   if (!isInVk()) return;
   bridge.subscribe((event: { detail?: { type?: string; data?: unknown } }) => {
     const type = (event.detail as { type?: string } | undefined)?.type;
     if (type === 'VKWebAppUpdateConfig') applyInsets((event.detail as { data?: unknown }).data);
     if (type === 'VKWebAppViewHide') handlers.onHide();
-    if (type === 'VKWebAppViewRestore') handlers.onRestore?.();
+    if (type === 'VKWebAppViewRestore') {
+      applyViewSettings();
+      handlers.onRestore?.();
+    }
   });
   bridge
     .send('VKWebAppInit')
     .then(() => {
-      // The "swipe back" gesture of the VK app must not fire while the player steers by swiping.
-      quiet('VKWebAppSetSwipeSettings', { history: false });
-      // Dark bars that match the game instead of the light VK chrome.
-      quiet('VKWebAppSetViewSettings', {
-        status_bar_style: 'light',
-        action_bar_color: '#151D23',
-        navigation_bar_color: '#151D23',
-      });
+      applyViewSettings();
+      window.setTimeout(applyViewSettings, 1200);
     })
     .catch(() => {
       /* The game still works; the server rejects unsigned calls anyway. */

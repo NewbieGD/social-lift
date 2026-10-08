@@ -83,6 +83,19 @@ export const STYLE_SETS: StyleSet[] = [
     parts: ['head', 'torso', 'arms', 'legs', 'torch'],
   },
   {
+    // Reward for 10 duel wins in a row against different players: a chrome combat machine with
+    // red eyes, a glowing core and pistons. Worn completely, a red scanner line sweeps over it.
+    id: 'legion',
+    palette: { main: '#C9CFD8', sub: '#4A515C', accent: '#FF2A2A', dark: '#1B1F26', glow: '#FF6A4A' },
+    parts: ['head', 'torso', 'arms', 'legs', 'torch'],
+  },
+  // Flashlights: each one replaces the flashlight in the hero's hand.
+  { id: 'phone', palette: { main: '#2B3038', sub: '#8FA0B8', accent: '#FFFFFF', dark: '#14171C' }, parts: ['torch'] },
+  { id: 'wood', palette: { main: '#8A5A33', sub: '#C9A06A', accent: '#FFB02E', dark: '#4A2F18' }, parts: ['torch'] },
+  { id: 'saber', palette: { main: '#B9C1CD', sub: '#2B3038', accent: '#57D6FF', dark: '#14171C', glow: '#BFF3FF' }, parts: ['torch'] },
+  { id: 'fireball', palette: { main: '#3A2A22', sub: '#7A4A2A', accent: '#FF8A1F', dark: '#1C130F', glow: '#FFD27A' }, parts: ['torch'] },
+  { id: 'jar', palette: { main: '#BFE3F0', sub: '#7A8A96', accent: '#E6FF6A', dark: '#34444F', glow: '#F4FFB0' }, parts: ['torch'] },
+  {
     // Green skin and ragged teal clothes: huge arms, torn trousers.
     id: 'brute',
     palette: { main: '#55707A', sub: '#34474F', accent: '#9CD28A', dark: '#223037', skin: '#6FBF5B', skinShade: '#4E9540' },
@@ -99,6 +112,12 @@ const KINDS: Record<string, Partial<Record<Slot, string>>> = {
   acrobat: { head: 'mask', torso: 'web', arms: 'webglove', legs: 'weblegs' },
   brute: { head: 'brute', torso: 'bare', arms: 'big', legs: 'torn' },
   seraph: { head: 'seraphHelm', torso: 'seraphArmor', arms: 'seraphGauntlet', legs: 'seraphGreaves', torch: 'seraphLantern' },
+  legion: { head: 'legionHead', torso: 'legionArmor', arms: 'legionArms', legs: 'legionLegs', torch: 'legionTorch' },
+  phone: { torch: 'phoneTorch' },
+  wood: { torch: 'woodTorch' },
+  saber: { torch: 'saberTorch' },
+  fireball: { torch: 'fireTorch' },
+  jar: { torch: 'jarTorch' },
 };
 
 export const STYLES: Record<string, StyleDef> = {};
@@ -143,6 +162,30 @@ export function wornStyles(loadout: StyleLoadout | undefined): WornStyles {
 
 export function hasAnyStyle(w: WornStyles): boolean {
   return !!(w.head || w.torso || w.arms || w.legs || w.feet || w.torch);
+}
+
+/** All five parts of the chrome set are worn together: the red scanner runs over the hero. */
+export function fullLegion(w: WornStyles): boolean {
+  return [w.head, w.torso, w.arms, w.legs, w.torch].every((d) => d?.set === 'legion');
+}
+
+/** How far (in hero units) a held light is longer than a plain flashlight: the beam starts at its tip. */
+export function torchReach(d: StyleDef | undefined): number {
+  switch (d?.kind) {
+    case 'woodTorch':
+      return 4;
+    case 'saberTorch':
+      return 8;
+    case 'fireTorch':
+      return 5;
+    case 'jarTorch':
+      return 2;
+    case 'phoneTorch':
+    case 'legionTorch':
+      return 1;
+    default:
+      return 0;
+  }
 }
 
 /** All five parts of the premium set are worn together: the hero glows. */

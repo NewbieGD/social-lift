@@ -81,6 +81,12 @@ export interface ShopState {
   best_duel_streak?: number;
 }
 
+export interface BlockedPlayer {
+  id: number;
+  name: string | null;
+  photo: string | null;
+}
+
 /** What other players see about a player: how they look, records, collection. */
 export interface PublicProfile {
   id: number;
@@ -172,7 +178,7 @@ export interface FinishResult {
   rank_week: number | null;
   prev_rank_all: number | null;
   prev_rank_week: number | null;
-  duel?: { status: 'pending' | 'done'; outcome?: Record<string, 'win' | 'loss' | 'draw'> } | null;
+  duel?: { status: 'pending' | 'done'; outcome?: Record<string, 'win' | 'loss' | 'draw'>; stake?: Record<string, number> } | null;
   /** Coins paid for this run, the new balance, and cosmetics this run opened. */
   coins?: number;
   coins_earned?: number;
@@ -401,6 +407,31 @@ export class Session {
     if (shop) {
       if (typeof r.coins === 'number') shop.coins = r.coins;
       for (const id of r.new_items ?? []) if (!shop.owned.includes(id)) shop.owned.push(id);
+    }
+  }
+
+  /** Players whose chat messages this player hides (null when the server cannot be reached). */
+  async fetchBlocks(): Promise<BlockedPlayer[] | null> {
+    try {
+      return (await api<{ blocked: BlockedPlayer[] }>('GET', '/chat/blocks')).blocked;
+    } catch {
+      return null;
+    }
+  }
+
+  async blockPlayer(id: number): Promise<BlockedPlayer[] | null> {
+    try {
+      return (await api<{ blocked: BlockedPlayer[] }>('POST', '/chat/block', { user_id: id })).blocked;
+    } catch {
+      return null;
+    }
+  }
+
+  async unblockPlayer(id: number): Promise<BlockedPlayer[] | null> {
+    try {
+      return (await api<{ blocked: BlockedPlayer[] }>('DELETE', `/chat/block/${id}`)).blocked;
+    } catch {
+      return null;
     }
   }
 

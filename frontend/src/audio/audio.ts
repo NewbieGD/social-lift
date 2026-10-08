@@ -246,8 +246,13 @@ export class AudioEngine {
         this.tone(t, 'sawtooth', 380, 180, 0.16, 0.08);
         break;
       case 'death':
+        // A heavy boom, glass shattering, and a short falling shimmer.
         this.tone(t, 'sawtooth', 440, 80, 0.7, 0.25);
         this.noiseHit(t, 0.3, 400, 0.18);
+        this.tone(t, 'sine', 120, 26, 1.2, 0.55);
+        this.noiseHit(t, 0.55, 2600, 0.24, undefined, true);
+        this.noiseHit(t + 0.06, 0.9, 700, 0.12);
+        [988, 740, 554, 415].forEach((f, i) => this.tone(t + 0.14 + i * 0.12, 'triangle', f, f * 0.5, 0.5, 0.1));
         break;
       case 'bell':
         for (const [f, d] of [

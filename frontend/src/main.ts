@@ -9,7 +9,7 @@ import type { SimEvent } from './core/types';
 import { ru } from './i18n/ru';
 import { DEFAULT_KEYS, InputController, keyLabel, STEER_CODES } from './input/input';
 import { ApiError } from './net/api';
-import { Session, type Decor, type PropPlacement, type CrownNotice, type RunTicket, type Stats } from './net/session';
+import { Session, type BlockedPlayer, type Decor, type PropPlacement, type CrownNotice, type RunTicket, type Stats } from './net/session';
 import { haptic, hapticsSupported, initHaptics } from './platform/haptics';
 import { ads, DEFAULT_ADS, type AdsConfig } from './platform/ads';
 import { canShare, initShare, shareStory, shareWall } from './platform/share';
@@ -720,6 +720,8 @@ function finishRun(): void {
         else {
           el.innerHTML = V.rankHtml(res);
           document.getElementById('resultRecord')?.classList.toggle('hidden', !res.is_record);
+          // The server confirmed a new record: golden rays turn behind the card.
+          if (res.is_record && sim.score > 0) document.querySelector('.panel.result')?.classList.add('is-record');
           const bestEl = document.getElementById('resultBest');
           if (bestEl) bestEl.textContent = String(res.best_all);
         }
@@ -730,11 +732,14 @@ function finishRun(): void {
       }
       if (res && res.status === 'finished' && (res.coins_earned ?? 0) > 0) {
         const line = document.getElementById('coinsLine');
-        if (line) line.innerHTML = `${V.COIN_ICON}<span>${ru.result.coinsEarned(res.coins_earned ?? 0)}</span>`;
+        if (line) {
+          line.innerHTML = `${V.COIN_ICON}<span>${ru.result.coinsEarned(res.coins_earned ?? 0)}</span>`;
+          coinBurst(line);
+        }
       }
       if (res?.duel && finishedDuel) {
         const myId = String(session.data?.profile.id ?? '');
-        if (res.duel.status === 'done' && res.duel.outcome) showDuelOutcome(res.duel.outcome[myId] ?? 'draw');
+        if (res.duel.status === 'done' && res.duel.outcome) showDuelOutcome(res.duel.outcome[myId] ?? 'draw', res.duel.stake?.[myId] ?? 0);
         else if (!duelOutcome) setDuelLine(ru.duel.pending);
       }
       if (res?.is_week_record) void checkCrown(true);
@@ -837,17 +842,38 @@ function celebrate(): void {
   confettiTimer = window.setTimeout(() => (host.innerHTML = ''), 2600);
 }
 
-/** Score counts up on the results card. */
+/** Score counts up on the results card, then lands with a pop and a glow. */
 function countUp(el: HTMLElement): void {
   const target = Number(el.dataset.target || 0);
-  const start = performance.now();
-  const dur = Math.min(1200, 300 + target * 4);
+  const delay = 700; // the newspaper lands first
+  const start = performance.now() + delay;
+  const dur = Math.min(1300, 400 + target * 3);
   const step = (now: number): void => {
-    const k = Math.min(1, (now - start) / dur);
+    const k = Math.max(0, Math.min(1, (now - start) / dur));
     el.textContent = String(Math.round(target * (1 - Math.pow(1 - k, 3))));
     if (k < 1) requestAnimationFrame(step);
+    else if (target > 0) {
+      el.classList.add('landed');
+      if (settingsStore.get().vibration) haptic('light');
+    }
   };
   requestAnimationFrame(step);
+}
+
+/** A handful of coins jumps out of the "+N coins" line. */
+function coinBurst(line: HTMLElement): void {
+  if (settingsStore.get().reducedFx) return;
+  for (let i = 0; i < 9; i++) {
+    const c = document.createElement('i');
+    c.className = 'coin-fly';
+    const a = -Math.PI / 2 + (Math.random() - 0.5) * 2.2;
+    const d = 40 + Math.random() * 60;
+    c.style.setProperty('--dx', `${Math.round(Math.cos(a) * d)}px`);
+    c.style.setProperty('--dy', `${Math.round(Math.sin(a) * d)}px`);
+    c.style.setProperty('--d', `${(i * 0.045).toFixed(2)}s`);
+    line.appendChild(c);
+    window.setTimeout(() => c.remove(), 1400);
+  }
 }
 
 function lastTier(): number {
@@ -1697,7 +1723,8 @@ router.register('decor', {
 router.register('buyConfirm', {
   html: () => {
     const target = buyTarget ? session.data?.shop?.catalog.find((c) => c.id === buyTarget) : undefined;
-    return target ? V.buyConfirmView(ru.decor.names[target.id] ?? target.id, target.price ?? 0, session.data?.shop?.coins ?? 0) : '';
+    const label = target ? ru.decor.names[target.id] ?? ru.styles.parts[target.id] ?? ru.pets.names[target.id] ?? target.id : '';
+    return target ? V.buyConfirmView(label, target.price ?? 0, session.data?.shop?.coins ?? 0) : '';
   },
   modal: true,
 });
@@ -1750,7 +1777,10 @@ router.register('result', {
     countUp(root.querySelector<HTMLElement>('#resultScore')!);
     const thumb = root.querySelector<HTMLCanvasElement>('#coverHero');
     if (thumb) drawCoverHero(thumb, resultData?.tier ?? 0);
-    if (resultData?.record && resultData.score > 0) celebrate();
+    if (resultData?.record && resultData.score > 0) {
+      root.querySelector('.panel.result')?.classList.add('is-record');
+      window.setTimeout(celebrate, 900);
+    }
   },
 });
 router.register('duels', {
@@ -1760,6 +1790,8 @@ router.register('duels', {
       online: duelClient.online,
       waitingFor: duelWaitingFor,
       leadersHtml: duelLbHtml,
+      coins: session.data?.shop?.coins ?? null,
+      stake: DUEL_STAKE,
     }),
   cls: 'solid',
   mount: () => {
@@ -1767,12 +1799,20 @@ router.register('duels', {
     void loadDuelLeaders();
   },
 });
+router.register('msgMenu', { html: () => (chat.menuMsg ? V.chatMsgMenuView(chat.menuMsg) : ''), modal: true });
+router.register('reportReason', { html: () => V.reportReasonView(), modal: true });
+router.register('blockConfirm', {
+  html: () => (chat.menuMsg ? V.blockConfirmView(chat.menuMsg.user.name || ru.leaders.player) : ''),
+  modal: true,
+});
+router.register('blocked', { html: () => V.blockedView(chat.blocked), cls: 'solid' });
+router.register('chatRules', { html: () => V.chatRulesView(), cls: 'solid' });
 router.register('invite', {
-  html: () => (invite ? V.inviteView(invite.from, invite.timeout) : ''),
+  html: () => (invite ? V.inviteView(invite.from, invite.timeout, invite.stake) : ''),
   modal: true,
 });
 router.register('chat', {
-  html: () => V.chatView(),
+  html: () => V.chatView(chat.blocked.length),
   cls: 'solid',
   mount: () => mountChat(),
 });
@@ -2000,9 +2040,61 @@ const actions: Record<string, (arg: string, el: HTMLElement) => void> = {
     router.open('player');
   },
   challenge: (arg) => {
+    const have = session.data?.shop?.coins;
+    if (have !== undefined && have < DUEL_STAKE) {
+      router.back();
+      toast(ru.duel.needCoins(DUEL_STAKE, have), 4200);
+      return;
+    }
     askNotificationsOnce();
     router.back();
     duelClient.send({ t: 'challenge', to: Number(arg) });
+  },
+  // ---- chat: complaint, block, unblock ----
+  msgMenu: (arg) => {
+    const m = chat.msgs.find((x) => x.id === Number(arg));
+    if (!m) return;
+    chat.menuMsg = m;
+    router.open('msgMenu');
+  },
+  reportAsk: () => router.open('reportReason'),
+  reportSend: (reason) => {
+    const m = chat.menuMsg;
+    if (!m) return;
+    duelClient.send({ t: 'report', msg_id: m.id, reason });
+    router.back();
+    router.back();
+  },
+  blockAsk: () => router.open('blockConfirm'),
+  blockDo: () => {
+    const m = chat.menuMsg;
+    if (!m) return;
+    const name = m.user.name || ru.leaders.player;
+    void session.blockPlayer(m.user.id).then((list) => {
+      if (!list) {
+        toast(ru.chat.blockFail, 3200);
+        return;
+      }
+      chat.blocked = list;
+      toast(ru.chat.blockDone(name), 2800);
+      renderChatList();
+      renderChatWho();
+      const link = document.getElementById('blockedLink');
+      if (link) link.textContent = ru.chat.blockedLink(list.length);
+    });
+    router.back();
+    router.back();
+  },
+  unblock: (arg) => {
+    void session.unblockPlayer(Number(arg)).then((list) => {
+      if (!list) {
+        toast(ru.chat.blockFail, 3200);
+        return;
+      }
+      chat.blocked = list;
+      toast(ru.chat.unblocked, 2400);
+      if (router.top === 'blocked') router.refresh();
+    });
   },
   petPick: (id) => {
     const pet = session.data?.shop?.decor?.pet;
@@ -2034,10 +2126,10 @@ const actions: Record<string, (arg: string, el: HTMLElement) => void> = {
     void session.buy(id).then((res) => {
       router.back();
       if (res.ok) {
-        toast(ru.decor.bought(ru.decor.names[id] ?? id), 2200);
+        toast(ru.decor.bought(ru.decor.names[id] ?? ru.styles.parts[id] ?? id), 2200);
         audio.play('unlock');
       } else toast(res.code === 'not_enough_coins' ? ru.decor.notEnough : ru.decor.failed, 2200);
-      if (router.top === 'decor') router.refresh();
+      if (router.top === 'decor' || router.top === 'styles') router.refresh();
     });
   },
   stylesTab: (tab) => {
@@ -2132,6 +2224,12 @@ const actions: Record<string, (arg: string, el: HTMLElement) => void> = {
   },
   acceptConsent: () => void acceptConsent(),
   duelFind: () => {
+    const have = session.data?.shop?.coins;
+    if (have !== undefined && have < DUEL_STAKE) {
+      toast(ru.duel.needCoins(DUEL_STAKE, have), 4200);
+      router.refresh();
+      return;
+    }
     askNotificationsOnce();
     duelUi = 'waiting';
     duelWaitingFor = null;
@@ -2328,7 +2426,13 @@ function afterBoot(): void {
 
 // ---------- Chat ----------
 
+/** The stake of a duel in coins (the server decides and checks it; this is for the texts). */
+const DUEL_STAKE = 500;
+
 const chat = {
+  blocked: [] as BlockedPlayer[],
+  /** The message whose menu is open (complaint / block). */
+  menuMsg: null as ChatMsg | null,
   msgs: [] as ChatMsg[],
   online: [] as ChatUser[],
   known: new Map<number, ChatUser>(),
@@ -2379,29 +2483,41 @@ function chatStatus(text: string, ms = 4000): void {
 function renderChatWho(): void {
   const who = document.getElementById('chatWho');
   const count = document.getElementById('chatCount');
-  if (who) who.innerHTML = V.chatWhoHtml(chat.online);
-  if (count) count.textContent = ru.chat.online(chat.online.length);
+  const online = chat.online.filter((u) => !isBlocked(u.id));
+  if (who) who.innerHTML = V.chatWhoHtml(online);
+  if (count) count.textContent = ru.chat.online(online.length);
   who?.querySelectorAll<HTMLImageElement>('img').forEach((img) => img.addEventListener('error', () => img.remove(), { once: true }));
+}
+
+function isBlocked(userId: number): boolean {
+  return chat.blocked.some((b) => b.id === userId);
 }
 
 function chatRowHtml(m: ChatMsg): string {
   return V.chatMsgHtml(m, myId());
 }
 
+/** The messages the player wants to see (those of blocked players are left out). */
+function visibleMsgs(): ChatMsg[] {
+  return chat.msgs.filter((m) => m.sys || !isBlocked(m.user.id));
+}
+
 function renderChatList(): void {
   const list = document.getElementById('chatList');
   if (!list) return;
-  list.innerHTML = chat.msgs.length ? chat.msgs.map(chatRowHtml).join('') : `<div class="empty"><p>${ru.chat.empty}</p></div>`;
+  const shown = visibleMsgs();
+  list.innerHTML = shown.length ? shown.map(chatRowHtml).join('') : `<div class="empty"><p>${ru.chat.empty}</p></div>`;
   list.scrollTop = list.scrollHeight;
 }
 
 function appendChat(m: ChatMsg): void {
   chat.msgs.push(m);
   if (chat.msgs.length > 100) chat.msgs.shift();
+  if (!m.sys && isBlocked(m.user.id)) return;
   const list = document.getElementById('chatList');
   if (!list) return;
   const stick = list.scrollHeight - list.scrollTop - list.clientHeight < 80;
-  if (chat.msgs.length === 1) list.innerHTML = '';
+  if (list.querySelector('.empty')) list.innerHTML = '';
   list.insertAdjacentHTML('beforeend', chatRowHtml(m));
   while (list.children.length > 100) list.firstElementChild?.remove();
   if (stick || m.user.id === myId()) list.scrollTop = list.scrollHeight;
@@ -2421,6 +2537,17 @@ function mountChat(): void {
   if (!form || !input) return;
   renderChatList();
   renderChatWho();
+  // The list of blocked players: from the server, so it follows the account.
+  if (session.mode === 'online') {
+    void session.fetchBlocks().then((list) => {
+      if (!list) return;
+      chat.blocked = list;
+      renderChatList();
+      renderChatWho();
+      const link = document.getElementById('blockedLink');
+      if (link) link.textContent = ru.chat.blockedLink(list.length);
+    });
+  }
   if (session.mode !== 'online') chatStatus(ru.chat.offline, 0);
   else if (!duelClient.connected) chatStatus(ru.chat.connecting, 0);
   form.addEventListener('submit', (e) => {
@@ -2473,18 +2600,36 @@ function onChatMessage(m: DuelMsg): void {
       chat.cdUntil = Date.now() + m.wait * 1000;
       updateChatSend();
       break;
+    case 'chat_remove':
+      chat.msgs = chat.msgs.filter((x) => x.id !== m.id);
+      renderChatList();
+      break;
+    case 'report_ok':
+      toast(ru.chat.reportSent, 2600);
+      break;
+    case 'report_err':
+      toast(m.code === 'gone' ? ru.chat.reportGone : m.code === 'too_many' ? ru.chat.reportMany : ru.chat.reportFail, 3200);
+      break;
     case 'chat_err': {
       const input = document.getElementById('chatInput') as HTMLInputElement | null;
       if (input && !input.value) input.value = chat.lastText;
       if (m.code === 'cooldown') {
         chat.cdUntil = Date.now() + (m.wait ?? 30) * 1000;
         chatStatus(ru.chat.errWait(m.wait ?? 30));
+      } else if (m.code === 'muted') {
+        chatStatus(ru.chat.errMuted(Math.max(1, Math.ceil((m.wait ?? 3600) / 60))), 8000);
       } else chatStatus(m.code === 'words' ? ru.chat.errWords : m.code === 'link' ? ru.chat.errLink : ru.chat.errEmpty, 5000);
       updateChatSend();
       break;
     }
     case 'busy':
       chatStatus(m.who === 'me' ? ru.chat.busyMe : ru.chat.busyThem, 5000);
+      break;
+    case 'stake_short':
+      // Not enough coins for the stake: ours (a duel cannot start) or the other player's.
+      duelUi = 'idle';
+      toast(m.who === 'me' ? ru.duel.needCoins(m.need, m.have) : ru.duel.themShort(m.name || ru.duel.player), 4200);
+      if (router.top === 'duels') router.refresh();
       break;
   }
 }
@@ -2518,7 +2663,7 @@ let finishedDuel: DuelRun | null = null;
 let duelOutcome: 'win' | 'loss' | 'draw' | null = null;
 let duelUi: V.DuelView['status'] = 'idle';
 let duelWaitingFor: string | null = null;
-let invite: { from: DuelPlayer; timeout: number } | null = null;
+let invite: { from: DuelPlayer; timeout: number; stake: number } | null = null;
 const oppCanvas = $<HTMLCanvasElement>('opp');
 const oppName = $('oppName');
 const duelMeEl = $('duelMe');
@@ -2557,7 +2702,7 @@ duelClient.onMessage = (m: DuelMsg) => {
         duelClient.send({ t: 'decline' });
         return;
       }
-      invite = { from: m.from, timeout: m.timeout };
+      invite = { from: m.from, timeout: m.timeout, stake: m.stake ?? DUEL_STAKE };
       audio.play('unlock');
       router.open('invite');
       break;
@@ -2592,7 +2737,7 @@ duelClient.onMessage = (m: DuelMsg) => {
       break;
     }
     case 'result':
-      showDuelOutcome(m.outcome);
+      showDuelOutcome(m.outcome, m.coins);
       break;
   }
 };
@@ -2790,10 +2935,13 @@ function setDuelLine(text: string): void {
   if (el) el.textContent = text;
 }
 
-function showDuelOutcome(outcome: 'win' | 'loss' | 'draw'): void {
+function showDuelOutcome(outcome: 'win' | 'loss' | 'draw', coins = 0): void {
   duelOutcome = outcome;
   document.getElementById('duelScore')?.classList.add(outcome);
-  setDuelLine(outcome === 'win' ? ru.duel.win : outcome === 'loss' ? ru.duel.loss : ru.duel.draw);
+  const stakeText = coins > 0 ? ` ${ru.duel.coinsWon(coins)}` : coins < 0 ? ` ${ru.duel.coinsLost(-coins)}` : '';
+  setDuelLine((outcome === 'win' ? ru.duel.win : outcome === 'loss' ? ru.duel.loss : ru.duel.draw) + stakeText);
+  // The stake moved coins: show the new balance.
+  void session.refreshShop();
   if (outcome === 'win') audio.play('fanfare');
   if (session.data && outcome === 'win') session.data.stats.duel_wins = (session.data.stats.duel_wins ?? 0) + 1;
   if (outcome === 'win') {

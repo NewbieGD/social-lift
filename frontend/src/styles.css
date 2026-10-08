@@ -5217,3 +5217,353 @@ body.hide-opp #oppWrap {
 .style-card.premium-locked span {
   color: #ffe58a;
 }
+
+/* ===================== Results: livelier ===================== */
+/* The newspaper is slapped onto the screen, shines, and the cause of death is stamped on it. */
+.paper {
+  position: relative;
+  overflow: hidden;
+  animation:
+    paper-slap 0.75s cubic-bezier(0.2, 0.9, 0.3, 1) both,
+    paper-sway 4.5s ease-in-out 1s infinite alternate;
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.45);
+}
+@keyframes paper-slap {
+  0% {
+    opacity: 0;
+    transform: translateY(-140px) rotate(20deg) scale(2.2);
+    filter: blur(7px);
+  }
+  55% {
+    opacity: 1;
+    transform: translateY(8px) rotate(-3deg) scale(0.95);
+    filter: blur(0);
+  }
+  72% {
+    transform: translateY(-5px) rotate(1.6deg) scale(1.03);
+  }
+  100% {
+    transform: rotate(-1deg);
+  }
+}
+@keyframes paper-sway {
+  from {
+    transform: rotate(-1.4deg) translateY(0);
+  }
+  to {
+    transform: rotate(-0.2deg) translateY(-2px);
+  }
+}
+.paper::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(105deg, transparent 38%, rgba(255, 255, 255, 0.7) 50%, transparent 62%);
+  transform: translateX(-130%);
+  pointer-events: none;
+  animation: paper-shine 1.1s ease-out 1s forwards;
+}
+@keyframes paper-shine {
+  to {
+    transform: translateX(130%);
+  }
+}
+.paper-kicker {
+  display: inline-block;
+  padding: 2px 8px;
+  border: 2px solid #b3202e;
+  border-radius: 6px;
+  color: #b3202e;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  animation: stamp 0.5s cubic-bezier(0.2, 1.5, 0.4, 1) 0.6s both;
+}
+.paper.magazine .paper-kicker {
+  border-color: #fff;
+  color: #fff;
+}
+@keyframes stamp {
+  0% {
+    opacity: 0;
+    transform: scale(3) rotate(-18deg);
+  }
+  60% {
+    opacity: 1;
+    transform: scale(0.92) rotate(-4deg);
+  }
+  100% {
+    transform: scale(1) rotate(-3deg);
+  }
+}
+.big-score {
+  position: relative;
+  animation: score-in 0.5s ease-out 0.5s both;
+}
+@keyframes score-in {
+  from {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+}
+.big-score.landed {
+  animation: score-land 0.6s cubic-bezier(0.2, 1.6, 0.4, 1) both;
+  text-shadow: 0 0 18px rgba(255, 214, 64, 0.65);
+}
+@keyframes score-land {
+  0% {
+    transform: scale(1);
+  }
+  40% {
+    transform: scale(1.28);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+.record:not(.hidden) {
+  position: relative;
+  background: linear-gradient(100deg, #ffd640 30%, #fff6c4 50%, #ffd640 70%);
+  background-size: 220% 100%;
+  box-shadow: 0 0 0 2px rgba(255, 240, 180, 0.6), 0 0 18px rgba(255, 200, 60, 0.7);
+  animation:
+    record-in 0.6s cubic-bezier(0.2, 1.7, 0.4, 1) 1s both,
+    shimmer 1.8s linear 1.6s infinite,
+    glow-pulse 1.6s ease-in-out 1.6s infinite alternate;
+}
+@keyframes record-in {
+  from {
+    opacity: 0;
+    transform: scale(2.4) rotate(-10deg);
+  }
+  to {
+    transform: scale(1) rotate(-2deg);
+  }
+}
+@keyframes shimmer {
+  to {
+    background-position: -220% 0;
+  }
+}
+@keyframes glow-pulse {
+  to {
+    box-shadow: 0 0 0 2px rgba(255, 240, 180, 0.9), 0 0 30px rgba(255, 200, 60, 1);
+  }
+}
+/* Golden rays turn behind the card on a new record. */
+.panel.result.is-record::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 34%;
+  width: 640px;
+  height: 640px;
+  margin: -320px 0 0 -320px;
+  background: repeating-conic-gradient(from 0deg, rgba(255, 214, 64, 0.26) 0 7deg, transparent 7deg 26deg);
+  -webkit-mask-image: radial-gradient(circle, #000 12%, transparent 66%);
+  mask-image: radial-gradient(circle, #000 12%, transparent 66%);
+  animation: rays-spin 16s linear infinite, rays-in 0.8s ease-out 0.8s both;
+  pointer-events: none;
+  z-index: -1;
+}
+@keyframes rays-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@keyframes rays-in {
+  from {
+    opacity: 0;
+  }
+}
+.panel.result .stats > * {
+  animation: row-in 0.4s ease-out both;
+}
+.panel.result .stats > :nth-child(-n + 2) {
+  animation-delay: 1.1s;
+}
+.panel.result .stats > :nth-child(n + 3):nth-child(-n + 4) {
+  animation-delay: 1.2s;
+}
+.panel.result .stats > :nth-child(n + 5):nth-child(-n + 6) {
+  animation-delay: 1.3s;
+}
+.panel.result .stats > :nth-child(n + 7) {
+  animation-delay: 1.4s;
+}
+@keyframes row-in {
+  from {
+    opacity: 0;
+    transform: translateX(-18px);
+  }
+}
+.panel.result > button {
+  animation: btn-pop 0.45s cubic-bezier(0.2, 1.5, 0.4, 1) 1.5s both;
+}
+@keyframes btn-pop {
+  from {
+    opacity: 0;
+    transform: translateY(16px) scale(0.9);
+  }
+}
+.coins-line {
+  position: relative;
+  animation: coin-pop 0.5s cubic-bezier(0.2, 1.6, 0.4, 1) both;
+}
+@keyframes coin-pop {
+  from {
+    opacity: 0;
+    transform: scale(0.5);
+  }
+}
+.coins-line svg {
+  animation: coin-spin 1.2s ease-in-out both;
+}
+@keyframes coin-spin {
+  from {
+    transform: rotateY(720deg);
+  }
+}
+.coin-fly {
+  position: absolute;
+  left: 18px;
+  top: 50%;
+  width: 11px;
+  height: 11px;
+  margin: -5px 0 0 -5px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #fff6c4, #ffd640 55%, #c98a12);
+  box-shadow: 0 0 6px rgba(255, 214, 64, 0.9);
+  pointer-events: none;
+  animation: coin-fly 1.1s cubic-bezier(0.2, 0.7, 0.4, 1) var(--d) both;
+}
+@keyframes coin-fly {
+  0% {
+    opacity: 0;
+    transform: translate(0, 0) scale(0.4);
+  }
+  20% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translate(var(--dx), var(--dy)) scale(1);
+  }
+}
+body.reduced .paper,
+body.reduced .paper::after,
+body.reduced .paper-kicker,
+body.reduced .big-score,
+body.reduced .big-score.landed,
+body.reduced .record:not(.hidden),
+body.reduced .panel.result.is-record::before,
+body.reduced .panel.result .stats > *,
+body.reduced .panel.result > button,
+body.reduced .coins-line,
+body.reduced .coins-line svg {
+  animation: none;
+}
+
+.panel.result.is-record {
+  isolation: isolate;
+}
+
+.panel.result.is-record {
+  position: relative;
+  overflow: hidden;
+}
+
+/* ===== Chat safety, duel stake ===== */
+.chat-links {
+  display: flex;
+  gap: 14px;
+  padding: 0 14px;
+  margin: 2px 0 4px;
+}
+.chat-links .link-btn {
+  font-size: 12px;
+}
+.chat-more {
+  margin-left: auto;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink-dim);
+  font-size: 18px;
+  line-height: 1.1;
+  letter-spacing: 1px;
+  cursor: pointer;
+}
+.chat-more:active {
+  background: rgba(255, 255, 255, 0.12);
+}
+.chat-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.msg-menu {
+  position: relative;
+  text-align: center;
+}
+.msg-menu .secondary,
+.msg-menu .primary {
+  width: 100%;
+  margin-top: 8px;
+}
+.secondary.danger,
+.primary.danger {
+  color: #ffd9d9;
+  background: rgba(200, 50, 60, 0.35);
+  box-shadow: inset 0 0 0 1.5px rgba(255, 110, 110, 0.55);
+}
+.primary.danger {
+  background: linear-gradient(90deg, #d93a46, #b02634);
+  color: #fff;
+}
+.blocked-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+.blocked-name {
+  flex: 1;
+  min-width: 0;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.blocked-row .secondary {
+  width: auto;
+  margin: 0;
+  padding: 6px 12px;
+  font-size: 12px;
+}
+.invite-ava.sm {
+  width: 36px;
+  height: 36px;
+  font-size: 16px;
+  flex: none;
+}
+.chat-rules-page h3 {
+  margin: 14px 0 4px;
+  font-size: 15px;
+}
+.chat-rules-page p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--ink-dim);
+}
+.stake-note {
+  margin: 8px 0;
+  padding: 8px 10px;
+  border-radius: 12px;
+  background: rgba(255, 214, 64, 0.12);
+  box-shadow: inset 0 0 0 1px rgba(255, 214, 64, 0.4);
+  font-size: 13px;
+  line-height: 1.4;
+}

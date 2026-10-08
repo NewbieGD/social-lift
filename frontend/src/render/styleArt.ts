@@ -504,6 +504,101 @@ export function drawStyleHead(ctx: CanvasRenderingContext2D, d: StyleDef, view: 
       ctx.stroke();
       break;
     }
+    case 'legionHead': {
+      // A chrome skull: a metal cranium, cheek plates, a grille of teeth and glowing red eyes.
+      ctx.beginPath();
+      ctx.ellipse(cx - (side ? 1 : 0), -0.4, rx + 2.2, 13.4, 0, 0, Math.PI * 2);
+      const sg = ctx.createRadialGradient(cx - 4, -9, 1, cx, 0, 18);
+      sg.addColorStop(0, '#FFFFFF');
+      sg.addColorStop(0.35, p.main);
+      sg.addColorStop(1, tone(p.main, -0.42));
+      ctx.fillStyle = sg;
+      ctx.fill();
+      edge(ctx, p.sub, 1);
+      // Panel seams on the cranium.
+      ctx.strokeStyle = tone(p.main, -0.5);
+      ctx.lineWidth = 0.7;
+      ctx.beginPath();
+      ctx.moveTo(cx - (side ? 7 : 9), -9);
+      ctx.quadraticCurveTo(cx, -13.4, cx + (side ? 8 : 9), -8);
+      ctx.moveTo(cx - 1, -13.2);
+      ctx.lineTo(cx + 1, -6);
+      ctx.stroke();
+      // Face plate: darker steel, from the brow down to the jaw.
+      ctx.beginPath();
+      if (side) {
+        ctx.moveTo(cx + 0.2, -5.2);
+        ctx.lineTo(cx + rx + 2.6, -5.4);
+        ctx.quadraticCurveTo(cx + rx + 3.4, 4, cx + 4.6, 11.8);
+        ctx.quadraticCurveTo(cx - 0.6, 10.4, cx + 0.2, 1);
+      } else {
+        ctx.moveTo(-8.6, -5.4);
+        ctx.quadraticCurveTo(0, -7.6, 8.6, -5.4);
+        ctx.quadraticCurveTo(9.6, 5, 4.8, 11.6);
+        ctx.quadraticCurveTo(0, 13.2, -4.8, 11.6);
+        ctx.quadraticCurveTo(-9.6, 5, -8.6, -5.4);
+      }
+      ctx.closePath();
+      const fg = ctx.createLinearGradient(0, -6, 0, 12);
+      fg.addColorStop(0, tone(p.sub, 0.45));
+      fg.addColorStop(1, tone(p.sub, -0.25));
+      ctx.fillStyle = fg;
+      ctx.fill();
+      edge(ctx, p.dark, 0.8);
+      // Brow ridge and dark eye sockets with a burning red eye.
+      ctx.strokeStyle = p.dark;
+      ctx.lineWidth = 1.8;
+      ctx.lineCap = 'round';
+      for (const e of eyes(view)) {
+        ctx.beginPath();
+        ctx.moveTo(e.x - e.r - 1.4, -4.2);
+        ctx.lineTo(e.x + e.r + 1.2, -3.2);
+        ctx.stroke();
+        ctx.fillStyle = '#0A0B0F';
+        ctx.beginPath();
+        ctx.ellipse(e.x, -0.8, e.r + 1.2, e.r + 1.6, 0, 0, Math.PI * 2);
+        ctx.fill();
+        glowDot(ctx, e.x, -0.8, 8, p.accent, 0.95);
+        ctx.fillStyle = p.accent;
+        ctx.beginPath();
+        ctx.arc(e.x, -0.8, e.r * 0.62, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#FFE0D8';
+        ctx.beginPath();
+        ctx.arc(e.x, -0.8, e.r * 0.26, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      // Nasal cavity.
+      ctx.fillStyle = '#0A0B0F';
+      ctx.beginPath();
+      const nx = side ? cx + rx + 1.2 : 0;
+      ctx.moveTo(nx - 1.3, 4);
+      ctx.lineTo(nx + 1.3, 4);
+      ctx.lineTo(nx, 1.6);
+      ctx.closePath();
+      ctx.fill();
+      // Teeth grille.
+      const mx0 = side ? cx + 1.2 : -4.6;
+      const mx1 = side ? cx + rx + 2 : 4.6;
+      rr(ctx, mx0, 6.4, mx1 - mx0, 3.6, 0.8);
+      ctx.fillStyle = '#0A0B0F';
+      ctx.fill();
+      ctx.strokeStyle = tone(p.main, -0.1);
+      ctx.lineWidth = 0.6;
+      for (let x = mx0 + 1; x < mx1; x += 1.5) {
+        ctx.beginPath();
+        ctx.moveTo(x, 6.6);
+        ctx.lineTo(x, 9.8);
+        ctx.stroke();
+      }
+      // A small red status light at the temple.
+      glowDot(ctx, side ? cx - 3 : -9.2, -3, 4, p.accent, 0.7);
+      ctx.fillStyle = p.accent;
+      ctx.beginPath();
+      ctx.arc(side ? cx - 3 : -9.2, -3, 0.7, 0, Math.PI * 2);
+      ctx.fill();
+      break;
+    }
     case 'brute': {
       // Messy dark hair, heavy angry brows and clenched teeth (the skin is tinted by the caller).
       ctx.fillStyle = '#2B2A22';
@@ -549,6 +644,8 @@ export function torsoColor(d: StyleDef): string {
     case 'web':
     case 'seraphArmor':
       return d.palette.main;
+    case 'legionArmor':
+      return d.palette.sub;
     case 'bare':
       return d.palette.skin ?? SKIN;
     default:
@@ -878,6 +975,79 @@ export function drawStyleTorso(ctx: CanvasRenderingContext2D, d: StyleDef, len: 
       }
       break;
     }
+    case 'legionArmor': {
+      // A ribcage of chrome plates over dark steel, a glowing core, pistons at the sides.
+      ctx.fillStyle = p.dark;
+      ctx.fillRect(-hw + 1, -len + 1, hw * 2 - 2, len - 2);
+      for (let i = 0; i < 4; i++) {
+        const y = -len + 5 + i * 3.6;
+        for (const sd of [-1, 1]) {
+          ctx.beginPath();
+          ctx.moveTo(mid + sd * 1.2, y);
+          ctx.quadraticCurveTo(mid + sd * (hw - 0.6), y - 1.4, mid + sd * (hw - 1.4), y + 2.4);
+          ctx.lineWidth = 1.9;
+          ctx.strokeStyle = tone(p.main, i % 2 ? -0.1 : 0.1);
+          ctx.lineCap = 'round';
+          ctx.stroke();
+          ctx.lineWidth = 0.5;
+          ctx.strokeStyle = 'rgba(255,255,255,0.55)';
+          ctx.beginPath();
+          ctx.moveTo(mid + sd * 2, y - 0.5);
+          ctx.quadraticCurveTo(mid + sd * (hw - 1.4), y - 1.8, mid + sd * (hw - 2.4), y + 1.4);
+          ctx.stroke();
+        }
+      }
+      // Sternum and the glowing core.
+      ctx.fillStyle = tone(p.main, -0.2);
+      ctx.fillRect(mid - 1, -len + 2, 2, len * 0.62);
+      const gy = -len * 0.5;
+      glowDot(ctx, mid, gy, 9, p.accent, 0.9);
+      ctx.beginPath();
+      ctx.arc(mid, gy, 3.1, 0, Math.PI * 2);
+      ctx.fillStyle = '#1B1F26';
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(mid, gy, 2.2, 0, Math.PI * 2);
+      ctx.fillStyle = p.accent;
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(mid, gy, 0.9, 0, Math.PI * 2);
+      ctx.fillStyle = '#FFE0D8';
+      ctx.fill();
+      // Hydraulic pistons along both sides.
+      for (const sd of [-1, 1]) {
+        ctx.strokeStyle = '#E8ECF2';
+        ctx.lineWidth = 0.9;
+        ctx.beginPath();
+        ctx.moveTo(mid + sd * (hw - 1.6), -len + 3);
+        ctx.lineTo(mid + sd * (hw - 1.6), -4);
+        ctx.stroke();
+        ctx.strokeStyle = p.dark;
+        ctx.lineWidth = 2.2;
+        ctx.beginPath();
+        ctx.moveTo(mid + sd * (hw - 1.6), -len * 0.6);
+        ctx.lineTo(mid + sd * (hw - 1.6), -4);
+        ctx.stroke();
+      }
+      // A warning-striped belt plate.
+      rr(ctx, -hw - 1, -5.2, hw * 2 + 2, 5.2, 1);
+      ctx.fillStyle = p.dark;
+      ctx.fill();
+      ctx.save();
+      ctx.clip();
+      ctx.fillStyle = p.accent;
+      for (let x = -hw - 4; x < hw + 4; x += 4) {
+        ctx.beginPath();
+        ctx.moveTo(x, -0.2);
+        ctx.lineTo(x + 2, -5.2);
+        ctx.lineTo(x + 3.4, -5.2);
+        ctx.lineTo(x + 1.4, -0.2);
+        ctx.closePath();
+        ctx.fill();
+      }
+      ctx.restore();
+      break;
+    }
     case 'bare': {
       ctx.strokeStyle = tone(p.skin ?? SKIN, -0.3);
       ctx.lineWidth = 0.9;
@@ -940,6 +1110,7 @@ export function handColor(d: StyleDef | undefined, skin: string): string {
   switch (d.kind) {
     case 'gauntlet':
     case 'seraphGauntlet':
+    case 'legionArms':
       return d.palette.sub;
     case 'bracer':
       return d.palette.dark;
@@ -969,6 +1140,41 @@ export function drawStyleArm(ctx: CanvasRenderingContext2D, d: StyleDef, l: Limb
     case 'bracer':
       limb3d(ctx, lerp(el, wr, 0.3), lerp(el, wr, 0.65), wr, [5.2, 5, 4.6], tone(p.sub, k), 1);
       break;
+    case 'legionArms': {
+      // Mechanical arms: a steel shoulder joint, a piston along the forearm, chrome plates and
+      // a red light at the elbow and the wrist.
+      sphere(ctx, l[0].x, l[0].y + 0.4, 3.9, 3.6, tone(p.sub, k));
+      glowDot(ctx, l[0].x, l[0].y + 0.4, 4, p.accent, 0.5);
+      limb3d(ctx, lerp(l[0], el, 0.2), lerp(l[0], el, 0.55), lerp(l[0], el, 0.95), [5.4, 5.2, 4.8], tone(p.main, k - 0.05), 1);
+      sphere(ctx, el.x, el.y, 3.4, 3.2, tone(p.sub, k));
+      glowDot(ctx, el.x, el.y, 5, p.accent, 0.8);
+      ctx.fillStyle = p.accent;
+      ctx.beginPath();
+      ctx.arc(el.x, el.y, 0.9, 0, Math.PI * 2);
+      ctx.fill();
+      limb3d(ctx, lerp(el, wr, 0.2), lerp(el, wr, 0.6), lerp(el, wr, 0.95), [5, 4.8, 4.4], tone(p.main, k), 1);
+      // The piston: a thin chrome rod beside a dark cylinder.
+      ctx.strokeStyle = '#F2F5FA';
+      ctx.lineWidth = 0.8;
+      ctx.beginPath();
+      ctx.moveTo(lerp(el, wr, 0.15).x + 2.4, lerp(el, wr, 0.15).y);
+      ctx.lineTo(lerp(el, wr, 0.8).x + 2.4, lerp(el, wr, 0.8).y);
+      ctx.stroke();
+      ctx.strokeStyle = p.dark;
+      ctx.lineWidth = 1.8;
+      ctx.beginPath();
+      ctx.moveTo(lerp(el, wr, 0.4).x + 2.4, lerp(el, wr, 0.4).y);
+      ctx.lineTo(lerp(el, wr, 0.8).x + 2.4, lerp(el, wr, 0.8).y);
+      ctx.stroke();
+      const a = lerp(el, wr, 0.9);
+      glowDot(ctx, a.x, a.y, 4, p.accent, 0.6);
+      ctx.beginPath();
+      ctx.arc(a.x, a.y, 2.9, 0, Math.PI * 2);
+      ctx.strokeStyle = p.accent;
+      ctx.lineWidth = 0.9;
+      ctx.stroke();
+      break;
+    }
     case 'seraphGauntlet': {
       // A gold pauldron on the shoulder, a long gold bracer and glowing cyan rings.
       sphere(ctx, l[0].x, l[0].y + 0.4, 3.9, 3.4, tone(p.sub, k));
@@ -1045,6 +1251,8 @@ export function legColors(d: StyleDef): { thigh: string; shin: string } {
       return { thigh: p.main, shin: p.skin ?? SKIN };
     case 'seraphGreaves':
       return { thigh: p.main, shin: p.main };
+    case 'legionLegs':
+      return { thigh: p.sub, shin: p.main };
     default:
       return { thigh: p.main, shin: p.main };
   }
@@ -1125,6 +1333,30 @@ export function drawStyleLeg(ctx: CanvasRenderingContext2D, d: StyleDef, l: Limb
       ctx.stroke();
       ctx.globalAlpha = 1;
       break;
+    case 'legionLegs': {
+      // Piston legs: a bare hydraulic knee with a glowing red joint and a chrome shin guard
+      // that has a red light strip.
+      limb3d(ctx, lerp(knee, ank, 0.2), lerp(knee, ank, 0.55), lerp(knee, ank, 0.95), [6, 5.8, 5.2], tone(p.main, k), 1);
+      sphere(ctx, knee.x, knee.y, 3.5, 3.5, tone(p.sub, k));
+      glowDot(ctx, knee.x, knee.y, 5.4, p.accent, 0.85);
+      ctx.fillStyle = p.accent;
+      ctx.beginPath();
+      ctx.arc(knee.x, knee.y, 1.1, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = '#F2F5FA';
+      ctx.lineWidth = 0.8;
+      ctx.beginPath();
+      ctx.moveTo(knee.x + 2.8, knee.y - 3.4);
+      ctx.lineTo(knee.x + 2.8, knee.y + 1.4);
+      ctx.stroke();
+      ctx.strokeStyle = p.accent;
+      ctx.lineWidth = 0.9;
+      ctx.beginPath();
+      ctx.moveTo(lerp(knee, ank, 0.3).x, lerp(knee, ank, 0.3).y);
+      ctx.lineTo(lerp(knee, ank, 0.8).x, lerp(knee, ank, 0.8).y);
+      ctx.stroke();
+      break;
+    }
     case 'seraphGreaves': {
       // Gold knee guards with a feather fin and long gold greaves.
       limb3d(ctx, lerp(knee, ank, 0.18), lerp(knee, ank, 0.55), lerp(knee, ank, 0.92), [6.2, 6, 5.2], tone(p.sub, k), 1);
@@ -1184,7 +1416,7 @@ export function drawStyleFoot(ctx: CanvasRenderingContext2D, d: StyleDef, view: 
   const upper = d.kind === 'sneaker' ? '#F2F4F8' : d.kind === 'barefoot' || d.kind === 'torn' ? p.skin ?? SKIN : p.main;
   const sole = d.kind === 'sneaker' ? '#C5CCD8' : d.kind === 'torn' ? p.skinShade ?? tone(p.skin ?? SKIN, -0.3) : p.dark;
   const trim = d.kind === 'sneaker' ? '#D94A4A' : d.kind === 'captainboot' ? '#fff' : p.sub;
-  const boot = ['plates', 'trousers', 'bodysuit', 'wraplegs', 'weblegs', 'seraphGreaves'].includes(d.kind);
+  const boot = ['plates', 'trousers', 'bodysuit', 'wraplegs', 'weblegs', 'seraphGreaves', 'legionLegs'].includes(d.kind);
   const col = tone(upper, k);
   if (view === 'side') {
     // Sole
@@ -1226,6 +1458,10 @@ export function drawStyleFoot(ctx: CanvasRenderingContext2D, d: StyleDef, view: 
       rr(ctx, -3.2, -6, 3.2, 1.4, 0.6);
       ctx.fillStyle = p.sub;
       ctx.fill();
+    }
+    if (d.kind === 'legionLegs') {
+      // The sole glows red, like heat from the hydraulics.
+      glowDot(ctx, 0, -0.6, 7, p.accent, 0.55);
     }
     if (d.kind === 'seraphGreaves') {
       // Winged boots: a feather fan at the ankle pointing back.
@@ -1280,10 +1516,313 @@ export function drawStyleFoot(ctx: CanvasRenderingContext2D, d: StyleDef, view: 
 // ===========================================================================
 
 /**
+ * The held light of a style (it replaces the flashlight in the hand). Frame like torch3d: the
+ * grip is at 0,0 and the light points along +x; `lensTilt` is how wide the lens is seen (0..3.4).
+ * Each kind draws its own object: a golden lantern, a plasma lantern, a phone, a wooden torch,
+ * a glowing blade, a hand with a fireball, a jar of fireflies.
+ */
+export function drawStyleTorch(ctx: CanvasRenderingContext2D, d: StyleDef, len: number, lensTilt: number, t: number): void {
+  switch (d.kind) {
+    case 'legionTorch':
+      return legionLantern(ctx, d, len, lensTilt, t);
+    case 'phoneTorch':
+      return phoneTorch(ctx, d, len, t);
+    case 'woodTorch':
+      return woodTorch(ctx, d, len, t);
+    case 'saberTorch':
+      return saberTorch(ctx, d, len, t);
+    case 'fireTorch':
+      return fireTorch(ctx, d, len, t);
+    case 'jarTorch':
+      return jarTorch(ctx, d, len, t);
+    default:
+      return seraphLantern(ctx, d, len, lensTilt, t);
+  }
+}
+
+function flame(ctx: CanvasRenderingContext2D, x: number, y: number, h: number, t: number, hot = '#FFF3B0', mid = '#FFB02E', out = '#E8420F'): void {
+  const sway = Math.sin(t * 11 + x) * h * 0.08;
+  glowDot(ctx, x, y - h * 0.4, h * 2.2, '#FF9A2E', 0.55 + 0.12 * Math.sin(t * 17));
+  for (const [k, c] of [[1, out], [0.72, mid], [0.4, hot]] as [number, string][]) {
+    ctx.beginPath();
+    ctx.moveTo(x - h * 0.34 * k, y);
+    ctx.quadraticCurveTo(x - h * 0.4 * k, y - h * 0.5 * k, x + sway * k, y - h * k * (1 + 0.1 * Math.sin(t * 13)));
+    ctx.quadraticCurveTo(x + h * 0.4 * k, y - h * 0.5 * k, x + h * 0.34 * k, y);
+    ctx.quadraticCurveTo(x, y + h * 0.18 * k, x - h * 0.34 * k, y);
+    ctx.closePath();
+    ctx.fillStyle = c;
+    ctx.fill();
+  }
+}
+
+/** A phone held like a flashlight: a dark slab, a lit screen and a camera with a bright LED. */
+function phoneTorch(ctx: CanvasRenderingContext2D, d: StyleDef, len: number, t: number): void {
+  const p = d.palette;
+  const L = len + 2;
+  rr(ctx, -3, -3.4, L, 6.8, 1.6);
+  const g = ctx.createLinearGradient(0, -3.4, 0, 3.4);
+  g.addColorStop(0, tone(p.main, 0.3));
+  g.addColorStop(1, tone(p.main, -0.2));
+  ctx.fillStyle = g;
+  ctx.fill();
+  edge(ctx, p.dark, 0.7);
+  // The screen with a flashlight icon.
+  rr(ctx, -2.2, -2.6, L - 5.6, 5.2, 1);
+  ctx.fillStyle = '#10151E';
+  ctx.fill();
+  ctx.fillStyle = 'rgba(120,180,255,0.35)';
+  ctx.fillRect(-1.4, -2.4, L - 7.4, 1.4);
+  ctx.fillStyle = '#EAF3FF';
+  ctx.beginPath();
+  ctx.moveTo(1, -1);
+  ctx.lineTo(3.6, -1.6);
+  ctx.lineTo(3.6, 1.6);
+  ctx.lineTo(1, 1);
+  ctx.closePath();
+  ctx.fill();
+  // The camera bump and the LED.
+  const cx = L - 3.6;
+  rr(ctx, cx - 1.6, -2.6, 3.8, 5.2, 1);
+  ctx.fillStyle = p.dark;
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(cx + 0.3, -0.9, 1.1, 0, Math.PI * 2);
+  ctx.fillStyle = '#1B2530';
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(cx + 0.3, 1.2, 0.9, 0, Math.PI * 2);
+  ctx.fillStyle = p.accent;
+  ctx.fill();
+  glowDot(ctx, cx + 0.3, 1.2, 9 + Math.sin(t * 6), '#FFFFFF', 0.85);
+}
+
+/** A wooden torch: a stick with a wrapped head and a living flame. */
+function woodTorch(ctx: CanvasRenderingContext2D, d: StyleDef, len: number, t: number): void {
+  const p = d.palette;
+  const L = len + 2;
+  const g = ctx.createLinearGradient(0, -1.8, 0, 1.8);
+  g.addColorStop(0, p.sub);
+  g.addColorStop(0.5, p.main);
+  g.addColorStop(1, p.dark);
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  ctx.roundRect(-4, -1.6, L - 3, 3.2, 1.4);
+  ctx.fill();
+  edge(ctx, p.dark, 0.6);
+  ctx.strokeStyle = 'rgba(40,24,12,0.5)';
+  ctx.lineWidth = 0.4;
+  for (let x = -2; x < L - 6; x += 2.6) {
+    ctx.beginPath();
+    ctx.moveTo(x, -1.4);
+    ctx.lineTo(x + 1, 1.4);
+    ctx.stroke();
+  }
+  // The wrapped head, black with pitch.
+  ctx.fillStyle = '#2A1B12';
+  ctx.beginPath();
+  ctx.moveTo(L - 6, -1.8);
+  ctx.quadraticCurveTo(L - 1, -4.6, L + 2, -3);
+  ctx.lineTo(L + 2, 3);
+  ctx.quadraticCurveTo(L - 1, 4.6, L - 6, 1.8);
+  ctx.closePath();
+  ctx.fill();
+  edge(ctx, '#2A1B12', 0.5);
+  ctx.strokeStyle = '#C9A06A';
+  ctx.lineWidth = 0.6;
+  for (const x of [L - 4, L - 1.5]) {
+    ctx.beginPath();
+    ctx.moveTo(x, -3.4);
+    ctx.lineTo(x, 3.4);
+    ctx.stroke();
+  }
+  // The flame points forward along the light (the frame's +x), shown as a fire on the tip.
+  ctx.save();
+  ctx.translate(L + 1, -0.6);
+  ctx.rotate(Math.PI / 4);
+  flame(ctx, 0, 0, 8.5, t);
+  ctx.restore();
+}
+
+/** An energy blade: a metal hilt and a long glowing blade of light. */
+function saberTorch(ctx: CanvasRenderingContext2D, d: StyleDef, len: number, t: number): void {
+  const p = d.palette;
+  const hilt = len * 0.62;
+  const g = ctx.createLinearGradient(0, -2, 0, 2);
+  g.addColorStop(0, '#F2F5FA');
+  g.addColorStop(0.5, p.main);
+  g.addColorStop(1, tone(p.main, -0.4));
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  ctx.roundRect(-4.6, -2, hilt, 4, 1.2);
+  ctx.fill();
+  edge(ctx, p.sub, 0.6);
+  ctx.fillStyle = p.sub;
+  for (const x of [-2.6, -0.4, 1.8]) ctx.fillRect(x, -2, 0.9, 4);
+  ctx.fillStyle = '#E8392F';
+  ctx.fillRect(hilt - 6.6, -2.4, 1.6, 1);
+  // The emitter.
+  ctx.fillStyle = p.sub;
+  ctx.fillRect(hilt - 4.6, -2.6, 2.4, 5.2);
+  // The blade.
+  const bl = len * 1.25 + 9;
+  const x0 = hilt - 2.2;
+  const pulse = 0.88 + 0.12 * Math.sin(t * 9);
+  glowDot(ctx, x0 + bl * 0.5, 0, bl * 0.75, p.accent, 0.5 * pulse);
+  ctx.beginPath();
+  ctx.roundRect(x0, -2.1, bl, 4.2, 2.1);
+  ctx.fillStyle = `rgba(87,214,255,${0.55 * pulse})`;
+  ctx.fill();
+  ctx.beginPath();
+  ctx.roundRect(x0, -1.1, bl, 2.2, 1.1);
+  ctx.fillStyle = '#F2FDFF';
+  ctx.fill();
+}
+
+/** A hand holding a ball of fire: a leather glove with curled fingers, flames dancing above it. */
+function fireTorch(ctx: CanvasRenderingContext2D, d: StyleDef, len: number, t: number): void {
+  const p = d.palette;
+  const bx = len * 0.8 + 3;
+  // The cuff and the back of the hand.
+  rr(ctx, -4.6, -2.6, 5, 5.2, 1.4);
+  ctx.fillStyle = p.dark;
+  ctx.fill();
+  const hg = ctx.createLinearGradient(0, -3.4, 0, 3.4);
+  hg.addColorStop(0, tone(p.sub, 0.2));
+  hg.addColorStop(1, tone(p.main, -0.1));
+  ctx.fillStyle = hg;
+  ctx.beginPath();
+  ctx.moveTo(0, -3);
+  ctx.quadraticCurveTo(bx * 0.5, -4.4, bx - 1, -2.4);
+  ctx.lineTo(bx - 1, 2.4);
+  ctx.quadraticCurveTo(bx * 0.5, 4.4, 0, 3);
+  ctx.closePath();
+  ctx.fill();
+  edge(ctx, p.dark, 0.6);
+  // Fingers curled around the ball.
+  for (let i = 0; i < 4; i++) {
+    const y = -2.8 + i * 1.9;
+    ctx.beginPath();
+    ctx.ellipse(bx - 0.6, y, 2.3, 1, 0, 0, Math.PI * 2);
+    ctx.fillStyle = tone(p.sub, i % 2 ? 0 : 0.12);
+    ctx.fill();
+    edge(ctx, p.dark, 0.4);
+  }
+  // The ball of fire: a glowing sphere with licks of flame.
+  const r = 4.4 + 0.3 * Math.sin(t * 8);
+  const cx = bx + 3.2;
+  glowDot(ctx, cx, 0, r * 3.4, '#FF8A1F', 0.7);
+  const og = ctx.createRadialGradient(cx - 1, -1.2, 0.3, cx, 0, r);
+  og.addColorStop(0, '#FFFBE0');
+  og.addColorStop(0.35, '#FFC24A');
+  og.addColorStop(0.75, '#FF6A1A');
+  og.addColorStop(1, '#C8300B');
+  ctx.beginPath();
+  ctx.arc(cx, 0, r, 0, Math.PI * 2);
+  ctx.fillStyle = og;
+  ctx.fill();
+  for (let i = 0; i < 5; i++) {
+    const a = (i / 5) * Math.PI * 2 + t * 2.4;
+    ctx.save();
+    ctx.translate(cx + Math.cos(a) * r * 0.8, Math.sin(a) * r * 0.8);
+    ctx.rotate(a + Math.PI / 2);
+    flame(ctx, 0, 0, 3.4 + Math.sin(t * 9 + i) * 0.8, t + i);
+    ctx.restore();
+  }
+}
+
+/** A jar of fireflies: glass, a wire handle and glowing dots drifting inside. */
+function jarTorch(ctx: CanvasRenderingContext2D, d: StyleDef, len: number, t: number): void {
+  const p = d.palette;
+  const w = 8.4;
+  const x0 = len * 0.45;
+  // The wire handle to the hand.
+  ctx.strokeStyle = p.sub;
+  ctx.lineWidth = 0.8;
+  ctx.beginPath();
+  ctx.moveTo(-3.6, 0);
+  ctx.lineTo(x0, 0);
+  ctx.moveTo(x0, -3.4);
+  ctx.quadraticCurveTo(x0 - 3, -5.4, x0 - 3.8, 0);
+  ctx.quadraticCurveTo(x0 - 3, 5.4, x0, 3.4);
+  ctx.stroke();
+  glowDot(ctx, x0 + w / 2, 0, 15, p.glow ?? '#F4FFB0', 0.55);
+  // The glass body.
+  rr(ctx, x0, -4.2, w, 8.4, 2.2);
+  const gg = ctx.createLinearGradient(x0, 0, x0 + w, 0);
+  gg.addColorStop(0, 'rgba(190,230,245,0.45)');
+  gg.addColorStop(0.5, 'rgba(120,170,190,0.2)');
+  gg.addColorStop(1, 'rgba(190,230,245,0.45)');
+  ctx.fillStyle = gg;
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(220,245,255,0.85)';
+  ctx.lineWidth = 0.7;
+  ctx.stroke();
+  // The lid.
+  ctx.fillStyle = p.sub;
+  ctx.fillRect(x0 - 0.6, -4.9, 2, 9.8);
+  ctx.fillStyle = tone(p.sub, 0.3);
+  ctx.fillRect(x0 - 0.6, -4.9, 2, 1.4);
+  // Fireflies.
+  for (let i = 0; i < 7; i++) {
+    const a = t * (0.9 + (i % 3) * 0.35) + i * 1.7;
+    const fx = x0 + 3 + (Math.sin(a) * 0.5 + 0.5) * (w - 4);
+    const fy = Math.cos(a * 1.3 + i) * 2.8;
+    const tw = 0.4 + 0.6 * Math.abs(Math.sin(t * 3 + i * 2));
+    glowDot(ctx, fx, fy, 3.4, p.accent, 0.95 * tw);
+    ctx.fillStyle = `rgba(255,255,200,${tw})`;
+    ctx.beginPath();
+    ctx.arc(fx, fy, 0.6, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+/** A plasma lantern: black-chrome, with cooling fins and a red glowing lens ring. */
+function legionLantern(ctx: CanvasRenderingContext2D, d: StyleDef, len: number, lensTilt: number, t: number): void {
+  const p = d.palette;
+  const g = ctx.createLinearGradient(0, -2.4, 0, 2.4);
+  g.addColorStop(0, tone(p.sub, 0.5));
+  g.addColorStop(0.5, p.sub);
+  g.addColorStop(1, p.dark);
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  ctx.roundRect(-4.6, -2.2, len * 0.6, 4.4, 1.2);
+  ctx.fill();
+  edge(ctx, p.dark, 0.6);
+  // Cooling fins.
+  ctx.fillStyle = p.main;
+  for (let i = 0; i < 3; i++) ctx.fillRect(len * 0.2 + i * 1.8, -3.4, 0.9, 6.8);
+  // The chrome head and the lens ring.
+  const hx = len * 0.56;
+  const hg = ctx.createLinearGradient(0, -3.6, 0, 3.6);
+  hg.addColorStop(0, '#FFFFFF');
+  hg.addColorStop(0.5, p.main);
+  hg.addColorStop(1, tone(p.main, -0.4));
+  ctx.fillStyle = hg;
+  ctx.beginPath();
+  ctx.moveTo(hx, -2.8);
+  ctx.lineTo(len + 2, -4.4);
+  ctx.lineTo(len + 2, 4.4);
+  ctx.lineTo(hx, 2.8);
+  ctx.closePath();
+  ctx.fill();
+  edge(ctx, p.dark, 0.7);
+  const pulse = 0.85 + 0.15 * Math.sin(t * 6);
+  ctx.beginPath();
+  ctx.ellipse(len + 2.2, 0, Math.max(0.9, lensTilt * 1.1), 3.8, 0, 0, Math.PI * 2);
+  ctx.fillStyle = '#0A0B0F';
+  ctx.fill();
+  ctx.beginPath();
+  ctx.ellipse(len + 2.3, 0, Math.max(0.6, lensTilt * 0.8), 2.8, 0, 0, Math.PI * 2);
+  ctx.fillStyle = p.accent;
+  ctx.fill();
+  glowDot(ctx, len + 3, 0, 12 * pulse, p.accent, 0.7);
+}
+
+/**
  * A golden lantern-torch with a glowing cyan crystal lens. Frame like torch3d: the grip is at
  * 0,0 and the lens points along +x; `lensTilt` is how wide the lens is seen (0..3.4).
  */
-export function drawStyleTorch(ctx: CanvasRenderingContext2D, d: StyleDef, len: number, lensTilt: number, t: number): void {
+function seraphLantern(ctx: CanvasRenderingContext2D, d: StyleDef, len: number, lensTilt: number, t: number): void {
   const p = d.palette;
   // Pearl-wrapped handle.
   const hg = ctx.createLinearGradient(0, -2.2, 0, 2.2);
@@ -1403,6 +1942,70 @@ export function drawSeraphAura(ctx: CanvasRenderingContext2D, d: StyleDef, t: nu
     sg.addColorStop(1, 'rgba(255,220,120,0)');
     ctx.fillStyle = sg;
     ctx.fillRect(x - 3.4, y - 3.4, 6.8, 6.8);
+  }
+  ctx.restore();
+  void p;
+}
+
+/**
+ * The scanner of the full chrome set: a red heat glow with rising embers around the hero, and the
+ * red "machine vision": a line sweeping over the body (front view) or a laser from the eye (side view).
+ */
+export function drawLegionFx(ctx: CanvasRenderingContext2D, d: StyleDef, t: number, cy = -30, eye?: { x: number; y: number }): void {
+  const p = d.palette;
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  const pulse = 0.9 + 0.1 * Math.sin(t * 3.1);
+  const g = ctx.createRadialGradient(0, cy, 4, 0, cy, 48 * pulse);
+  g.addColorStop(0, 'rgba(255,70,40,0.34)');
+  g.addColorStop(0.5, 'rgba(255,40,30,0.14)');
+  g.addColorStop(1, 'rgba(255,30,20,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(-56, cy - 56, 112, 112);
+  // Embers rise from the machine.
+  for (let i = 0; i < 14; i++) {
+    const ph = (t * 0.5 + i * 0.173) % 1;
+    const x = Math.sin(i * 7.1) * 20 + Math.sin(t * 2 + i) * 3;
+    const y = cy + 34 - ph * 74;
+    const a = Math.sin(ph * Math.PI) * 0.9;
+    const sg = ctx.createRadialGradient(x, y, 0, x, y, 2.6);
+    sg.addColorStop(0, `rgba(255,170,100,${a})`);
+    sg.addColorStop(1, 'rgba(255,60,30,0)');
+    ctx.fillStyle = sg;
+    ctx.fillRect(x - 2.6, y - 2.6, 5.2, 5.2);
+  }
+  if (!eye) {
+    // A scan line runs down the body again and again.
+    const k = (t * 0.55) % 1;
+    const y = cy - 34 + k * 70;
+    const lg = ctx.createLinearGradient(-26, 0, 26, 0);
+    lg.addColorStop(0, 'rgba(255,40,30,0)');
+    lg.addColorStop(0.5, `rgba(255,90,70,${0.85 * Math.sin(k * Math.PI)})`);
+    lg.addColorStop(1, 'rgba(255,40,30,0)');
+    ctx.fillStyle = lg;
+    ctx.fillRect(-26, y - 0.8, 52, 1.6);
+    const bg = ctx.createLinearGradient(0, y - 7, 0, y + 1);
+    bg.addColorStop(0, 'rgba(255,40,30,0)');
+    bg.addColorStop(1, `rgba(255,60,40,${0.2 * Math.sin(k * Math.PI)})`);
+    ctx.fillStyle = bg;
+    ctx.fillRect(-26, y - 7, 52, 8);
+  } else {
+    // A thin laser from the eye, sweeping a little up and down.
+    const sweep = Math.sin(t * 1.7) * 0.1;
+    const x1 = eye.x + 120;
+    const y1 = eye.y + sweep * 120;
+    const lg = ctx.createLinearGradient(eye.x, eye.y, x1, y1);
+    lg.addColorStop(0, 'rgba(255,90,70,0.9)');
+    lg.addColorStop(1, 'rgba(255,40,30,0)');
+    ctx.strokeStyle = lg;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(eye.x, eye.y);
+    ctx.lineTo(x1, y1);
+    ctx.stroke();
+    ctx.lineWidth = 4.4;
+    ctx.globalAlpha = 0.25;
+    ctx.stroke();
   }
   ctx.restore();
   void p;

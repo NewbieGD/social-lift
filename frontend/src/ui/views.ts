@@ -2,10 +2,11 @@
 import { AGE_LABEL } from '../config';
 import { legal, ru, type DocSection } from '../i18n/ru';
 import type { ChatMsg, ChatUser } from '../net/duel';
-import type { CatalogItem, FinishResult, Leaderboard, LeaderRow, PublicProfile, ShopState, Stats } from '../net/session';
+import type { BlockedPlayer, CatalogItem, FinishResult, Leaderboard, LeaderRow, PublicProfile, ShopState, Stats } from '../net/session';
 import { STYLE_SETS } from '../render/styles';
 import { esc } from './dom';
 import { keyLabel } from '../input/input';
+import { fullscreenSupported } from '../platform/fullscreen';
 import type { LightId } from '../core/gameConfig';
 import type { Settings } from './settingsStore';
 
@@ -184,7 +185,7 @@ export function menuView(d: MenuData): string {
     <div class="showcase">
       <div class="stage-top">
         <button class="top-btn more-btn" data-action="open" data-arg="moreMenu" aria-label="${ru.menu.more}" title="${ru.menu.more}">${MORE_ICON}</button>
-        <button class="top-btn fs-btn" data-action="fullscreen" aria-label="${ru.menu.fullscreen}" title="${ru.menu.fullscreen}">${FS_ICON}</button>
+        ${fullscreenSupported() ? `<button class="top-btn fs-btn" data-action="fullscreen" aria-label="${ru.menu.fullscreen}" title="${ru.menu.fullscreen}">${FS_ICON}</button>` : ''}
         ${d.coins === null ? '' : `<button class="coin-pill" data-action="open" data-arg="coinsInfo" title="${ru.menu.coins}" aria-label="${ru.menu.coins}: ${d.coins}">${COIN_ICON}<b>${d.coins}</b></button>`}
       </div>
       <div class="hero-stage">
@@ -366,7 +367,9 @@ export function stylesView(shop: ShopState | null, tab: 'mine' | 'premium' = 'mi
         const isWorn = worn(c.slot) === id;
         const note = isOwned ? (isWorn ? ru.styles.worn : ru.styles.wear) : requirementText(c, shop);
         const premiumLocked = !isOwned && !!c.product && showPremiumTab;
-        return `<button class="style-card ${isOwned ? 'owned' : 'locked'} ${isWorn ? 'worn' : ''} ${premiumLocked ? 'premium-locked' : ''}" ${isOwned ? `data-action="wearStyle" data-arg="${id}"` : premiumLocked ? 'data-action="stylesTab" data-arg="premium"' : 'disabled'} aria-label="${esc(ru.styles.parts[id])}">
+        // Priced items (not premium ones) are bought for coins: a tap opens the confirmation.
+        const buyable = !isOwned && !c.product && c.price !== null && c.price !== undefined;
+        return `<button class="style-card ${isOwned ? 'owned' : 'locked'} ${isWorn ? 'worn' : ''} ${premiumLocked ? 'premium-locked' : ''} ${buyable ? 'buyable' : ''}" ${isOwned ? `data-action="wearStyle" data-arg="${id}"` : premiumLocked ? 'data-action="stylesTab" data-arg="premium"' : buyable ? `data-action="askBuy" data-arg="${id}"` : 'disabled'} aria-label="${esc(ru.styles.parts[id])}">
           <canvas data-style="${id}" data-locked="${isOwned ? '0' : '1'}" aria-hidden="true"></canvas>
           <b>${esc(ru.styles.parts[id])}</b>
           <span>${esc(isOwned ? ru.styles.slots[c.slot] + ' · ' + note : note)}</span>
@@ -529,14 +532,14 @@ export function petsView(shop: ShopState | null): string {
   const owned = new Set(shop.owned);
   const byId = new Map(shop.catalog.map((c) => [c.id, c]));
   const chosenId = shop.decor?.pet;
-  const cards = ['pet_cat', 'pet_dog', 'pet_parrot', 'pet_spark']
+  const cards = ['pet_cat', 'pet_dog', 'pet_parrot', 'pet_trophy', 'pet_spark']
     .map((id) => {
       const has = owned.has(id);
       const chosen = chosenId === id;
       const c = byId.get(id);
       const premium = !!c?.product;
       const votes = shop.products?.find((q) => q.id === c?.product)?.votes ?? 10;
-      const note = has ? (chosen ? ru.pets.chosen : ru.pets.pick) : premium ? ru.pets.premiumNote(votes) : c?.record != null ? ru.pets.requireRecord(c.record) : ru.styles.requireNone;
+      const note = has ? (chosen ? ru.pets.chosen : ru.pets.pick) : premium ? ru.pets.premiumNote(votes) : c?.record != null ? ru.pets.requireRecord(c.record) : c?.duel_streak != null ? ru.pets.streakNote(c.duel_streak) : ru.styles.requireNone;
       return `<button class="style-card decor-card ${has ? 'owned' : 'locked'} ${chosen ? 'worn' : ''} ${premium && !has ? 'premium-locked' : ''}" ${has ? `data-action="petPick" data-arg="${id}"` : premium ? 'data-action="openPremium"' : 'disabled'} aria-label="${esc(ru.pets.names[id])}">
         <canvas data-pet="${id}" data-locked="${has ? '0' : '1'}" aria-hidden="true"></canvas>
         <b>${esc(ru.pets.names[id])}</b>
@@ -825,6 +828,9 @@ export interface DuelView {
   waitingFor: string | null;
   /** Last loaded duel rating (shown at once while a fresh copy loads). */
   leadersHtml: { rows: string; me: string } | null;
+  /** The coins on the account (null when unknown) and the stake of a duel. */
+  coins: number | null;
+  stake: number;
 }
 
 export function duelsView(d: DuelView): string {
@@ -834,13 +840,17 @@ export function duelsView(d: DuelView): string {
   else if (d.status === 'waiting') status = ru.duel.waiting(d.waitingFor || ru.duel.player);
   else if (d.status === 'none') status = ru.duel.none;
   else if (d.status === 'declined') status = ru.duel.declined;
-  const canFind = d.status === 'idle' || d.status === 'none' || d.status === 'declined';
+  const poor = d.coins !== null && d.coins < d.stake;
+  const canFind = (d.status === 'idle' || d.status === 'none' || d.status === 'declined') && !poor;
   return `${header(ru.duel.title)}<div class="scroll duel-scroll"><div class="panel flat duel-panel">
     <div class="duel-hero" aria-hidden="true"><i class="spark s1"></i><i class="spark s2"></i><i class="spark s3"></i><i class="spark s4"></i>${ICON.swords}</div>
     <p>${ru.duel.lead}</p>
+    <p class="stake-note"><b>${ru.duel.stake(d.stake)}</b>${d.coins !== null ? `<br />${ru.duel.balance(d.coins)}` : ''}</p>
     <p class="muted">${ru.duel.rulesNote}</p>
+    <p class="muted small">${ru.duel.streakNote}</p>
     ${d.status !== 'offline' && d.status !== 'connecting' ? `<p class="duel-online"><span class="dot"></span>${ru.duel.online(d.online)}</p>` : ''}
     ${status ? `<p class="status ${d.status === 'waiting' ? '' : 'warn'}">${esc(status)}</p>` : ''}
+    ${poor && d.status !== 'waiting' ? `<p class="status warn">${esc(ru.duel.needCoins(d.stake, d.coins ?? 0))}</p>` : ''}
     ${
       d.status === 'waiting'
         ? `<button class="secondary" data-action="duelCancel">${ru.duel.cancel}</button>`
@@ -852,13 +862,14 @@ export function duelsView(d: DuelView): string {
   </div></div>`;
 }
 
-export function inviteView(from: { name: string | null; photo: string | null }, seconds: number): string {
+export function inviteView(from: { name: string | null; photo: string | null }, seconds: number, stake = 500): string {
   const name = from.name || ru.duel.player;
   const img = from.photo ? `<img src="${esc(from.photo)}" alt="" referrerpolicy="no-referrer" />` : `<b>${esc(name.slice(0, 1))}</b>`;
   return `<div class="panel invite">
     <div class="invite-ava">${img}</div>
     <h2>${ru.duel.inviteTitle}</h2>
     <p>${esc(ru.duel.invite(name))}</p>
+    <p class="stake-note"><b>${ru.duel.stake(stake)}</b></p>
     <div class="invite-timer"><i style="animation-duration:${seconds}s"></i></div>
     <button class="primary" data-action="duelAccept">${ru.duel.accept}</button>
     <button class="secondary" data-action="duelDecline">${ru.duel.decline}</button>
@@ -1026,10 +1037,11 @@ function chatAva(u: ChatUser, size = ''): string {
   return `<button type="button" class="chat-ava ${size}" data-action="player" data-arg="${u.id}" aria-label="${esc(name)}">${inner}</button>`;
 }
 
-export function chatView(): string {
+export function chatView(blockedCount = 0): string {
   return `${header(ru.chat.title)}
     <div class="chat-top"><span class="chat-count" id="chatCount"></span><div class="chat-who" id="chatWho"></div></div>
     <p class="chat-rules">${ru.chat.rules}</p>
+    <div class="chat-links"><button type="button" class="link-btn" data-action="open" data-arg="chatRules">${ru.chat.rulesLink}</button><button type="button" class="link-btn" data-action="open" data-arg="blocked" id="blockedLink">${ru.chat.blockedLink(blockedCount)}</button></div>
     <div class="scroll chat-list" id="chatList"></div>
     <p class="chat-status" id="chatStatus"></p>
     <form class="chat-form" id="chatForm" autocomplete="off">
@@ -1050,10 +1062,59 @@ export function chatMsgHtml(m: ChatMsg, myId: number | null): string {
   return `<div class="chat-msg${m.user.id === myId ? ' mine' : ''}">
     ${chatAva(m.user)}
     <div class="chat-body">
-      <div class="chat-meta"><button type="button" class="chat-name" data-action="player" data-arg="${m.user.id}">${esc(name)}</button>${m.user.rank ? `<span class="chat-rank">#${m.user.rank}</span>` : ''}<time>${time}</time></div>
+      <div class="chat-meta"><button type="button" class="chat-name" data-action="player" data-arg="${m.user.id}">${esc(name)}</button>${m.user.rank ? `<span class="chat-rank">#${m.user.rank}</span>` : ''}<time>${time}</time>${m.user.id === myId || m.id < 0 ? '' : `<button type="button" class="chat-more" data-action="msgMenu" data-arg="${m.id}" aria-label="${ru.chat.more}">⋯</button>`}</div>
       <p>${esc(m.text)}</p>
     </div>
   </div>`;
+}
+
+/** Actions for one chat message: complain, block the author, open his profile. */
+export function chatMsgMenuView(m: ChatMsg): string {
+  const name = m.user.name || ru.leaders.player;
+  return `<div class="panel msg-menu">
+    <button class="icon-btn close" data-action="back" aria-label="${ru.chat.close}">${CLOSE_ICON}</button>
+    <h2>${ru.chat.msgMenuTitle}</h2>
+    <p class="muted small"><b>${esc(name)}</b>: ${esc(m.text.length > 90 ? `${m.text.slice(0, 90)}…` : m.text)}</p>
+    <button class="secondary" data-action="reportAsk">${ru.chat.report}</button>
+    <button class="secondary danger" data-action="blockAsk">${ru.chat.block}</button>
+    <button class="link-btn" data-action="player" data-arg="${m.user.id}">${ru.profileChoice.title}</button>
+  </div>`;
+}
+
+export function reportReasonView(): string {
+  return `<div class="panel msg-menu">
+    <button class="icon-btn close" data-action="back" aria-label="${ru.chat.close}">${CLOSE_ICON}</button>
+    <h2>${ru.chat.reportTitle}</h2>
+    ${(['abuse', 'spam', 'other'] as const).map((r) => `<button class="secondary" data-action="reportSend" data-arg="${r}">${ru.chat.reasons[r]}</button>`).join('')}
+  </div>`;
+}
+
+export function blockConfirmView(name: string): string {
+  return `<div class="panel msg-menu">
+    <h2>${esc(ru.chat.blockTitle(name))}</h2>
+    <p>${ru.chat.blockText}</p>
+    <button class="primary danger" data-action="blockDo">${ru.chat.blockDo}</button>
+    <button class="secondary" data-action="back">${ru.decor.cancel}</button>
+  </div>`;
+}
+
+export function blockedView(list: BlockedPlayer[] | null): string {
+  const rows = (list ?? [])
+    .map((b) => {
+      const name = b.name || ru.leaders.player;
+      const img = b.photo ? `<img src="${esc(b.photo)}" alt="" referrerpolicy="no-referrer" />` : `<b>${esc(name.slice(0, 1))}</b>`;
+      return `<div class="blocked-row"><span class="invite-ava sm">${img}</span><span class="blocked-name">${esc(name)}</span><button class="secondary" data-action="unblock" data-arg="${b.id}">${ru.chat.unblock}</button></div>`;
+    })
+    .join('');
+  return `${header(ru.chat.blockedTitle)}<div class="scroll"><div class="panel flat">${
+    list === null ? `<p class="status warn">${ru.profile.failed}</p>` : rows || `<p class="muted">${ru.chat.blockedEmpty}</p>`
+  }</div></div>`;
+}
+
+export function chatRulesView(): string {
+  return `${header(ru.chat.rulesTitle)}<div class="scroll"><div class="panel flat chat-rules-page">
+    ${ru.chat.rulesBody.map(([h, t], i) => `<h3>${i + 1}. ${esc(h)}</h3><p>${esc(t)}</p>`).join('')}
+  </div></div>`;
 }
 
 export interface ProfileWho {
