@@ -3,7 +3,9 @@ see simple numbers. Everything needs ADMIN_KEY (an Amvera variable); without it 
 
 from __future__ import annotations
 
+import functools
 import hmac
+import logging
 from datetime import timedelta
 
 from fastapi import APIRouter, Depends, Request
@@ -18,8 +20,26 @@ from .core import utcnow
 from .db import SessionLocal, get_session
 from .models import BalanceOverride, ChatReport, Event, Run, User, VkOrder
 
+log = logging.getLogger("app.admin")
 router = APIRouter(prefix="/api/admin")
 page_router = APIRouter()
+
+
+def guarded(fn):
+    """An error inside an admin endpoint is logged with its traceback and shown to the owner as text
+    (the page is protected by the key, so the message is safe to show), not hidden as a bare 500."""
+
+    @functools.wraps(fn)
+    async def wrapper(*args, **kwargs):
+        try:
+            return await fn(*args, **kwargs)
+        except Exception as exc:  # noqa: BLE001
+            log.exception("admin endpoint %s failed", fn.__name__)
+            return JSONResponse(
+                {"error": {"code": "server_error", "message": f"{type(exc).__name__}: {str(exc)[:300]}"}}, status_code=500
+            )
+
+    return wrapper
 
 
 async def reload_overrides() -> None:
@@ -33,7 +53,7 @@ def _denied(request: Request) -> JSONResponse | None:
     key = settings.admin_key
     if not key:
         return JSONResponse({"error": {"code": "not_found", "message": "Not found"}}, status_code=404)
-    if not hmac.compare_digest(request.headers.get("x-admin-key", ""), key):
+    if not hmac.compare_digest(request.headers.get("x-admin-key", "").encode("utf-8"), key.encode("utf-8")):
         return JSONResponse({"error": {"code": "forbidden", "message": "Forbidden"}}, status_code=403)
     return None
 
@@ -96,6 +116,7 @@ class BalanceIn(BaseModel):
 
 
 @router.get("/balance")
+@guarded
 async def get_balance(request: Request) -> JSONResponse:
     if (d := _denied(request)) is not None:
         return d
@@ -103,6 +124,7 @@ async def get_balance(request: Request) -> JSONResponse:
 
 
 @router.put("/balance")
+@guarded
 async def put_balance(body: BalanceIn, request: Request, session: AsyncSession = Depends(get_session)) -> JSONResponse:
     if (d := _denied(request)) is not None:
         return d
@@ -121,6 +143,7 @@ async def put_balance(body: BalanceIn, request: Request, session: AsyncSession =
 
 
 @router.delete("/balance/{key:path}")
+@guarded
 async def reset_balance(key: str, request: Request, session: AsyncSession = Depends(get_session)) -> JSONResponse:
     if (d := _denied(request)) is not None:
         return d
@@ -141,6 +164,7 @@ async def _share(session: AsyncSession, kind: str, since, below: int | None = No
 
 
 @router.get("/stats")
+@guarded
 async def stats(request: Request, session: AsyncSession = Depends(get_session)) -> JSONResponse:
     if (d := _denied(request)) is not None:
         return d
@@ -173,6 +197,7 @@ async def stats(request: Request, session: AsyncSession = Depends(get_session)) 
 
 
 @router.get("/chat-reports")
+@guarded
 async def chat_reports(request: Request, session: AsyncSession = Depends(get_session)) -> JSONResponse:
     if (d := _denied(request)) is not None:
         return d
@@ -213,18 +238,20 @@ td.n{width:130px}.muted{color:#8da0b8;font-size:13px}.ov{color:#ffd640;font-weig
 <script>
 const $=s=>document.querySelector(s);let KEY=sessionStorage.getItem('ak')||'';$('#key').value=KEY;
 async function api(m,p,b){const r=await fetch('/api/admin'+p,{method:m,headers:{'X-Admin-Key':KEY,'Content-Type':'application/json'},body:b?JSON.stringify(b):undefined});
- if(r.status===404)throw new Error('Админка выключена: нет переменной ADMIN_KEY');if(r.status===403)throw new Error('Неверный ключ');if(!r.ok)throw new Error((await r.json()).error.code);return r.json()}
+ if(r.status===404)throw new Error('Админка выключена: нет переменной ADMIN_KEY');if(r.status===403)throw new Error('Неверный ключ');if(!r.ok){const j=await r.json().catch(()=>({error:{code:'http_'+r.status,message:''}}));throw new Error(j.error.code+(j.error.message?': '+j.error.message:''))}return r.json()}
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 function flash(t){$('#msg').textContent=t;setTimeout(()=>$('#msg').textContent='',2500)}
-async function load(){try{
- const [st,bal,rep]=await Promise.all([api('GET','/stats'),api('GET','/balance'),api('GET','/chat-reports')]);
+async function section(name,fn){try{return await fn()}catch(e){return '<h2>'+name+'</h2><p style="color:#ff8a8a">Не загрузилось: '+esc(e.message)+'</p>'}}
+async function load(){
  const names={players_total:'Игроков всего',players_new_24h:'Новых за сутки',players_active_24h:'Активных за сутки',players_active_7d:'Активных за неделю',runs_finished_24h:'Забегов за сутки',coins_in_circulation:'Монет у игроков',orders_total:'Покупок за голоса',votes_total:'Голосов получено',chat_reports_24h:'Жалоб за сутки',online_now:'Сейчас онлайн',duels_running:'Дуэлей идёт',fps_avg_24h:'Средний FPS за сутки',fps_under_30_share_pct:'Забегов ниже 30 FPS, %',low_quality_share_pct:'Устройств с упрощённой графикой, %'};
- let h='<h2>Сейчас</h2><div class="cards">'+Object.entries(names).map(([k,v])=>`<div class="card">${v}<b>${st[k]}</b></div>`).join('')+'</div>';
- const groups={};bal.rows.forEach(r=>(groups[r.group]=groups[r.group]||[]).push(r));
- h+='<h2>Баланс (меняется сразу, без выкладки)</h2><p class="muted">Жёлтым отмечено то, что вы изменили. «Сбросить» возвращает значение из кода. Изменения доходят до игроков примерно за 30 секунд.</p>';
- for(const g of Object.keys(groups)){h+=`<h3>${esc(g)}</h3><table>`+groups[g].map(r=>`<tr><td>${esc(r.desc)}<div class="muted">${esc(r.key)}${r.lo!==undefined&&r.key.indexOf('.')<0?` · от ${r.lo} до ${r.hi}`:''} · по умолчанию ${r.default}</div></td><td class="n"><input data-k="${esc(r.key)}" value="${r.value}" size="9" class="${r.overridden?'ov':''}"></td><td><button data-s="${esc(r.key)}">Сохранить</button> <button class="g" data-r="${esc(r.key)}">Сбросить</button></td></tr>`).join('')+'</table>'}
- h+='<h2>Жалобы на сообщения чата</h2>'+(rep.reports.length?'<table><tr><th>Когда</th><th>Кто пожаловался</th><th>На кого</th><th>Причина</th><th>Сообщение</th></tr>'+rep.reports.map(r=>`<tr><td>${esc(r.at.slice(0,16).replace('T',' '))}</td><td>${r.reporter}</td><td>${r.reported}</td><td>${esc(r.reason)}</td><td>${esc(r.text)}</td></tr>`).join('')+'</table>':'<p class="muted">Жалоб нет.</p>');
- $('#app').innerHTML=h;}catch(e){$('#app').innerHTML='<p style="color:#ff8a8a">'+esc(e.message)+'</p>'}}
+ const parts=await Promise.all([
+  section('Сейчас',async()=>{const st=await api('GET','/stats');return '<h2>Сейчас</h2><div class="cards">'+Object.entries(names).map(([k,v])=>`<div class="card">${v}<b>${st[k]}</b></div>`).join('')+'</div>'}),
+  section('Баланс',async()=>{const bal=await api('GET','/balance');const groups={};bal.rows.forEach(r=>(groups[r.group]=groups[r.group]||[]).push(r));
+   let h='<h2>Баланс (меняется сразу, без выкладки)</h2><p class="muted">Жёлтым отмечено то, что вы изменили. «Сбросить» возвращает значение из кода. Изменения доходят до игроков примерно за 30 секунд.</p>';
+   for(const g of Object.keys(groups)){h+=`<h3>${esc(g)}</h3><table>`+groups[g].map(r=>`<tr><td>${esc(r.desc)}<div class="muted">${esc(r.key)}${r.key.indexOf('.')<0?` · от ${r.lo} до ${r.hi}`:''} · по умолчанию ${r.default}</div></td><td class="n"><input data-k="${esc(r.key)}" value="${r.value}" size="9" class="${r.overridden?'ov':''}"></td><td><button data-s="${esc(r.key)}">Сохранить</button> <button class="g" data-r="${esc(r.key)}">Сбросить</button></td></tr>`).join('')+'</table>'}
+   return h}),
+  section('Жалобы на сообщения чата',async()=>{const rep=await api('GET','/chat-reports');return '<h2>Жалобы на сообщения чата</h2>'+(rep.reports.length?'<table><tr><th>Когда</th><th>Кто пожаловался</th><th>На кого</th><th>Причина</th><th>Сообщение</th></tr>'+rep.reports.map(r=>`<tr><td>${esc(r.at.slice(0,16).replace('T',' '))}</td><td>${r.reporter}</td><td>${r.reported}</td><td>${esc(r.reason)}</td><td>${esc(r.text)}</td></tr>`).join('')+'</table>':'<p class="muted">Жалоб нет.</p>')})]);
+ $('#app').innerHTML=parts.join('')}
 document.addEventListener('click',async e=>{const s=e.target.dataset.s,r=e.target.dataset.r;if(!s&&!r)return;
  try{if(s){const v=Number(document.querySelector('input[data-k="'+s+'"]').value);await api('PUT','/balance',{key:s,value:v});flash('Сохранено')}else{await api('DELETE','/balance/'+r);flash('Сброшено')}await load()}catch(x){flash('Ошибка: '+x.message)}});
 $('#go').onclick=()=>{KEY=$('#key').value.trim();sessionStorage.setItem('ak',KEY);load()};if(KEY)load();
