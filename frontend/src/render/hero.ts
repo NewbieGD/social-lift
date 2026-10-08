@@ -3,8 +3,8 @@
 // No filters or shadowBlur: shading is done with gradients.
 
 import { bodyGradient, edge, fist3d, hand3d, limb3d, spec, tone, torch3d } from './shade3d';
-import { armColor, armScale, drawSeraphAura, drawSeraphWings, drawStyleArm, drawStyleBack, drawStyleFoot, drawStyleHead, drawStyleLeg, drawStyleTorch, drawStyleTorso, handColor, legColors as styleLegColors, skinFor, torsoColor } from './styleArt';
-import { fullSeraph, wornStyles, type StyleLoadout, type WornStyles } from './styles';
+import { armColor, armScale, drawLegionFx, drawSeraphAura, drawSeraphWings, drawStyleArm, drawStyleBack, drawStyleFoot, drawStyleHead, drawStyleLeg, drawStyleTorch, drawStyleTorso, handColor, legColors as styleLegColors, skinFor, torsoColor } from './styleArt';
+import { fullLegion, fullSeraph, wornStyles, type StyleLoadout, type WornStyles } from './styles';
 
 export type Face = 'normal' | 'grin' | 'scared' | 'squint';
 export type Gesture = 'none' | 'scratch' | 'pocket' | 'tie' | 'wave';
@@ -516,7 +516,7 @@ function drawHead(ctx: CanvasRenderingContext2D, rig: Rig, o: Outfit, tier: numb
   ctx.rotate(rig.headTilt);
   const face = rig.face;
 
-  const coversHair = !!w?.head && ['helmet', 'cowl', 'mask', 'brute', 'beanie', 'seraphHelm'].includes(w.head.kind);
+  const coversHair = !!w?.head && ['helmet', 'cowl', 'mask', 'brute', 'beanie', 'seraphHelm', 'legionHead'].includes(w.head.kind);
   // Back hair mass behind the head (a knitted cap leaves the hair at the back visible).
   if (!coversHair || w?.head?.kind === 'beanie') {
     ctx.fillStyle = HAIR;
@@ -990,7 +990,7 @@ function drawArm(ctx: CanvasRenderingContext2D, l: Limb3, o: Outfit, back: boole
     drawStyleArm(ctx, w.arms, l, back);
     return;
   }
-  if (w?.torso && ['hoodie', 'tunic', 'suit', 'wraps', 'web', 'seraphArmor'].includes(w.torso.kind)) {
+  if (w?.torso && ['hoodie', 'tunic', 'suit', 'wraps', 'web', 'seraphArmor', 'legionArmor'].includes(w.torso.kind)) {
     // Sleeves of the worn top, when the arms have no style of their own.
     const kk = back ? 0.14 : 0;
     const col = shade(torsoColor(w.torso), kk);
@@ -1051,13 +1051,24 @@ export function drawHeroBody(ctx: CanvasRenderingContext2D, pose: HeroPose, give
     drawSeraphAura(ctx, w.torso, t, -rig.torsoLen * 0.6);
     ctx.restore();
   }
+  // The chrome set: the red scanner of the machine.
+  if (w.torso && fullLegion(w)) {
+    ctx.save();
+    ctx.translate(rig.hip.x, rig.hip.y);
+    const ht = rig.points.headTop;
+    drawLegionFx(ctx, w.torso, t, -rig.torsoLen * 0.6, { x: ht.x + 5 - rig.hip.x, y: ht.y + 9 - rig.hip.y });
+    ctx.restore();
+  }
   if (w.torso?.kind === 'seraphArmor') {
     const air = pose.dead ? 0 : 1 - Math.exp(-pose.sinceLand * 14);
     const spread = pose.dead ? 0.15 : Math.max(0.2, Math.min(1, (0.28 + Math.max(0, pose.vy) / 700 + (pose.vy < 0 ? 0.22 : 0)) * (0.4 + 0.6 * air)));
     ctx.save();
     ctx.translate(rig.hip.x, rig.hip.y);
     ctx.rotate(rig.lean);
-    drawSeraphWings(ctx, w.torso, rig.torsoLen, 'side', spread, t);
+    // The wings come away from the body while he flies up and return as he falls back.
+    const vy = pose.vy;
+    const detach = pose.dead ? 0 : air * (vy >= 0 ? 0.5 + 0.5 * Math.min(1, vy / 380) : Math.max(0, 0.5 + vy / 700));
+    drawSeraphWings(ctx, w.torso, rig.torsoLen, 'side', spread, t, detach);
     ctx.restore();
   }
   if (w.torso && (w.torso.kind === 'tunic' || w.torso.kind === 'suit' || w.torso.kind === 'wraps')) {

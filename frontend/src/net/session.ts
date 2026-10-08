@@ -81,6 +81,12 @@ export interface ShopState {
   best_duel_streak?: number;
 }
 
+export interface BlockedPlayer {
+  id: number;
+  name: string | null;
+  photo: string | null;
+}
+
 /** What other players see about a player: how they look, records, collection. */
 export interface PublicProfile {
   id: number;
@@ -128,6 +134,8 @@ export interface Bootstrap {
   shop?: ShopState;
   /** Privacy choices of this player. */
   privacy?: { hide_vk_link: boolean };
+  /** Balance numbers the server currently uses (they can change without a new version of the game). */
+  tunables?: { duel_stake: number; points_per_coin: number };
   server_time: number;
   ads: Record<string, number | boolean>;
   crown?: CrownInfo;
@@ -172,7 +180,7 @@ export interface FinishResult {
   rank_week: number | null;
   prev_rank_all: number | null;
   prev_rank_week: number | null;
-  duel?: { status: 'pending' | 'done'; outcome?: Record<string, 'win' | 'loss' | 'draw'> } | null;
+  duel?: { status: 'pending' | 'done'; outcome?: Record<string, 'win' | 'loss' | 'draw'>; stake?: Record<string, number> } | null;
   /** Coins paid for this run, the new balance, and cosmetics this run opened. */
   coins?: number;
   coins_earned?: number;
@@ -340,7 +348,10 @@ export class Session {
   }
 
   /** Anonymous funnel event; failures are ignored. */
-  event(type: 'tutorial_start' | 'tutorial_end' | 'run_start' | 'run_end' | 'tier_reached' | 'ad_shown' | 'settings_changed', value?: number): void {
+  event(
+    type: 'tutorial_start' | 'tutorial_end' | 'run_start' | 'run_end' | 'tier_reached' | 'ad_shown' | 'settings_changed' | 'perf_fps' | 'perf_level' | 'device_mem' | 'device_cores',
+    value?: number,
+  ): void {
     if (this.mode !== 'online') return;
     api('POST', '/events', value === undefined ? { type } : { type, value }).catch(() => undefined);
   }
@@ -401,6 +412,31 @@ export class Session {
     if (shop) {
       if (typeof r.coins === 'number') shop.coins = r.coins;
       for (const id of r.new_items ?? []) if (!shop.owned.includes(id)) shop.owned.push(id);
+    }
+  }
+
+  /** Players whose chat messages this player hides (null when the server cannot be reached). */
+  async fetchBlocks(): Promise<BlockedPlayer[] | null> {
+    try {
+      return (await api<{ blocked: BlockedPlayer[] }>('GET', '/chat/blocks')).blocked;
+    } catch {
+      return null;
+    }
+  }
+
+  async blockPlayer(id: number): Promise<BlockedPlayer[] | null> {
+    try {
+      return (await api<{ blocked: BlockedPlayer[] }>('POST', '/chat/block', { user_id: id })).blocked;
+    } catch {
+      return null;
+    }
+  }
+
+  async unblockPlayer(id: number): Promise<BlockedPlayer[] | null> {
+    try {
+      return (await api<{ blocked: BlockedPlayer[] }>('DELETE', `/chat/block/${id}`)).blocked;
+    } catch {
+      return null;
     }
   }
 
