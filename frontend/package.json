@@ -7,17 +7,14 @@
     "dev": "vite --host",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview --host",
-    "test": "tsx tools/sim-tests.ts && tsx tools/slot-tests.ts && tsx tools/perf-tests.ts",
+    "test": "tsx tools/sim-tests.ts && tsx tools/slot-tests.ts",
     "bot": "tsx tools/bot.ts 60 0.25",
-    "docs": "tsx tools/gen-docs.ts",
-    "e2e": "node e2e/run.mjs"
+    "docs": "tsx tools/gen-docs.ts"
   },
   "devDependencies": {
     "typescript": "^5.6.3",
     "vite": "^5.4.10",
-    "tsx": "^4.19.0",
-    "esbuild": "^0.24.0",
-    "playwright": "^1.48.0"
+    "tsx": "^4.19.0"
   },
   "dependencies": {
     "@vkontakte/vk-bridge": "^2.14.1",

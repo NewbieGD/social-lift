@@ -3,8 +3,8 @@
 // Origin: between the feet on the floor; y grows downward.
 
 import type { Outfit } from './hero';
-import { armColor, armScale, drawLegionFx, drawSeraphAura, drawSeraphWings, drawStyleArm, drawStyleBack, drawStyleFoot, drawStyleHead, drawStyleLeg, drawStyleTorch, drawStyleTorso, handColor, legColors as styleLegColors, skinFor, torsoColor } from './styleArt';
-import { fullLegion, fullSeraph, wornStyles, type StyleLoadout, type WornStyles } from './styles';
+import { armColor, armScale, drawSeraphAura, drawSeraphWings, drawStyleArm, drawStyleBack, drawStyleFoot, drawStyleHead, drawStyleLeg, drawStyleTorch, drawStyleTorso, handColor, legColors as styleLegColors, skinFor, torsoColor } from './styleArt';
+import { fullSeraph, wornStyles, type StyleLoadout, type WornStyles } from './styles';
 import { bodyGradient, edge, fist3d, hand3d, limb3d, sphere, spec, tone, torch3d, type P } from './shade3d';
 
 const SKIN = '#EDB48A';
@@ -116,7 +116,7 @@ export function drawHeroFront(
     sleeve = forearm = armColor(w.arms);
   } else if (w.torso) {
     // A worn top brings its own sleeves (or leaves the arms bare for armor and bare chests).
-    sleeve = forearm = ['hoodie', 'tunic', 'suit', 'wraps', 'web', 'seraphArmor', 'legionArmor'].includes(w.torso.kind) ? torsoColor(w.torso) : SKIN;
+    sleeve = forearm = ['hoodie', 'tunic', 'suit', 'wraps', 'web', 'seraphArmor'].includes(w.torso.kind) ? torsoColor(w.torso) : SKIN;
   }
   const handSkin = handColor(w.arms, skin);
   const asc = armScale(w.arms);
@@ -136,16 +136,10 @@ export function drawHeroFront(
     drawSeraphAura(ctx, w.torso, t, -30);
     ctx.restore();
   }
-  if (w.torso && fullLegion(w)) {
-    ctx.save();
-    drawLegionFx(ctx, w.torso, t, -30);
-    ctx.restore();
-  }
   if (w.torso?.kind === 'seraphArmor') {
     ctx.save();
     ctx.translate(0, ty + 21);
-    // In the menu the wings drift a little away from the body and back.
-    drawSeraphWings(ctx, w.torso, 21, 'front', 0.5 + 0.1 * Math.sin(t * 2), t, 0.25 + 0.18 * Math.sin(t * 1.3));
+    drawSeraphWings(ctx, w.torso, 21, 'front', 0.5 + 0.1 * Math.sin(t * 2), t);
     ctx.restore();
   }
   // Capes and the shell hang behind the whole body.
@@ -421,7 +415,7 @@ export function drawHeroFront(
   ctx.save();
   ctx.translate(0, hy);
   ctx.rotate(Math.sin(t * 1.3) * 0.03);
-  const coversHair = !!w.head && ['helmet', 'cowl', 'mask', 'brute', 'beanie', 'seraphHelm', 'legionHead'].includes(w.head.kind);
+  const coversHair = !!w.head && ['helmet', 'cowl', 'mask', 'brute', 'beanie', 'seraphHelm'].includes(w.head.kind);
   if (!coversHair || w.head?.kind === 'beanie') sphere(ctx, 0, -2, 12.4, 11.6, HAIR);
   for (const s of [-1, 1]) {
     sphere(ctx, s * 11.2, 1.4, 2.5, 3.2, skinHead);

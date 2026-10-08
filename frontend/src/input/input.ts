@@ -188,8 +188,7 @@ export class InputController {
       this.zoneDir = clientX < rect.left + rect.width / 2 ? -1 : 1;
       return;
     }
-    // A scale of 0 (a field measured while the page was hidden) would send the hero to an edge.
-    const dxWorld = ((clientX - this.dragStartPx) / Math.max(0.05, this.scale)) * this.sensitivity;
+    const dxWorld = ((clientX - this.dragStartPx) / this.scale) * this.sensitivity;
     const W = gameConfig.world.width;
     const target = Math.max(0, Math.min(W, this.dragStartHeroX + dxWorld));
     this.dragTargetX = target;
@@ -212,11 +211,7 @@ export class InputController {
     if (e.pointerType === 'touch') return; // touch steers through touch events
     // Buttons on the field (pause, skip, floating shield) handle their own taps.
     if ((e.target as HTMLElement).closest('button')) return;
-    if (this.steerPointer !== null) {
-      // The mouse button was released outside the window or under an ad: the old drag is over.
-      if (e.buttons === 0 || e.pointerId !== this.steerPointer) this.steerPointer = null;
-      else return;
-    }
+    if (this.steerPointer !== null) return;
     this.steerPointer = e.pointerId;
     const el = e.currentTarget as HTMLElement;
     el.setPointerCapture?.(e.pointerId);
@@ -250,13 +245,7 @@ export class InputController {
     if ((e.target as HTMLElement).closest('button')) return;
     // Keep the webview from taking this touch for scrolling, swiping back or pull-to-refresh.
     if (e.cancelable) e.preventDefault();
-    // A touch that never ended (the page was covered by an ad, a call or a system gesture) must not block steering for good.
-    if (this.steerTouch !== null) {
-      const alive = Array.from(e.touches).some((t) => t.identifier === this.steerTouch);
-      if (alive) return;
-      this.steerTouch = null;
-      this.endSteer();
-    }
+    if (this.steerTouch !== null) return;
     this.steerTouch = t0.identifier;
     this.beginSteer(t0.clientX, e.currentTarget as HTMLElement);
   };

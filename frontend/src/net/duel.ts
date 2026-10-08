@@ -29,33 +29,19 @@ export interface ChatMsg {
   sys?: boolean;
 }
 
-/** A duel that is running now (for the list of duels to watch). */
-export interface SpecRow {
-  id: string;
-  a: { id: number; name: string | null; photo: string | null };
-  b: { id: number; name: string | null; photo: string | null };
-  elapsed: number;
-  watchers: number;
-}
-
 export type DuelMsg =
   | { t: 'chat_hist'; msgs: ChatMsg[]; users: ChatUser[]; wait: number }
   | { t: 'chat'; msg: ChatMsg }
   | { t: 'chat_users'; users: ChatUser[] }
   | { t: 'chat_user'; action: 'join'; user: ChatUser }
-  | { t: 'chat_err'; code: 'empty' | 'link' | 'words' | 'cooldown' | 'muted'; wait?: number }
-  | { t: 'chat_remove'; id: number }
-  | { t: 'report_ok' }
-  | { t: 'chat_warned'; removed: boolean; text: string }
-  | { t: 'report_err'; code: 'gone' | 'too_many' }
-  | { t: 'stake_short'; need: number; have: number; who: 'me' | 'them'; name?: string | null }
+  | { t: 'chat_err'; code: 'empty' | 'link' | 'words' | 'cooldown'; wait?: number }
   | { t: 'chat_cd'; wait: number }
   | { t: 'busy'; who: 'me' | 'them'; name?: string | null }
   | { t: 'online'; n: number }
   | { t: 'none'; n: number }
   | { t: 'waiting'; to: DuelPlayer; timeout: number }
   | { t: 'declined' }
-  | { t: 'invite'; from: DuelPlayer; timeout: number; stake?: number }
+  | { t: 'invite'; from: DuelPlayer; timeout: number }
   | { t: 'invite_cancel' }
   | {
       t: 'start';
@@ -64,18 +50,11 @@ export type DuelMsg =
       start_at: number;
       ticket: { run_id: string; seed: number; started_at: number; token: string };
       opponent: DuelPlayer;
-      stake?: number;
     }
   | { t: 'inputs'; upto: number; log: number[][] }
-  | { t: 'spec_list'; duels: SpecRow[] }
-  | { t: 'spec_start'; duel: string; seed: number; elapsed_ms: number; players: DuelPlayer[]; logs: Record<string, number[][]>; scores: Record<string, number | null> }
-  | { t: 'spec_inputs'; duel: string; uid: number; upto: number; log: number[][] }
-  | { t: 'spec_dead'; duel: string; uid: number; score: number }
-  | { t: 'spec_end'; duel: string; outcome: Record<string, 'win' | 'loss' | 'draw'> }
-  | { t: 'spec_err'; code: string }
   | { t: 'opp_dead'; score: number }
   | { t: 'opp_left' }
-  | { t: 'result'; duel: string; outcome: 'win' | 'loss' | 'draw'; coins?: number };
+  | { t: 'result'; duel: string; outcome: 'win' | 'loss' | 'draw' };
 
 export class DuelClient {
   online = 0;

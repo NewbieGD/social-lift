@@ -52,7 +52,7 @@ export class PetWalker {
       if (Math.abs(t - this.x) < 18 * u) t = this.x + (this.x > (minX + maxX) / 2 ? -1 : 1) * 30 * u;
       return Math.max(minX, Math.min(maxX, t));
     };
-    if (kind === 'spark' || kind === 'trophy') {
+    if (kind === 'spark') {
       // Always airborne: it drifts from place to place, bobbing in the air.
       this.mode = 'fly';
       this.timer -= dt;
@@ -166,7 +166,7 @@ export class PetFollower {
     this.hist.push({ t: now, x: hx, y: hy });
     while (this.hist.length > 90 && this.hist[0].t < now - 1.2) this.hist.shift();
 
-    if (kind === 'parrot' || kind === 'spark' || kind === 'trophy') {
+    if (kind === 'parrot' || kind === 'spark') {
       // Lazy circles around the hero, a little above him (the spark is quicker and a little higher).
       const quick = kind === 'spark' ? 1.7 : 1;
       const tx = hx + Math.cos(now * 1.35 * quick) * (kind === 'spark' ? 30 : 26);

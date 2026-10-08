@@ -45,26 +45,12 @@ function glowAt(g: Ctx, x: number, y: number, r: number, color: string, a: numbe
  * Draws one object. `tv` paints the screen of the TV (it receives the context already
  * clipped and translated to the screen rectangle).
  */
-export interface PropState {
-  /** The lamp (and other switches) are on; default true. */
-  on?: boolean;
-  /** Seconds since the player tapped the object (undefined = not touched lately). */
-  touch?: number;
-}
-
-/** A little hop of a ball after a tap: damped bounces. */
-function hop(touch: number | undefined, height: number): number {
-  if (touch === undefined || touch > 1.4) return 0;
-  return Math.abs(Math.sin(touch * 7.5)) * height * Math.exp(-touch * 2.6);
-}
-
-export function drawProp(g: Ctx, id: string, t: number, tv?: (g: Ctx, w: number, h: number) => void, state: PropState = {}): void {
+export function drawProp(g: Ctx, id: string, t: number, tv?: (g: Ctx, w: number, h: number) => void): void {
   switch (id) {
     case 'prop_football': {
       shadow(g, 5);
       g.save();
-      g.translate(0, -4.2 - hop(state.touch, 11));
-      if (state.touch !== undefined && state.touch < 1.4) g.rotate(state.touch * 6);
+      g.translate(0, -4.2);
       g.rotate(0.3);
       sphere(g, 0, 0, 4.2, 4.2, '#F6F6F4');
       g.fillStyle = '#23252B';
@@ -87,8 +73,7 @@ export function drawProp(g: Ctx, id: string, t: number, tv?: (g: Ctx, w: number,
     case 'prop_basketball': {
       shadow(g, 5.8);
       g.save();
-      g.translate(0, -4.9 - hop(state.touch, 14));
-      if (state.touch !== undefined && state.touch < 1.4) g.rotate(state.touch * 5);
+      g.translate(0, -4.9);
       sphere(g, 0, 0, 4.9, 4.9, '#E8782B');
       g.strokeStyle = '#4A2410';
       g.lineWidth = 0.5;
@@ -127,21 +112,9 @@ export function drawProp(g: Ctx, id: string, t: number, tv?: (g: Ctx, w: number,
       g.fillStyle = bodyGradient(g, '#F4C26A', -4.4, 4.4);
       g.fill();
       edge(g, '#F4C26A', 0.6);
-      const on = state.on !== false;
       const flick = 0.85 + 0.15 * Math.sin(t * 5);
-      if (on) glowAt(g, 0, -24, 22, 'rgba(255,200,110,1)', 0.6 * flick);
-      else {
-        // Switched off: the shade is just cloth.
-        g.fillStyle = 'rgba(30,24,16,0.45)';
-        g.beginPath();
-        g.moveTo(-4.4, -25);
-        g.lineTo(4.4, -25);
-        g.lineTo(2.6, -30);
-        g.lineTo(-2.6, -30);
-        g.closePath();
-        g.fill();
-      }
-      g.fillStyle = on ? 'rgba(255,240,200,0.95)' : 'rgba(120,110,95,0.9)';
+      glowAt(g, 0, -24, 22, 'rgba(255,200,110,1)', 0.6 * flick);
+      g.fillStyle = 'rgba(255,240,200,0.95)';
       g.beginPath();
       g.ellipse(0, -25, 2.4, 0.8, 0, 0, Math.PI * 2);
       g.fill();
@@ -212,18 +185,6 @@ export function drawProp(g: Ctx, id: string, t: number, tv?: (g: Ctx, w: number,
       g.fill();
       const sp = 0.5 + 0.5 * Math.sin(t * 2.4);
       glowAt(g, 3, -19, 5, 'rgba(255,245,200,1)', 0.35 * sp);
-      if (state.touch !== undefined && state.touch < 1.2) {
-        // A tap on the cup: a burst of sparkles.
-        const k = state.touch / 1.2;
-        g.save();
-        g.globalCompositeOperation = 'lighter';
-        for (let i = 0; i < 10; i++) {
-          const a = (i / 10) * Math.PI * 2;
-          const r = 4 + k * 14;
-          glowAt(g, Math.cos(a) * r, -14 + Math.sin(a) * r, 3, 'rgba(255,240,170,1)', 0.9 * (1 - k));
-        }
-        g.restore();
-      }
       break;
     }
     case 'prop_sword': {

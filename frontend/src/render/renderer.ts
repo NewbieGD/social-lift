@@ -4,13 +4,9 @@ import type { Platform, SimEvent } from '../core/types';
 import { ru } from '../i18n/ru';
 import { isBuffOnly, type Slot } from './slots';
 import { tone } from './shade3d';
-import { DeathFx } from './deathFx';
-import { comboLevel, FireTrail } from './fireTrail';
-import { perf } from '../core/perf';
-import type { DeathReason } from '../core/types';
 import { drawPet, type PetKind } from './pets';
 import { PetFollower } from './petMotion';
-import { STYLES, torchReach, type StyleLoadout } from './styles';
+import type { StyleLoadout } from './styles';
 import { drawHeroBody, drawItem, heroRig, ITEM_ANCHOR, ITEM_BY_TIER, outfitFromMask, type AttachPoint, type Face, type Gesture, type HeroPose, type Item, type Rig } from './hero';
 import { palette } from './palette';
 import { CROWN_LIFT_SIDE, crownBob, drawCrown } from './crown';
@@ -168,10 +164,6 @@ export class Renderer {
   private floaters: Floater[] = [];
   private bills: FlyBill[] = [];
   private particles = new Particles();
-  private deathFx = new DeathFx();
-  private fireTrail = new FireTrail();
-  private deathFxDone = false;
-  private lastDeathReason: DeathReason = 'fall';
   private skies = new Map<number, HTMLCanvasElement>();
   private tiles = new Map<number, HTMLCanvasElement>();
   private ambient: Ambient[] = [];
@@ -179,6 +171,7 @@ export class Renderer {
   private sceneTier = 0;
   private flashlightColor: [number, number, number] = [235, 235, 225];
   private auraPulse = 0;
+  private frameTimes: number[] = [];
   private lowQuality = false;
 
   reducedEffects = false;
@@ -272,7 +265,6 @@ export class Renderer {
     this.sceneTier = tier;
     this.cine = null;
     this.petFollower.reset();
-    this.fireTrail.reset();
     this.danger = 0;
     this.highlights.length = 0;
     this.sparkles.length = 0;
@@ -377,14 +369,10 @@ export class Renderer {
         } else {
           this.startItemFlight(e.item, e.x, e.y, sim);
         }
-      } else if (e.type === 'death') {
-        // The effect itself starts in draw(), once the hero's picture of this moment is known.
-        this.lastDeathReason = e.reason;
-        if (this.reducedEffects) {
-          for (let i = 0; i < 16; i++) {
-            const a = Math.random() * Math.PI * 2;
-            this.particles.spawn(1, sim.hero.x, sim.hero.y + 26, Math.cos(a) * 220, Math.sin(a) * 220 + 120, 1.2);
-          }
+      } else if (e.type === 'death' && !this.reducedEffects) {
+        for (let i = 0; i < 16; i++) {
+          const a = Math.random() * Math.PI * 2;
+          this.particles.spawn(1, sim.hero.x, sim.hero.y + 26, Math.cos(a) * 220, Math.sin(a) * 220 + 120, 1.2);
         }
       }
     }
@@ -559,17 +547,6 @@ export class Renderer {
     ctx.setTransform(s, 0, 0, s, 0, 0);
 
     this.particles.update(frameDt);
-    this.deathFx.update(frameDt);
-    this.fireTrail.update(frameDt);
-    if (!sim.dead && this.deathFxDone) {
-      // A new run: the effect and the screen jolt are over.
-      this.deathFx.reset();
-      this.deathFxDone = false;
-    }
-    {
-      const sh = this.deathFx.shake();
-      this.canvas.style.transform = sh.x || sh.y ? `translate(${sh.x.toFixed(1)}px, ${sh.y.toFixed(1)}px)` : '';
-    }
     this.auraPulse = Math.max(0, this.auraPulse - frameDt * 2.5);
 
     const cam = sim.prevCamY + (sim.camY - sim.prevCamY) * alpha + this.camShift;
@@ -652,10 +629,10 @@ export class Renderer {
     // The pet: a cat or a dog runs behind the hero, a parrot flies in front of him.
     if (this.pet) {
       if (!sim.dead) this.petFollower.update(sim.time, frameDt, this.pet, hx, hy, hero.facing > 0 ? 1 : -1);
-      if (this.pet !== 'parrot' && this.pet !== 'spark' && this.pet !== 'trophy') this.paintPet(toY);
+      if (this.pet !== 'parrot' && this.pet !== 'spark') this.paintPet(toY);
     }
     this.drawHero(sim, hx, toY(hy), frameDt, tier);
-    if (this.pet === 'parrot' || this.pet === 'spark' || this.pet === 'trophy') this.paintPet(toY);
+    if (this.pet === 'parrot' || this.pet === 'spark') this.paintPet(toY);
     this.drawItems(sim, hx, hy, toY, frameDt);
     this.drawHighlights(frameDt);
     this.drawSparkles(frameDt);
@@ -688,7 +665,6 @@ export class Renderer {
       ctx.fillStyle = `rgba(5,6,10,${0.45 * this.deathK})`;
       ctx.fillRect(0, 0, W, H);
     }
-    this.deathFx.draw(ctx, W, H);
   }
 
   /**
@@ -1286,45 +1262,19 @@ export class Renderer {
     this.heroXf = sim.dead ? null : { x, y: footY, sx, sy, facing: hero.facing, rig };
 
     // The beam starts at the flashlight lens and follows its angle.
-    // A longer held light (a blade, a torch, a fireball) starts the beam at its own tip.
-    const reach = torchReach(this.styles.torch ? STYLES[this.styles.torch] : undefined);
-    const tipX = x + (rig.torchTip.x + Math.cos(rig.torchAngle) * reach) * sx * hero.facing;
-    const tipY = footY + (rig.torchTip.y + Math.sin(rig.torchAngle) * reach) * sy;
+    const tipX = x + rig.torchTip.x * sx * hero.facing;
+    const tipY = footY + rig.torchTip.y * sy;
     const beamAngle = hero.facing > 0 ? rig.torchAngle : Math.PI - rig.torchAngle;
     if (!sim.dead) this.drawBeam(sim, tipX, tipY, beamAngle, rgb, outfit.newTorch, dt);
 
-    // The fiery trail of a combo (see fireTrail.ts): behind the hero, stronger with the multiplier.
-    const combo = sim.dead || this.reducedEffects || sim.tutorial || perf.effective >= 2 ? 0 : comboLevel(sim.multiplier);
-    this.fireTrail.emit(dt * (perf.effective >= 1 ? 0.5 : 1), x, footY - 16 * sy, hero.vx, hero.vy, combo);
-    this.fireTrail.draw(ctx, combo, x, footY - 28 * sy);
-    // The moment of death: the hero is replaced by his own shards (see deathFx.ts).
-    if (sim.dead && !this.reducedEffects && !this.deathFxDone) {
-      this.deathFxDone = true;
-      const k = this.scale * this.dpr;
-      const SW = 92;
-      const SH = 112;
-      const snap = document.createElement('canvas');
-      snap.width = Math.max(1, Math.ceil(SW * k));
-      snap.height = Math.max(1, Math.ceil(SH * k));
-      const sg = snap.getContext('2d');
-      if (sg) {
-        sg.setTransform(k, 0, 0, k, 0, 0);
-        sg.translate(SW / 2, SH - 10);
-        sg.scale(sx * hero.facing, sy);
-        drawHeroBody(sg, pose, rig);
-        this.deathFx.start(snap, k, SW, SH, x, footY - 30, this.lastDeathReason);
-      } else this.deathFx.start(null, k, SW, SH, x, footY - 30, this.lastDeathReason);
-    }
     const shielded = sim.light === 'red' && !sim.dead;
     if (shielded) this.drawShieldGlow(pose, rig, x, footY, sx * hero.facing, sy, sim.time, dt, 'halo');
-    if (!this.deathFx.hidesHero) {
-      ctx.save();
-      ctx.translate(x, footY);
-      if (sim.dead) ctx.rotate(hero.spin);
-      ctx.scale(sx * hero.facing, sy);
-      drawHeroBody(ctx, pose, rig);
-      ctx.restore();
-    }
+    ctx.save();
+    ctx.translate(x, footY);
+    if (sim.dead) ctx.rotate(hero.spin);
+    ctx.scale(sx * hero.facing, sy);
+    drawHeroBody(ctx, pose, rig);
+    ctx.restore();
     if (shielded) this.drawShieldGlow(pose, rig, x, footY, sx * hero.facing, sy, sim.time, dt, 'rim');
 
     // The weekly leader's crown floats above the head, above any cap or helmet.
@@ -1801,10 +1751,14 @@ export class Renderer {
     ctx.globalAlpha = 1;
   }
 
-  /** Adaptive quality: on a slow device particles are halved (the level is chosen by core/perf.ts). */
-  private trackQuality(_dt: number): void {
-    // The level comes from the shared monitor (core/perf.ts), which watches the real frame times.
-    const low = perf.effective >= 1;
+  /** Adaptive quality: if frames average over 20 ms for about 2 s, halve particles. */
+  private trackQuality(dt: number): void {
+    if (dt <= 0) return;
+    this.frameTimes.push(dt);
+    if (this.frameTimes.length < 120) return;
+    const avg = this.frameTimes.reduce((a, b) => a + b, 0) / this.frameTimes.length;
+    this.frameTimes.length = 0;
+    const low = avg > 0.02;
     if (low !== this.lowQuality) {
       this.lowQuality = low;
       this.particles.cap = low ? MAX_PARTICLES / 2 : MAX_PARTICLES;
