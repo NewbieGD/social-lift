@@ -74,6 +74,10 @@ class DecorIn(Strict):
         return v
 
 
+class BlockIn(Strict):
+    user_id: int
+
+
 class PrivacyIn(Strict):
     hide_vk_link: bool
 
@@ -91,5 +95,10 @@ class EventIn(Strict):
         "tier_reached",
         "ad_shown",
         "settings_changed",
+        # Device and speed reports (anonymous): they show how the game runs on weak phones.
+        "perf_fps",
+        "perf_level",
+        "device_mem",
+        "device_cores",
     ]
     value: int | None = Field(default=None, ge=0, le=10_000_000)

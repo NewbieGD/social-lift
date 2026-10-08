@@ -6,14 +6,17 @@ from typing import Literal
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Query, Request
 from fastapi.responses import JSONResponse
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .. import game_config as gc
 from ..config import settings
+from .. import tunables
 from ..core import aware, utcnow
 from ..db import get_session
+from ..models import ChatBlock, ChatReport, User
 from ..deps import ApiError, Caller, current_user, enforce_limit
-from ..schemas import BuyIn, ConsentIn, DecorIn, EventIn, LoadoutIn, PrivacyIn, RunFinishIn, SettingsIn
+from ..schemas import BlockIn, BuyIn, ConsentIn, DecorIn, EventIn, LoadoutIn, PrivacyIn, RunFinishIn, SettingsIn
 from ..services import crown, game, payments, public, shop
 from ..services.profiles import refresh_profiles
 
@@ -45,6 +48,7 @@ async def bootstrap(
     return {
         "shop": await shop.state(session, user),
         "privacy": {"hide_vk_link": bool(user.hide_vk_link)},
+        "tunables": {"duel_stake": tunables.get("duel_stake"), "points_per_coin": tunables.get("points_per_coin")},
         "crown": crown_info,
         "profile": game.profile_dict(user),
         "flags": {
@@ -164,6 +168,83 @@ async def vk_payments(request: Request, session: AsyncSession = Depends(get_sess
     if len(body) > 8192:
         return JSONResponse(payments._err(payments.BAD_REQUEST, "Too large"))
     return JSONResponse(await payments.handle(session, payments.parse_body(body)))
+
+
+MAX_BLOCKS = 200
+
+
+async def _block_list(session: AsyncSession, user_id: int) -> list[dict]:
+    rows = await session.execute(
+        select(User.id, User.display_name, User.photo_url, User.profile_deactivated)
+        .join(ChatBlock, ChatBlock.blocked_id == User.id)
+        .where(ChatBlock.user_id == user_id)
+        .order_by(ChatBlock.created_at.desc())
+    )
+    return [
+        {"id": int(uid), "name": name, "photo": None if gone else photo}
+        for uid, name, photo, gone in rows
+    ]
+
+
+def _live_blocks(user_id: int, blocked: set[int]) -> None:
+    """The player's open chat connection learns about the change at once."""
+    from .. import duel_ws
+
+    conn = duel_ws.conns.get(user_id)
+    if conn is not None:
+        conn.blocked = set(blocked)
+
+
+@router.get("/chat/blocks")
+async def chat_blocks(
+    caller: Caller = Depends(current_user),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    enforce_limit(f"u:{caller.user_id}:blocks", gc.LIMIT_DEFAULT)
+    await game.require_user(session, caller)
+    return {"blocked": await _block_list(session, caller.user_id)}
+
+
+@router.post("/chat/block")
+async def chat_block(
+    body: BlockIn,
+    caller: Caller = Depends(current_user),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    enforce_limit(f"u:{caller.user_id}:blocks", gc.LIMIT_DEFAULT)
+    await game.require_user(session, caller)
+    if body.user_id == caller.user_id:
+        raise ApiError(400, "invalid_request", "Cannot block yourself")
+    if await session.get(User, body.user_id) is None:
+        raise ApiError(404, "no_player", "Player not found")
+    ids = {
+        int(b) for (b,) in await session.execute(select(ChatBlock.blocked_id).where(ChatBlock.user_id == caller.user_id))
+    }
+    if body.user_id not in ids:
+        if len(ids) >= MAX_BLOCKS:
+            raise ApiError(400, "too_many_blocks", "Too many blocked players")
+        session.add(ChatBlock(user_id=caller.user_id, blocked_id=body.user_id, created_at=utcnow()))
+        await session.commit()
+        ids.add(body.user_id)
+    _live_blocks(caller.user_id, ids)
+    return {"blocked": await _block_list(session, caller.user_id)}
+
+
+@router.delete("/chat/block/{user_id}")
+async def chat_unblock(
+    user_id: int,
+    caller: Caller = Depends(current_user),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    enforce_limit(f"u:{caller.user_id}:blocks", gc.LIMIT_DEFAULT)
+    await game.require_user(session, caller)
+    await session.execute(delete(ChatBlock).where(ChatBlock.user_id == caller.user_id, ChatBlock.blocked_id == user_id))
+    await session.commit()
+    ids = {
+        int(b) for (b,) in await session.execute(select(ChatBlock.blocked_id).where(ChatBlock.user_id == caller.user_id))
+    }
+    _live_blocks(caller.user_id, ids)
+    return {"blocked": await _block_list(session, caller.user_id)}
 
 
 @router.get("/players/{user_id}")

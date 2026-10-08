@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 
@@ -12,6 +13,7 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from . import game_config as gc
+from .admin import page_router, reload_overrides, router as admin_router
 from .api.routes import router
 from .duel_ws import router as duel_router
 from .config import settings
@@ -32,8 +34,20 @@ async def lifespan(_: FastAPI):
         # Local convenience; production uses Alembic migrations.
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
+    # Balance numbers changed from the admin page (tunables.py): load now and refresh every 30 s,
+    # so that every server instance follows a change quickly.
+    async def refresh_loop() -> None:
+        while True:
+            try:
+                await reload_overrides()
+            except Exception as exc:  # noqa: BLE001 - the table may not exist before the migration
+                log.warning("balance overrides not loaded: %s", type(exc).__name__)
+            await asyncio.sleep(30)
+
+    task = asyncio.create_task(refresh_loop())
     log.info("started env=%s app_id=%s", settings.app_env, settings.vk_app_id)
     yield
+    task.cancel()
     await engine.dispose()
 
 
@@ -46,6 +60,8 @@ app = FastAPI(
 )
 app.include_router(router)
 app.include_router(duel_router)
+app.include_router(admin_router)
+app.include_router(page_router)
 
 
 def error(status: int, code: str, message: str, headers: dict | None = None) -> JSONResponse:

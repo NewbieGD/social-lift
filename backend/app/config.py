@@ -40,6 +40,8 @@ class Settings:
     run_signing_secret: str = field(default_factory=lambda: os.environ.get("RUN_SIGNING_SECRET", ""))
     allowed_origins: list[str] = field(default_factory=lambda: _list("ALLOWED_ORIGINS"))
     terms_version: int = field(default_factory=lambda: int(os.environ.get("TERMS_VERSION", "1") or 1))
+    # A key for the moderator's list of chat complaints (GET /api/admin/chat-reports). Empty = off.
+    admin_key: str = field(default_factory=lambda: os.environ.get("ADMIN_KEY", ""))
     # Unsigned requests with X-Dev-User are accepted only in development.
     dev_auth_bypass: bool = field(default_factory=lambda: _bool("DEV_AUTH_BYPASS"))
 
