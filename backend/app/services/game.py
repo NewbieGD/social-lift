@@ -286,8 +286,9 @@ async def finish_run(session: AsyncSession, caller: Caller, body: RunFinishIn) -
             wb.best_score = body.score
             wb.achieved_at = now
             is_week_record = True
-        # Coins: 1 point = 1 coin, paid once per counted run; a new record may open cosmetics.
-        coins_earned = await shop.credit_run(session, user, run.id, body.score)
+        # Coins for the points of a normal run, paid once per counted run. A duel pays no coins for
+        # its points: the only coins of a duel are the stake that the loser pays the winner.
+        coins_earned = 0 if run.duel_id else await shop.credit_run(session, user, run.id, body.score)
         new_items = await shop.sync_unlocks(session, user)
         new_items += await shop.claim_drop(session, user, run.drop_item, body.drop_found, body.score)
     await session.commit()

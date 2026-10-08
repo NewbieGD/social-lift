@@ -464,7 +464,7 @@ async def test_duel_loser_pays_the_stake_to_the_winner(client):
     # 151 lost: pays 500; 150 gets it.
     assert res["duel"]["status"] == "done" and res["duel"]["stake"]["151"] == -500 and res["duel"]["stake"]["150"] == 500
     async with SessionLocal() as s:
-        assert (await s.get(User, 150)).coins == 604 and (await s.get(User, 151)).coins == 201  # 4 and 1 coins for the points
+        assert (await s.get(User, 150)).coins == 600 and (await s.get(User, 151)).coins == 200  # points of a duel pay nothing
     # A poor loser pays only what he has. 150 now has 600 and loses against 151.
     async with SessionLocal() as s:
         (await s.get(User, 150)).coins = 300
@@ -472,13 +472,13 @@ async def test_duel_loser_pays_the_stake_to_the_winner(client):
     await _play_duel(client, 151, 150, 41, 40, 12)
     async with SessionLocal() as s:
         loser = await s.get(User, 150)
-        assert loser.coins == 0  # all he had (300 and the 1 coin for his points)
+        assert loser.coins == 0  # all he had (300)
     # A draw moves nothing.
     async with SessionLocal() as s:
         before = (await s.get(User, 151)).coins
     await _play_duel(client, 150, 151, 42, 30, 30)
     async with SessionLocal() as s:
-        assert (await s.get(User, 151)).coins == before + 3
+        assert (await s.get(User, 151)).coins == before  # a draw moves nothing, and the points pay nothing
 
 
 async def test_cannot_start_a_duel_without_the_stake(client):
@@ -559,6 +559,9 @@ async def test_chat_reports_hide_a_message_and_mute_the_author(client):
         await duel_ws.chat_report(reporters[0], 9001, "abuse")
         await duel_ws.chat_report(reporters[2], 9001, "spam")
         assert msg not in duel_ws.chat_history  # the third one hides it
+        # The author was warned once by the first complaint, and told that the message was removed.
+        warns = [m for m in author.ws.sent if m["t"] == "chat_warned"]
+        assert len(warns) == 2 and warns[0]["removed"] is False and warns[1]["removed"] is True
         assert any(m["t"] == "chat_remove" and m["id"] == 9001 for m in reporters[3].ws.sent)
     finally:
         for uid in range(180, 186):

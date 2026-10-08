@@ -92,6 +92,8 @@ REPORT_REASONS = ("abuse", "spam", "other")
 
 chat_history: deque[dict] = deque(maxlen=CHAT_HISTORY)
 chat_muted: dict[int, float] = {}  # user id -> time.monotonic() until which the player cannot write
+chat_warned: dict[int, float] = {}  # user id -> time.monotonic() of the last warning (one per 5 minutes)
+CHAT_WARN_EVERY_SEC = 300
 chat_seq = 0
 conns: dict[int, Conn] = {}
 duels: dict[str, Duel] = {}
@@ -242,7 +244,14 @@ async def chat_report(me: Conn, msg_id: object, reason: object) -> None:
             )
         )
     await send(me, {"t": "report_ok"})
-    if (same_msg or 0) >= tunables.get("chat_report_hide"):
+    hidden = (same_msg or 0) >= tunables.get("chat_report_hide")
+    # The author learns about the complaint (online players only; at most one warning per 5 minutes,
+    # but a removed message is always announced).
+    target = conns.get(author)
+    if target is not None and (hidden or time.monotonic() - chat_warned.get(author, -1e9) >= CHAT_WARN_EVERY_SEC):
+        chat_warned[author] = time.monotonic()
+        await send(target, {"t": "chat_warned", "removed": hidden, "text": str(msg["text"])[:80]})
+    if hidden:
         try:
             chat_history.remove(msg)
         except ValueError:
