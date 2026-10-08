@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from .. import game_config as gc
 from ..config import settings
+from .. import tunables
 from ..core import aware, utcnow
 from ..db import get_session
 from ..models import ChatBlock, ChatReport, User
@@ -47,6 +48,7 @@ async def bootstrap(
     return {
         "shop": await shop.state(session, user),
         "privacy": {"hide_vk_link": bool(user.hide_vk_link)},
+        "tunables": {"duel_stake": tunables.get("duel_stake"), "points_per_coin": tunables.get("points_per_coin")},
         "crown": crown_info,
         "profile": game.profile_dict(user),
         "flags": {
@@ -243,34 +245,6 @@ async def chat_unblock(
     }
     _live_blocks(caller.user_id, ids)
     return {"blocked": await _block_list(session, caller.user_id)}
-
-
-@router.get("/admin/chat-reports")
-async def admin_chat_reports(request: Request, session: AsyncSession = Depends(get_session)) -> JSONResponse:
-    """The latest complaints about chat messages, for the developer (needs ADMIN_KEY)."""
-    import hmac
-
-    key = settings.admin_key
-    if not key:
-        return JSONResponse({"error": {"code": "not_found", "message": "Not found"}}, status_code=404)
-    if not hmac.compare_digest(request.headers.get("x-admin-key", ""), key):
-        return JSONResponse({"error": {"code": "forbidden", "message": "Forbidden"}}, status_code=403)
-    rows = await session.execute(select(ChatReport).order_by(ChatReport.id.desc()).limit(200))
-    return JSONResponse(
-        {
-            "reports": [
-                {
-                    "id": r.id,
-                    "reporter": r.reporter_id,
-                    "reported": r.reported_id,
-                    "reason": r.reason,
-                    "text": r.text,
-                    "at": r.created_at.isoformat(),
-                }
-                for r in rows.scalars()
-            ]
-        }
-    )
 
 
 @router.get("/players/{user_id}")

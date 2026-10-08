@@ -821,3 +821,104 @@ async def test_vk_refund_takes_the_goods_back(client):
     assert back["response"]["order_id"] == 31
     shop = (await client.get("/api/shop", headers=headers(122))).json()
     assert "pet_spark" not in shop["owned"] and "pet" not in shop["decor"]
+
+
+# ---------------------------------------------------------------- balance without a deploy
+
+async def test_admin_balance_changes_apply_without_a_deploy(client, monkeypatch):
+    from types import SimpleNamespace
+
+    from app import admin, tunables
+    from app.services import game as game_service
+
+    await ready_player(client, 190)
+    # Without ADMIN_KEY the page and the API are off.
+    assert (await client.get("/admin")).status_code == 404
+    assert (await client.get("/api/admin/balance", headers={"x-admin-key": "k"})).status_code == 404
+    monkeypatch.setattr(admin, "settings", SimpleNamespace(admin_key="secret-key"))
+    try:
+        assert (await client.get("/api/admin/balance")).status_code == 403
+        assert (await client.get("/api/admin/balance", headers={"x-admin-key": "wrong"})).status_code == 403
+        good = {"x-admin-key": "secret-key"}
+        rows = (await client.get("/api/admin/balance", headers=good)).json()["rows"]
+        stake = next(r for r in rows if r["key"] == "duel_stake")
+        assert stake["default"] == 500 and stake["value"] == 500 and not stake["overridden"]
+        # Change the stake and a price: the game uses the new numbers at once.
+        assert (await client.put("/api/admin/balance", json={"key": "duel_stake", "value": 200}, headers=good)).status_code == 200
+        assert game_service.duel_stake() == 200
+        assert (await client.put("/api/admin/balance", json={"key": "price.prop_cup", "value": 55}, headers=good)).status_code == 200
+        cup = next(i for i in (await client.get("/api/shop", headers=headers(190))).json()["catalog"] if i["id"] == "prop_cup")
+        assert cup["price"] == 55
+        boot = (await client.post("/api/session/bootstrap", headers=headers(190))).json()
+        assert boot["tunables"]["duel_stake"] == 200
+        # Bad requests are refused.
+        assert (await client.put("/api/admin/balance", json={"key": "duel_stake", "value": -5}, headers=good)).json()["error"]["code"] == "out_of_range"
+        assert (await client.put("/api/admin/balance", json={"key": "nonsense", "value": 1}, headers=good)).json()["error"]["code"] == "unknown_key"
+        assert (await client.put("/api/admin/balance", json={"key": "price.bg_dusk", "value": 1}, headers=good)).json()["error"]["code"] == "unknown_key"  # not for sale
+        # Reset returns the default from the code.
+        await client.delete("/api/admin/balance/duel_stake", headers=good)
+        await client.delete("/api/admin/balance/price.prop_cup", headers=good)
+        assert game_service.duel_stake() == 500
+        stats = (await client.get("/api/admin/stats", headers=good)).json()
+        assert stats["players_total"] >= 1
+        assert (await client.get("/admin")).status_code == 200
+    finally:
+        tunables.set_overrides({})
+
+
+async def test_spectators_watch_a_duel(client):
+    import asyncio
+    import json
+    import time
+
+    from app import duel_ws
+
+    class FakeWS:
+        def __init__(self):
+            self.sent = []
+
+        async def send_text(self, text):
+            self.sent.append(json.loads(text))
+
+    a = duel_ws.Conn(ws=FakeWS(), user_id=210, name="A", photo=None, state="duel", duel="d" * 36)
+    b = duel_ws.Conn(ws=FakeWS(), user_id=211, name="B", photo=None, state="duel", duel="d" * 36)
+    w = duel_ws.Conn(ws=FakeWS(), user_id=212, name="W", photo=None)
+    for c in (a, b, w):
+        duel_ws.conns[c.user_id] = c
+    duel_id = "d" * 36
+    duel_ws.duels[duel_id] = duel_ws.Duel(
+        id=duel_id, a=210, b=211, seed=77, started_at=time.time() - 12,
+        players={210: {"id": 210, "name": "A", "photo": None, "look": None}, 211: {"id": 211, "name": "B", "photo": None, "look": None}},
+    )
+    try:
+        # Inputs sent before anybody watches are kept for latecomers.
+        await duel_ws.handle(a, {"t": "inputs", "upto": 30, "log": [[0, 8, 1], [20, 0, 0]]})
+        await duel_ws.handle(w, {"t": "spec_list"})
+        listing = w.ws.sent[-1]
+        assert listing["t"] == "spec_list" and listing["duels"][0]["id"] == duel_id and listing["duels"][0]["elapsed"] >= 11
+        # Players and unknown duels cannot be joined; a watcher can.
+        await duel_ws.handle(a, {"t": "spec_join", "duel": duel_id})
+        assert a.ws.sent[-1]["t"] == "spec_err"
+        await duel_ws.handle(w, {"t": "spec_join", "duel": "nope"})
+        assert w.ws.sent[-1]["t"] == "spec_err"
+        await duel_ws.handle(w, {"t": "spec_join", "duel": duel_id})
+        start = w.ws.sent[-1]
+        assert start["t"] == "spec_start" and start["seed"] == 77 and start["elapsed_ms"] >= 11_000
+        assert start["logs"]["210"] == [[0, 8, 1], [20, 0, 0]] and w.state == "watching"
+        # What the players do next reaches the watcher.
+        await duel_ws.handle(b, {"t": "inputs", "upto": 60, "log": [[40, -8, 0]]})
+        assert w.ws.sent[-1] == {"t": "spec_inputs", "duel": duel_id, "uid": 211, "upto": 60, "log": [[40, -8, 0]]}
+        await duel_ws.handle(b, {"t": "dead", "score": 55})
+        assert w.ws.sent[-1]["t"] == "spec_dead" and w.ws.sent[-1]["score"] == 55
+        # A watcher cannot start duels or be challenged while watching.
+        await duel_ws.find(w)
+        assert w.state == "watching"
+        # The end of the duel is announced and the watcher is free again.
+        duel_ws._on_result(duel_id, {210: "win", 211: "loss"})
+        await asyncio.sleep(0.05)
+        assert w.ws.sent[-1]["t"] == "spec_end" and w.ws.sent[-1]["outcome"] == {"210": "win", "211": "loss"}
+        assert w.state == "idle" and w.watching is None
+    finally:
+        for uid in (210, 211, 212):
+            duel_ws.conns.pop(uid, None)
+        duel_ws.duels.pop(duel_id, None)

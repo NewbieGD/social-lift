@@ -340,7 +340,13 @@ async def _cleanup_weeks(session: AsyncSession) -> None:
 duel_listeners: list = []
 
 # The loser of a duel pays this many coins to the winner; a duel needs this much on the account.
-DUEL_STAKE = 500
+DUEL_STAKE = 500  # the default; the live value is duel_stake() (tunables.py)
+
+
+def duel_stake() -> int:
+    from .. import tunables
+
+    return tunables.get("duel_stake")
 # Coins moved by the duels that just ended, for the listeners: {duel_id: {user_id: delta}}.
 duel_stakes: dict[str, dict[int, int]] = {}
 
@@ -394,7 +400,7 @@ async def resolve_duel(session: AsyncSession, duel_id: str) -> dict:
     losers = [uid for uid, res in outcome.items() if res == "loss"]
     stake_map: dict[int, int] = {}
     if len(winners) == 1 and len(losers) == 1 and winners[0] in users and losers[0] in users:
-        paid = await shop.transfer_stake(session, users[losers[0]], users[winners[0]], duel_id, DUEL_STAKE)
+        paid = await shop.transfer_stake(session, users[losers[0]], users[winners[0]], duel_id, duel_stake())
         if paid:
             stake_map = {winners[0]: paid, losers[0]: -paid}
     duel_stakes[duel_id] = stake_map

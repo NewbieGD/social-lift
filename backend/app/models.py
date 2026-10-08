@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from sqlalchemy import (
+    Float,
     JSON,
     BigInteger,
     Boolean,
@@ -214,3 +215,13 @@ class ChatReport(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
     __table_args__ = (UniqueConstraint("reporter_id", "reported_id", "msg_ts", name="uq_chat_report_once"),)
+
+
+class BalanceOverride(Base):
+    """A balance number changed by the owner from the admin page (see tunables.py)."""
+
+    __tablename__ = "balance_overrides"
+
+    key: Mapped[str] = mapped_column(String(80), primary_key=True)
+    value: Mapped[float] = mapped_column(Float)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))

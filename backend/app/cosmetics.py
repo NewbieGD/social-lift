@@ -14,6 +14,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from . import tunables
+
 SLOTS = ("head", "torso", "arms", "legs", "feet", "torch")
 
 
@@ -135,8 +137,7 @@ def products_public() -> list[dict]:
 
 
 # Run drops: chance that a run has a drop at all, and the least score a run needs to claim it.
-DROP_CHANCE = 0.35
-DROP_MIN_SCORE = 100
+# The drop chance and the score needed live in tunables.py (drop_chance, drop_min_score).
 
 
 def catalog_public() -> list[dict]:
@@ -146,9 +147,9 @@ def catalog_public() -> list[dict]:
             "id": i.id,
             "slot": i.slot,
             "set": i.set,
-            "record": i.record,
-            "duel_streak": i.duel_streak,
-            "price": i.price,
+            "record": record_of(i),
+            "duel_streak": streak_of(i),
+            "price": price_of(i),
             "drop": i.drop,
             "kind": i.kind,
             "product": i.product,
@@ -159,13 +160,26 @@ def catalog_public() -> list[dict]:
 
 def unlocked_by_record(best_score: int, owned: set[str]) -> list[str]:
     """Items that the player's best single run opens and that are not owned yet."""
-    return [i.id for i in ITEMS.values() if i.record is not None and best_score >= i.record and i.id not in owned]
+    return [i.id for i in ITEMS.values() if record_of(i) is not None and best_score >= record_of(i) and i.id not in owned]
+
+
+def price_of(i: Item) -> int | None:
+    """The price in coins, with the owner's override (see tunables.py)."""
+    return None if i.price is None else tunables.item_override("price", i.id, i.price)
+
+
+def record_of(i: Item) -> int | None:
+    return None if i.record is None else tunables.item_override("record", i.id, i.record)
+
+
+def streak_of(i: Item) -> int | None:
+    return None if i.duel_streak is None else tunables.item_override("streak", i.id, i.duel_streak)
 
 
 def unlocked_by_streak(best_streak: int, owned: set[str]) -> list[str]:
     """Items that a best duel win streak opens and that are not owned yet."""
     return [
-        i.id for i in ITEMS.values() if i.duel_streak is not None and best_streak >= i.duel_streak and i.id not in owned
+        i.id for i in ITEMS.values() if streak_of(i) is not None and best_streak >= streak_of(i) and i.id not in owned
     ]
 
 

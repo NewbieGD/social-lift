@@ -22,6 +22,7 @@ from dataclasses import dataclass, field
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from .config import settings
+from . import tunables
 from .core import utcnow
 from .db import SessionLocal
 from sqlalchemy import func, select
@@ -47,7 +48,7 @@ class Conn:
     user_id: int
     name: str | None
     photo: str | None
-    state: str = "idle"  # idle | run | searching | invited | duel
+    state: str = "idle"  # idle | run | searching | invited | duel | watching
     duel: str | None = None
     invite_from: int | None = None
     declined: dict[int, float] = field(default_factory=dict)
@@ -57,6 +58,8 @@ class Conn:
     # Others may be offered a link to this player's VK page.
     link: bool = True
     last_chat: float = -1e9
+    # The duel this player is watching (as a spectator), if any.
+    watching: str | None = None
     # Players whose chat messages this player does not want to see.
     blocked: set[int] = field(default_factory=set)
     report_times: list[float] = field(default_factory=list)
@@ -68,6 +71,18 @@ class Duel:
     a: int
     b: int
     done: set[int] = field(default_factory=set)
+    # For spectators: the level and when it started, who plays (with how they look), the inputs
+    # sent so far by each player, the final scores of those who are out, and who is watching.
+    seed: int = 0
+    started_at: float = 0.0  # time.time() when the countdown ends (seconds)
+    players: dict[int, dict] = field(default_factory=dict)
+    logs: dict[int, list] = field(default_factory=dict)
+    scores: dict[int, int] = field(default_factory=dict)
+    spectators: set[int] = field(default_factory=set)
+
+    @property
+    def log_size(self) -> int:
+        return sum(len(v) for v in self.logs.values())
 
 
 CHAT_REPORT_HIDE = 3  # distinct complaints that remove a message for everybody
@@ -125,7 +140,7 @@ async def chat_send_users() -> None:
 
 
 def chat_wait(c: Conn) -> int:
-    return max(0, int(CHAT_COOLDOWN_SEC - (time.monotonic() - c.last_chat) + 0.999))
+    return max(0, int(tunables.get("chat_cooldown_sec") - (time.monotonic() - c.last_chat) + 0.999))
 
 
 async def chat_join(me: Conn) -> None:
@@ -180,7 +195,7 @@ async def chat_say(me: Conn, raw: object) -> None:
     msg = {"id": chat_seq, "ts": int(time.time() * 1000), "user": chat_user(me), "text": text}
     chat_history.append(msg)
     await chat_broadcast({"t": "chat", "msg": msg})
-    await send(me, {"t": "chat_cd", "wait": CHAT_COOLDOWN_SEC})
+    await send(me, {"t": "chat_cd", "wait": tunables.get("chat_cooldown_sec")})
 
 
 async def chat_report(me: Conn, msg_id: object, reason: object) -> None:
@@ -227,17 +242,17 @@ async def chat_report(me: Conn, msg_id: object, reason: object) -> None:
             )
         )
     await send(me, {"t": "report_ok"})
-    if (same_msg or 0) >= CHAT_REPORT_HIDE:
+    if (same_msg or 0) >= tunables.get("chat_report_hide"):
         try:
             chat_history.remove(msg)
         except ValueError:
             pass
         await chat_broadcast({"t": "chat_remove", "id": msg_id})
-    if (day_reporters or 0) >= CHAT_REPORT_MUTE and chat_muted.get(author, 0) < time.monotonic():
-        chat_muted[author] = time.monotonic() + CHAT_MUTE_SEC
+    if (day_reporters or 0) >= tunables.get("chat_report_mute") and chat_muted.get(author, 0) < time.monotonic():
+        chat_muted[author] = time.monotonic() + tunables.get("chat_mute_sec")
         target = conns.get(author)
         if target is not None:
-            await send(target, {"t": "chat_err", "code": "muted", "wait": CHAT_MUTE_SEC})
+            await send(target, {"t": "chat_err", "code": "muted", "wait": tunables.get("chat_mute_sec")})
 
 
 async def challenge(me: Conn, target_id: object) -> None:
@@ -253,11 +268,11 @@ async def challenge(me: Conn, target_id: object) -> None:
         return
     # Both players need the stake on the account.
     coins = await _coins([me.user_id, target.user_id])
-    if coins.get(me.user_id, 0) < game.DUEL_STAKE:
-        await send(me, {"t": "stake_short", "need": game.DUEL_STAKE, "have": coins.get(me.user_id, 0), "who": "me"})
+    if coins.get(me.user_id, 0) < game.duel_stake():
+        await send(me, {"t": "stake_short", "need": game.duel_stake(), "have": coins.get(me.user_id, 0), "who": "me"})
         return
-    if coins.get(target.user_id, 0) < game.DUEL_STAKE:
-        await send(me, {"t": "stake_short", "need": game.DUEL_STAKE, "have": coins.get(target.user_id, 0), "who": "them", "name": target.name})
+    if coins.get(target.user_id, 0) < game.duel_stake():
+        await send(me, {"t": "stake_short", "need": game.duel_stake(), "have": coins.get(target.user_id, 0), "who": "them", "name": target.name})
         return
     await invite(me, target)
 
@@ -271,6 +286,18 @@ async def broadcast_online() -> None:
 def _on_result(duel_id: str, outcome: dict[int, str]) -> None:
     d = duels.pop(duel_id, None)
     stakes = game.duel_stakes.pop(duel_id, {})
+    if d is not None:
+        # The watchers learn how it ended and go back to idle.
+        for sid in list(d.spectators):
+            sc = conns.get(sid)
+            if sc is not None:
+                sc.watching = None
+                if sc.state == "watching":
+                    sc.state = "idle"
+                asyncio.get_running_loop().create_task(
+                    send(sc, {"t": "spec_end", "duel": duel_id, "outcome": {str(k): v for k, v in outcome.items()}})
+                )
+        d.spectators.clear()
     for uid, res in outcome.items():
         c = conns.get(uid)
         if c is not None:
@@ -354,6 +381,7 @@ async def duel_socket(ws: WebSocket) -> None:
     finally:
         if conns.get(me.user_id) is me:
             del conns[me.user_id]
+        spec_leave(me)
         await chat_leave(me)
         await leave_duel(me)
         await broadcast_online()
@@ -415,9 +443,84 @@ async def handle(me: Conn, msg: dict) -> None:
             upto = msg.get("upto")
             if isinstance(log_, list) and isinstance(upto, int) and len(log_) <= 2000:
                 await send(other, {"t": "inputs", "upto": upto, "log": log_})
+                # Kept for people who join as spectators later (bounded), and passed on to those watching.
+                if d.log_size < SPEC_LOG_MAX:
+                    d.logs.setdefault(me.user_id, []).extend(log_)
+                for sid in list(d.spectators):
+                    await send(conns.get(sid), {"t": "spec_inputs", "duel": d.id, "uid": me.user_id, "upto": upto, "log": log_})
         else:
             score = msg.get("score")
-            await send(other, {"t": "opp_dead", "score": score if isinstance(score, int) else 0})
+            score = score if isinstance(score, int) else 0
+            d.scores[me.user_id] = score
+            await send(other, {"t": "opp_dead", "score": score})
+            for sid in list(d.spectators):
+                await send(conns.get(sid), {"t": "spec_dead", "duel": d.id, "uid": me.user_id, "score": score})
+    elif t == "spec_list":
+        await spec_list(me)
+    elif t == "spec_join":
+        await spec_join(me, msg.get("duel"))
+    elif t == "spec_leave":
+        spec_leave(me)
+
+
+# Spectators ("watch a duel"): up to this many per duel, and the inputs kept for latecomers.
+SPEC_MAX_PER_DUEL = 30
+SPEC_LOG_MAX = 6000
+
+
+def _live_duels() -> list[Duel]:
+    return [d for d in duels.values() if d.players and d.a in conns and d.b in conns]
+
+
+async def spec_list(me: Conn) -> None:
+    """The duels that are running now, to pick one to watch."""
+    now = time.time()
+    rows = []
+    for d in _live_duels()[:20]:
+        a, b = d.players.get(d.a), d.players.get(d.b)
+        if not a or not b:
+            continue
+        rows.append(
+            {
+                "id": d.id,
+                "a": {k: a[k] for k in ("id", "name", "photo")},
+                "b": {k: b[k] for k in ("id", "name", "photo")},
+                "elapsed": max(0, int(now - d.started_at)),
+                "watchers": len(d.spectators),
+            }
+        )
+    await send(me, {"t": "spec_list", "duels": rows})
+
+
+async def spec_join(me: Conn, duel_id: object) -> None:
+    d = duels.get(duel_id) if isinstance(duel_id, str) else None
+    if d is None or me.state != "idle" or me.user_id in (d.a, d.b) or len(d.spectators) >= SPEC_MAX_PER_DUEL:
+        await send(me, {"t": "spec_err", "code": "unavailable"})
+        return
+    me.state = "watching"
+    me.watching = d.id
+    d.spectators.add(me.user_id)
+    await send(
+        me,
+        {
+            "t": "spec_start",
+            "duel": d.id,
+            "seed": d.seed,
+            "elapsed_ms": int((time.time() - d.started_at) * 1000),
+            "players": [d.players[d.a], d.players[d.b]],
+            "logs": {str(uid): d.logs.get(uid, []) for uid in (d.a, d.b)},
+            "scores": {str(uid): d.scores.get(uid) for uid in (d.a, d.b)},
+        },
+    )
+
+
+def spec_leave(me: Conn) -> None:
+    d = duels.get(me.watching) if me.watching else None
+    if d is not None:
+        d.spectators.discard(me.user_id)
+    me.watching = None
+    if me.state == "watching":
+        me.state = "idle"
 
 
 async def _coins(user_ids: list[int]) -> dict[int, int]:
@@ -444,11 +547,11 @@ async def find(me: Conn) -> None:
         and me.user_id not in c.blocked
     ]
     coins = await _coins([me.user_id, *[c.user_id for c in pool]])
-    if coins.get(me.user_id, 0) < game.DUEL_STAKE:
-        await send(me, {"t": "stake_short", "need": game.DUEL_STAKE, "have": coins.get(me.user_id, 0), "who": "me"})
+    if coins.get(me.user_id, 0) < game.duel_stake():
+        await send(me, {"t": "stake_short", "need": game.duel_stake(), "have": coins.get(me.user_id, 0), "who": "me"})
         return
     # Only players who can pay the stake are offered.
-    pool = [c for c in pool if coins.get(c.user_id, 0) >= game.DUEL_STAKE]
+    pool = [c for c in pool if coins.get(c.user_id, 0) >= game.duel_stake()]
     if not pool:
         await send(me, {"t": "none", "n": len(conns)})
         return
@@ -460,8 +563,8 @@ async def invite(me: Conn, target: Conn) -> None:
     me.state = "searching"
     target.state = "invited"
     invites[target.user_id] = (me.user_id, now)
-    await send(target, {"t": "invite", "from": public(me), "timeout": INVITE_TIMEOUT_SEC, "stake": game.DUEL_STAKE})
-    await send(me, {"t": "waiting", "to": public(target), "timeout": INVITE_TIMEOUT_SEC})
+    await send(target, {"t": "invite", "from": public(me), "timeout": tunables.get("invite_timeout_sec"), "stake": game.duel_stake()})
+    await send(me, {"t": "waiting", "to": public(target), "timeout": tunables.get("invite_timeout_sec")})
     asyncio.get_event_loop().create_task(_expire_invite(target.user_id, me.user_id))
     # Also tell the challenged player in VK, in case the game is in the background.
     asyncio.get_event_loop().create_task(
@@ -470,7 +573,7 @@ async def invite(me: Conn, target: Conn) -> None:
 
 
 async def _expire_invite(target_id: int, from_id: int) -> None:
-    await asyncio.sleep(INVITE_TIMEOUT_SEC)
+    await asyncio.sleep(tunables.get("invite_timeout_sec"))
     inv = invites.get(target_id)
     if inv and inv[0] == from_id:
         invites.pop(target_id, None)
@@ -504,12 +607,12 @@ async def accept(me: Conn) -> None:
         return
     # The stake is checked again: coins may have been spent while the invitation was waiting.
     coins = await _coins([me.user_id, other.user_id])
-    short = [c for c in (me, other) if coins.get(c.user_id, 0) < game.DUEL_STAKE]
+    short = [c for c in (me, other) if coins.get(c.user_id, 0) < game.duel_stake()]
     if short:
         for c in (me, other):
             c.state = "idle"
         for c in short:
-            await send(c, {"t": "stake_short", "need": game.DUEL_STAKE, "have": coins.get(c.user_id, 0), "who": "me"})
+            await send(c, {"t": "stake_short", "need": game.duel_stake(), "have": coins.get(c.user_id, 0), "who": "me"})
         for c in (me, other):
             if c not in short:
                 await send(c, {"t": "invite_cancel" if c is me else "declined"})
@@ -524,8 +627,18 @@ async def accept(me: Conn) -> None:
         ta = await game.start_run(session, ua, seed=seed, duel_id=duel_id)
         tb = await game.start_run(session, ub, seed=seed, duel_id=duel_id)
         looks = {ua.id: await _look(session, ua), ub.id: await _look(session, ub)}
-    duels[duel_id] = Duel(id=duel_id, a=other.user_id, b=me.user_id)
     start_at = int(time.time() * 1000) + START_DELAY_MS
+    duels[duel_id] = Duel(
+        id=duel_id,
+        a=other.user_id,
+        b=me.user_id,
+        seed=seed,
+        started_at=start_at / 1000,
+        players={
+            other.user_id: {**public(other), "look": looks.get(other.user_id)},
+            me.user_id: {**public(me), "look": looks.get(me.user_id)},
+        },
+    )
     for c, ticket, opp in ((other, ta, me), (me, tb, other)):
         c.state = "duel"
         c.duel = duel_id
@@ -538,7 +651,7 @@ async def accept(me: Conn) -> None:
                 "start_at": start_at,
                 "ticket": ticket,
                 "opponent": {**public(opp), "look": looks.get(opp.user_id)},
-                "stake": game.DUEL_STAKE,
+                "stake": game.duel_stake(),
             },
         )
 

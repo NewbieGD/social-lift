@@ -7,7 +7,7 @@ import random
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .. import cosmetics
+from .. import cosmetics, tunables
 from ..core import utcnow
 from ..deps import ApiError
 from ..models import CoinTx, OwnedCosmetic, User
@@ -48,25 +48,25 @@ async def roll_drop(session: AsyncSession, user: User) -> str | None:
     The server rolls, so a player cannot claim a part the server did not offer for this run.
     """
     options = cosmetics.droppable(await owned_ids(session, user.id))
-    if not options or random.random() >= cosmetics.DROP_CHANCE:
+    if not options or random.random() >= tunables.get("drop_chance"):
         return None
     return random.choice(options)
 
 
 async def claim_drop(session: AsyncSession, user: User, drop_item: str | None, found: bool, score: int) -> list[str]:
     """Grants the rolled drop when the finished run reports it was picked up (and scored enough)."""
-    if not found or not drop_item or score < cosmetics.DROP_MIN_SCORE:
+    if not found or not drop_item or score < tunables.get("drop_min_score"):
         return []
     return await grant(session, user, [drop_item], "drop")
 
 
 # 10 points of a counted run = 1 coin (rounded down for each run): coins are meant to come slowly.
-POINTS_PER_COIN = 10
+POINTS_PER_COIN = 10  # the default; the live value is tunables.get("points_per_coin")
 
 
 async def credit_run(session: AsyncSession, user: User, run_id: str, score: int) -> int:
     """Pays coins for a counted run. The journal row is unique per run, so it pays once."""
-    amount = max(0, score) // POINTS_PER_COIN
+    amount = max(0, score) // tunables.get("points_per_coin")
     if amount <= 0:
         return 0
     user.coins = (user.coins or 0) + amount
@@ -164,15 +164,16 @@ async def buy(session: AsyncSession, user: User, item_id: str) -> dict:
     item = cosmetics.ITEMS.get(item_id)
     if item is None:
         raise ApiError(404, "unknown_item", "No such item")
-    if item.price is None:
+    price = cosmetics.price_of(item)
+    if price is None:
         raise ApiError(400, "not_for_sale", "This item is not for sale")
     if item_id in await owned_ids(session, user.id):
         raise ApiError(409, "already_owned", "You already have this item")
-    if (user.coins or 0) < item.price:
+    if (user.coins or 0) < price:
         raise ApiError(402, "not_enough_coins", "Not enough coins")
-    user.coins -= item.price
+    user.coins -= price
     session.add(
-        CoinTx(user_id=user.id, delta=-item.price, reason="buy", ref=item_id, balance_after=user.coins, created_at=utcnow())
+        CoinTx(user_id=user.id, delta=-price, reason="buy", ref=item_id, balance_after=user.coins, created_at=utcnow())
     )
     session.add(OwnedCosmetic(user_id=user.id, item_id=item_id, source="buy", acquired_at=utcnow()))
     await session.commit()
