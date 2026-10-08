@@ -6,7 +6,7 @@ one item per slot. Ways to get an item (`unlock`):
   {"record": N}   - the best score of a single run reached N (granted automatically)
   {"drop": True}  - found in a run: the server rolls a drop for the run at its start and grants it
                     when the finished run reports that it was picked up
-  {"duel_streak": N} - N duel wins in a row (best streak, granted automatically)
+  {"duel_streak": N} - N duel wins in a row against different players (best streak, granted automatically)
   price           - bought for coins (None = not for sale yet)
 """
 
@@ -68,10 +68,18 @@ ITEMS: dict[str, Item] = {
         *_set("ninja", FULL, duel_streak=(2, 4, 7, 10)),
         *_set("acrobat", FULL, drop=True),
         *_set("brute", FULL, record=(2600, 3000, 3500, 4000)),
+        # Reward for 10 duel wins in a row against different players: a chrome combat set (5 parts).
+        *_set("legion", ("head", "torso", "arms", "legs", "torch"), duel_streak=10),
+        # Flashlights: each one replaces the flashlight in the hand. Some are bought, some are found in runs.
+        *_set("phone", ("torch",), price=300),
+        *_set("wood", ("torch",), drop=True),
+        *_set("saber", ("torch",), price=900),
+        *_set("fireball", ("torch",), drop=True),
+        *_set("jar", ("torch",), price=600),
     )
 }
 
-# Main-screen decorations (and pets). For these items `slot` is the kind. The PRICES ARE PLACEHOLDERS (coins):
+# Main-screen decorations (and pets). For these items `slot` is the kind. The PRICES ARE PLACEHOLDERS (coins; 10 points of a run = 1 coin):
 # change them here. The default background (the brick alley) is free and is not an item.
 DECOR: tuple[Item, ...] = (
     Item("bg_dusk", "bg", kind="bg", record=100),
@@ -103,6 +111,8 @@ ITEMS.update({i.id: i for i in DECOR})
 PREMIUM_SET = ("head", "torso", "arms", "legs", "torch")
 ITEMS.update({i.id: i for i in _set("seraph", PREMIUM_SET, product="seraph_set")})
 ITEMS["pet_spark"] = Item("pet_spark", "pet", kind="pet", product="pet_spark")
+# A winged trophy that floats beside the player: the reward for 10 duel wins in a row.
+ITEMS["pet_trophy"] = Item("pet_trophy", "pet", kind="pet", duel_streak=10)
 
 
 @dataclass(frozen=True)

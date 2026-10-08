@@ -27,7 +27,7 @@ from ..core import (
     week_reset_at,
 )
 from ..deps import ApiError, Caller
-from ..models import CoinTx, Event, OwnedCosmetic, Run, User, VkOrder, WeekBest
+from ..models import ChatBlock, ChatReport, CoinTx, Event, OwnedCosmetic, Run, User, VkOrder, WeekBest
 from ..schemas import RunFinishIn
 from . import crown, shop
 
@@ -339,6 +339,11 @@ async def _cleanup_weeks(session: AsyncSession) -> None:
 # Called with the outcome when a duel is decided: (duel_id, {user_id: "win"|"loss"|"draw"}).
 duel_listeners: list = []
 
+# The loser of a duel pays this many coins to the winner; a duel needs this much on the account.
+DUEL_STAKE = 500
+# Coins moved by the duels that just ended, for the listeners: {duel_id: {user_id: delta}}.
+duel_stakes: dict[str, dict[int, int]] = {}
+
 
 async def resolve_duel(session: AsyncSession, duel_id: str) -> dict:
     """Decides a duel once both runs are over (finished, rejected or abandoned).
@@ -352,32 +357,54 @@ async def resolve_duel(session: AsyncSession, duel_id: str) -> dict:
         await session.commit()
         return {"status": "pending"}
     if any(r.flags == "duel_done" or (r.flags or "").startswith("duel_done") for r in runs):
+        stakes = await shop.duel_stakes(session, duel_id)
         await session.commit()
-        return {"status": "done", "outcome": _outcomes(runs)}
+        return {"status": "done", "outcome": _outcomes(runs), "stake": {str(k): v for k, v in stakes.items()}}
 
     outcome = _outcomes(runs)
     now = utcnow()
+    users: dict[int, User] = {}
+    for r in runs:
+        u = await session.get(User, r.user_id, with_for_update=True)
+        if u is not None:
+            users[r.user_id] = u
     for r in runs:
         result_ = outcome.get(r.user_id)
-        user = await session.get(User, r.user_id, with_for_update=True)
+        user = users.get(r.user_id)
+        opp_id = next((x.user_id for x in runs if x is not r), 0)
         if user is not None and result_ == "win":
             user.duel_wins = (user.duel_wins or 0) + 1
             user.duel_wins_at = now
-            # Wins in a row: the best streak opens cosmetics. A loss breaks the streak, a draw keeps it.
-            user.duel_streak = (user.duel_streak or 0) + 1
-            user.best_duel_streak = max(user.best_duel_streak or 0, user.duel_streak)
-            await shop.sync_unlocks(session, user)
+            # Wins in a row against DIFFERENT players: a win over someone already beaten in this
+            # streak still counts as a win, but does not extend the streak. A loss breaks it, a draw keeps it.
+            beaten = list(user.duel_streak_opps or [])
+            if opp_id not in beaten:
+                beaten.append(opp_id)
+                user.duel_streak_opps = beaten[-60:]
+                user.duel_streak = (user.duel_streak or 0) + 1
+                user.best_duel_streak = max(user.best_duel_streak or 0, user.duel_streak)
+                await shop.sync_unlocks(session, user)
         elif user is not None and result_ == "loss":
             user.duel_streak = 0
+            user.duel_streak_opps = []
         # Mark both runs so the duel is never counted twice (keeps the review flag readable).
         r.flags = "duel_done" if not r.flags or r.flags == "review" else f"duel_done:{r.flags}"[:64]
+    # The stake: the loser pays the winner (nothing on a draw).
+    winners = [uid for uid, res in outcome.items() if res == "win"]
+    losers = [uid for uid, res in outcome.items() if res == "loss"]
+    stake_map: dict[int, int] = {}
+    if len(winners) == 1 and len(losers) == 1 and winners[0] in users and losers[0] in users:
+        paid = await shop.transfer_stake(session, users[losers[0]], users[winners[0]], duel_id, DUEL_STAKE)
+        if paid:
+            stake_map = {winners[0]: paid, losers[0]: -paid}
+    duel_stakes[duel_id] = stake_map
     await session.commit()
     for fn in duel_listeners:
         try:
             fn(duel_id, outcome)
         except Exception:  # noqa: BLE001 - notifications must never break a finish
             pass
-    return {"status": "done", "outcome": outcome}
+    return {"status": "done", "outcome": outcome, "stake": {str(k): v for k, v in stake_map.items()}}
 
 
 def _outcomes(runs: list[Run]) -> dict[int, str]:
@@ -560,6 +587,9 @@ async def _next_above_week(session: AsyncSession, wid: str, score: int, at: date
 async def delete_player(session: AsyncSession, caller: Caller) -> None:
     # Explicit deletes so SQLite (tests) and PostgreSQL behave the same.
     await session.execute(delete(VkOrder).where(VkOrder.user_id == caller.user_id))
+    # Chat: complaints by and about the player, and blocks of the player by others.
+    await session.execute(delete(ChatReport).where(or_(ChatReport.reporter_id == caller.user_id, ChatReport.reported_id == caller.user_id)))
+    await session.execute(delete(ChatBlock).where(ChatBlock.blocked_id == caller.user_id))
     await session.execute(delete(CoinTx).where(CoinTx.user_id == caller.user_id))
     await session.execute(delete(OwnedCosmetic).where(OwnedCosmetic.user_id == caller.user_id))
     await session.execute(delete(Run).where(Run.user_id == caller.user_id))

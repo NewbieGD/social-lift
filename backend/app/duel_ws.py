@@ -15,14 +15,18 @@ import random
 import secrets
 import time
 import uuid
+from datetime import timedelta
 from collections import deque
 from dataclasses import dataclass, field
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from .config import settings
+from .core import utcnow
 from .db import SessionLocal
-from .models import User
+from sqlalchemy import func, select
+
+from .models import ChatBlock, ChatReport, User
 from . import chat_filter, cosmetics
 from .services import game, notify, shop
 from .vk_sign import verify_launch_params
@@ -53,6 +57,9 @@ class Conn:
     # Others may be offered a link to this player's VK page.
     link: bool = True
     last_chat: float = -1e9
+    # Players whose chat messages this player does not want to see.
+    blocked: set[int] = field(default_factory=set)
+    report_times: list[float] = field(default_factory=list)
 
 
 @dataclass
@@ -63,7 +70,13 @@ class Duel:
     done: set[int] = field(default_factory=set)
 
 
+CHAT_REPORT_HIDE = 3  # distinct complaints that remove a message for everybody
+CHAT_REPORT_MUTE = 5  # distinct players who complained within a day: a mute for an hour
+CHAT_MUTE_SEC = 3600
+REPORT_REASONS = ("abuse", "spam", "other")
+
 chat_history: deque[dict] = deque(maxlen=CHAT_HISTORY)
+chat_muted: dict[int, float] = {}  # user id -> time.monotonic() until which the player cannot write
 chat_seq = 0
 conns: dict[int, Conn] = {}
 duels: dict[str, Duel] = {}
@@ -97,12 +110,18 @@ def chat_members() -> list[Conn]:
 
 
 async def chat_broadcast(msg: dict) -> None:
+    sender = (msg.get("msg") or {}).get("user", {}).get("id") if msg.get("t") == "chat" else None
     for c in chat_members():
+        # A player who blocked the sender never receives the message.
+        if sender is not None and sender in c.blocked:
+            continue
         await send(c, msg)
 
 
 async def chat_send_users() -> None:
-    await chat_broadcast({"t": "chat_users", "users": [chat_user(c) for c in chat_members()]})
+    for c in chat_members():
+        users = [chat_user(m) for m in chat_members() if m.user_id not in c.blocked]
+        await send(c, {"t": "chat_users", "users": users})
 
 
 def chat_wait(c: Conn) -> int:
@@ -118,11 +137,16 @@ async def chat_join(me: Conn) -> None:
         me.in_chat = True
     await send(
         me,
-        {"t": "chat_hist", "msgs": list(chat_history), "users": [chat_user(c) for c in chat_members()], "wait": chat_wait(me)},
+        {
+            "t": "chat_hist",
+            "msgs": [m for m in chat_history if m["user"]["id"] not in me.blocked],
+            "users": [chat_user(c) for c in chat_members() if c.user_id not in me.blocked],
+            "wait": chat_wait(me),
+        },
     )
     if fresh:
         for c in chat_members():
-            if c is not me:
+            if c is not me and me.user_id not in c.blocked:
                 await send(c, {"t": "chat_user", "action": "join", "user": chat_user(me)})
         await chat_send_users()
 
@@ -143,6 +167,10 @@ async def chat_say(me: Conn, raw: object) -> None:
     if problem:
         await send(me, {"t": "chat_err", "code": problem})
         return
+    muted = chat_muted.get(me.user_id, 0) - time.monotonic()
+    if muted > 0:
+        await send(me, {"t": "chat_err", "code": "muted", "wait": int(muted) + 1})
+        return
     wait = chat_wait(me)
     if wait > 0:
         await send(me, {"t": "chat_err", "code": "cooldown", "wait": wait})
@@ -155,6 +183,63 @@ async def chat_say(me: Conn, raw: object) -> None:
     await send(me, {"t": "chat_cd", "wait": CHAT_COOLDOWN_SEC})
 
 
+async def chat_report(me: Conn, msg_id: object, reason: object) -> None:
+    """A complaint about a chat message. Enough complaints hide it and mute the author for a while."""
+    if not isinstance(msg_id, int) or reason not in REPORT_REASONS:
+        return
+    now = time.monotonic()
+    me.report_times[:] = [t for t in me.report_times if now - t < 60]
+    if len(me.report_times) >= 6:
+        await send(me, {"t": "report_err", "code": "too_many"})
+        return
+    msg = next((m for m in chat_history if m["id"] == msg_id), None)
+    if msg is None or msg["user"]["id"] == me.user_id:
+        await send(me, {"t": "report_err", "code": "gone"})
+        return
+    me.report_times.append(now)
+    author = msg["user"]["id"]
+    async with SessionLocal() as session:
+        exists = await session.scalar(
+            select(func.count())
+            .select_from(ChatReport)
+            .where(ChatReport.reporter_id == me.user_id, ChatReport.reported_id == author, ChatReport.msg_ts == msg["ts"])
+        )
+        if not exists:
+            session.add(
+                ChatReport(
+                    reporter_id=me.user_id,
+                    reported_id=author,
+                    msg_ts=msg["ts"],
+                    text=str(msg["text"])[:240],
+                    reason=reason,
+                    created_at=utcnow(),
+                )
+            )
+            await session.commit()
+        same_msg = await session.scalar(
+            select(func.count())
+            .select_from(ChatReport)
+            .where(ChatReport.reported_id == author, ChatReport.msg_ts == msg["ts"])
+        )
+        day_reporters = await session.scalar(
+            select(func.count(func.distinct(ChatReport.reporter_id))).where(
+                ChatReport.reported_id == author, ChatReport.created_at > utcnow() - timedelta(days=1)
+            )
+        )
+    await send(me, {"t": "report_ok"})
+    if (same_msg or 0) >= CHAT_REPORT_HIDE:
+        try:
+            chat_history.remove(msg)
+        except ValueError:
+            pass
+        await chat_broadcast({"t": "chat_remove", "id": msg_id})
+    if (day_reporters or 0) >= CHAT_REPORT_MUTE and chat_muted.get(author, 0) < time.monotonic():
+        chat_muted[author] = time.monotonic() + CHAT_MUTE_SEC
+        target = conns.get(author)
+        if target is not None:
+            await send(target, {"t": "chat_err", "code": "muted", "wait": CHAT_MUTE_SEC})
+
+
 async def challenge(me: Conn, target_id: object) -> None:
     """A direct duel challenge to a chosen player (from the chat)."""
     if not isinstance(target_id, int) or target_id == me.user_id:
@@ -163,8 +248,16 @@ async def challenge(me: Conn, target_id: object) -> None:
     if me.state != "idle":
         await send(me, {"t": "busy", "who": "me"})
         return
-    if target is None or target.state != "idle" or target.user_id in invites:
+    if target is None or target.state != "idle" or target.user_id in invites or me.user_id in target.blocked:
         await send(me, {"t": "busy", "who": "them", "name": target.name if target else None})
+        return
+    # Both players need the stake on the account.
+    coins = await _coins([me.user_id, target.user_id])
+    if coins.get(me.user_id, 0) < game.DUEL_STAKE:
+        await send(me, {"t": "stake_short", "need": game.DUEL_STAKE, "have": coins.get(me.user_id, 0), "who": "me"})
+        return
+    if coins.get(target.user_id, 0) < game.DUEL_STAKE:
+        await send(me, {"t": "stake_short", "need": game.DUEL_STAKE, "have": coins.get(target.user_id, 0), "who": "them", "name": target.name})
         return
     await invite(me, target)
 
@@ -177,13 +270,16 @@ async def broadcast_online() -> None:
 
 def _on_result(duel_id: str, outcome: dict[int, str]) -> None:
     d = duels.pop(duel_id, None)
+    stakes = game.duel_stakes.pop(duel_id, {})
     for uid, res in outcome.items():
         c = conns.get(uid)
         if c is not None:
             if c.duel == duel_id:
                 c.duel = None
                 c.state = "idle"
-            asyncio.get_running_loop().create_task(send(c, {"t": "result", "duel": duel_id, "outcome": res}))
+            asyncio.get_running_loop().create_task(
+                send(c, {"t": "result", "duel": duel_id, "outcome": res, "coins": stakes.get(uid, 0)})
+            )
     del d
 
 
@@ -230,6 +326,8 @@ async def duel_socket(ws: WebSocket) -> None:
             photo=None if user.profile_deactivated else user.photo_url,
             link=not user.hide_vk_link,
         )
+        rows = await session.execute(select(ChatBlock.blocked_id).where(ChatBlock.user_id == user.id))
+        me.blocked = {int(b) for (b,) in rows}
     old = conns.get(me.user_id)
     if old is not None:
         try:
@@ -271,6 +369,8 @@ async def handle(me: Conn, msg: dict) -> None:
         await chat_join(me)
     elif t == "chat_leave":
         await chat_leave(me)
+    elif t == "report":
+        await chat_report(me, msg.get("msg_id"), msg.get("reason"))
     elif t == "chat":
         await chat_say(me, msg.get("text"))
     elif t == "challenge":
@@ -320,6 +420,15 @@ async def handle(me: Conn, msg: dict) -> None:
             await send(other, {"t": "opp_dead", "score": score if isinstance(score, int) else 0})
 
 
+async def _coins(user_ids: list[int]) -> dict[int, int]:
+    """The coins of players (for the duel stake)."""
+    if not user_ids:
+        return {}
+    async with SessionLocal() as session:
+        rows = await session.execute(select(User.id, User.coins).where(User.id.in_(user_ids)))
+        return {int(i): int(c or 0) for i, c in rows}
+
+
 async def find(me: Conn) -> None:
     if me.state not in ("idle",):
         return
@@ -331,7 +440,15 @@ async def find(me: Conn) -> None:
         and c.state == "idle"
         and now - me.declined.get(c.user_id, -999) > 120
         and c.user_id not in invites
+        and c.user_id not in me.blocked
+        and me.user_id not in c.blocked
     ]
+    coins = await _coins([me.user_id, *[c.user_id for c in pool]])
+    if coins.get(me.user_id, 0) < game.DUEL_STAKE:
+        await send(me, {"t": "stake_short", "need": game.DUEL_STAKE, "have": coins.get(me.user_id, 0), "who": "me"})
+        return
+    # Only players who can pay the stake are offered.
+    pool = [c for c in pool if coins.get(c.user_id, 0) >= game.DUEL_STAKE]
     if not pool:
         await send(me, {"t": "none", "n": len(conns)})
         return
@@ -343,7 +460,7 @@ async def invite(me: Conn, target: Conn) -> None:
     me.state = "searching"
     target.state = "invited"
     invites[target.user_id] = (me.user_id, now)
-    await send(target, {"t": "invite", "from": public(me), "timeout": INVITE_TIMEOUT_SEC})
+    await send(target, {"t": "invite", "from": public(me), "timeout": INVITE_TIMEOUT_SEC, "stake": game.DUEL_STAKE})
     await send(me, {"t": "waiting", "to": public(target), "timeout": INVITE_TIMEOUT_SEC})
     asyncio.get_event_loop().create_task(_expire_invite(target.user_id, me.user_id))
     # Also tell the challenged player in VK, in case the game is in the background.
@@ -385,6 +502,18 @@ async def accept(me: Conn) -> None:
         me.state = "idle"
         await send(me, {"t": "invite_cancel"})
         return
+    # The stake is checked again: coins may have been spent while the invitation was waiting.
+    coins = await _coins([me.user_id, other.user_id])
+    short = [c for c in (me, other) if coins.get(c.user_id, 0) < game.DUEL_STAKE]
+    if short:
+        for c in (me, other):
+            c.state = "idle"
+        for c in short:
+            await send(c, {"t": "stake_short", "need": game.DUEL_STAKE, "have": coins.get(c.user_id, 0), "who": "me"})
+        for c in (me, other):
+            if c not in short:
+                await send(c, {"t": "invite_cancel" if c is me else "declined"})
+        return
     duel_id = str(uuid.uuid4())
     seed = secrets.randbits(32)
     async with SessionLocal() as session:
@@ -409,6 +538,7 @@ async def accept(me: Conn) -> None:
                 "start_at": start_at,
                 "ticket": ticket,
                 "opponent": {**public(opp), "look": looks.get(opp.user_id)},
+                "stake": game.DUEL_STAKE,
             },
         )
 

@@ -62,6 +62,8 @@ class User(Base):
     hide_vk_link: Mapped[bool] = mapped_column(Boolean, default=False)
     # Main-screen decoration: {bg, frame, fx, pet, props: {spot: item_id}}.
     decor: Mapped[dict] = mapped_column(JsonType, default=dict)
+    # The opponents beaten in the current streak (a win over one of them again does not extend it).
+    duel_streak_opps: Mapped[list] = mapped_column(JsonType, default=list)
     # Duel wins in a row now, and the best such streak ever (it opens cosmetics).
     duel_streak: Mapped[int] = mapped_column(Integer, default=0)
     best_duel_streak: Mapped[int] = mapped_column(Integer, default=0)
@@ -186,3 +188,29 @@ class VkOrder(Base):
     refunded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     __table_args__ = (UniqueConstraint("order_id", "test", name="uq_vk_order"),)
+
+
+class ChatBlock(Base):
+    """A player does not want to see the messages of another player in the chat."""
+
+    __tablename__ = "chat_blocks"
+
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    blocked_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class ChatReport(Base):
+    """A complaint about a chat message. The text is kept as it was when it was reported."""
+
+    __tablename__ = "chat_reports"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    reporter_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    reported_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    msg_ts: Mapped[int] = mapped_column(BigInteger)  # the time of the message, ms
+    text: Mapped[str] = mapped_column(String(240))
+    reason: Mapped[str] = mapped_column(String(16))  # abuse | spam | other
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+    __table_args__ = (UniqueConstraint("reporter_id", "reported_id", "msg_ts", name="uq_chat_report_once"),)

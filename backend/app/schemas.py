@@ -74,6 +74,10 @@ class DecorIn(Strict):
         return v
 
 
+class BlockIn(Strict):
+    user_id: int
+
+
 class PrivacyIn(Strict):
     hide_vk_link: bool
 

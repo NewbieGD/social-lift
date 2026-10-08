@@ -60,8 +60,13 @@ async def claim_drop(session: AsyncSession, user: User, drop_item: str | None, f
     return await grant(session, user, [drop_item], "drop")
 
 
-async def credit_run(session: AsyncSession, user: User, run_id: str, amount: int) -> int:
-    """1 point of a counted run = 1 coin. The journal row is unique per run, so it pays once."""
+# 10 points of a counted run = 1 coin (rounded down for each run): coins are meant to come slowly.
+POINTS_PER_COIN = 10
+
+
+async def credit_run(session: AsyncSession, user: User, run_id: str, score: int) -> int:
+    """Pays coins for a counted run. The journal row is unique per run, so it pays once."""
+    amount = max(0, score) // POINTS_PER_COIN
     if amount <= 0:
         return 0
     user.coins = (user.coins or 0) + amount
@@ -69,6 +74,25 @@ async def credit_run(session: AsyncSession, user: User, run_id: str, amount: int
         CoinTx(user_id=user.id, delta=amount, reason="run", ref=run_id, balance_after=user.coins, created_at=utcnow())
     )
     return amount
+
+
+async def transfer_stake(session: AsyncSession, loser: User, winner: User, duel_id: str, stake: int) -> int:
+    """The loser of a duel pays the winner (at most what the loser has). Once per duel (unique journal rows)."""
+    amount = min(stake, max(0, loser.coins or 0))
+    if amount <= 0:
+        return 0
+    now = utcnow()
+    loser.coins = (loser.coins or 0) - amount
+    winner.coins = (winner.coins or 0) + amount
+    session.add(CoinTx(user_id=loser.id, delta=-amount, reason="duel", ref=duel_id, balance_after=loser.coins, created_at=now))
+    session.add(CoinTx(user_id=winner.id, delta=amount, reason="duel", ref=duel_id, balance_after=winner.coins, created_at=now))
+    return amount
+
+
+async def duel_stakes(session: AsyncSession, duel_id: str) -> dict[int, int]:
+    """Who got or paid how many coins in a duel: {user_id: delta}."""
+    rows = await session.execute(select(CoinTx.user_id, CoinTx.delta).where(CoinTx.reason == "duel", CoinTx.ref == duel_id))
+    return {int(u): int(d) for u, d in rows}
 
 
 async def run_payout(session: AsyncSession, user_id: int, run_id: str) -> int:

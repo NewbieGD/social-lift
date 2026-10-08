@@ -253,15 +253,16 @@ async def test_coins_paid_once_per_run(client):
     await ready_player(client, 80)
     start = (await client.post("/api/runs/start", headers=headers(80))).json()
     r1 = (await finish(client, 80, start, score=12)).json()
-    assert r1["coins_earned"] == 12 and r1["coins"] == 12
+    # 10 points = 1 coin, rounded down per run.
+    assert r1["coins_earned"] == 1 and r1["coins"] == 1
     # Sending the same finish again (a retry) must not pay twice.
     r2 = (await finish(client, 80, start, score=12)).json()
-    assert r2["coins_earned"] == 12 and r2["coins"] == 12
+    assert r2["coins_earned"] == 1 and r2["coins"] == 1
     start = (await client.post("/api/runs/start", headers=headers(80))).json()
     r3 = (await finish(client, 80, start, score=30)).json()
-    assert r3["coins"] == 42
+    assert r3["coins"] == 4
     boot = (await client.post("/api/session/bootstrap", headers=headers(80))).json()
-    assert boot["shop"]["coins"] == 42
+    assert boot["shop"]["coins"] == 4
 
 
 async def test_rejected_run_pays_nothing(client):
@@ -330,7 +331,12 @@ async def test_buy_with_coins(client, monkeypatch):
     poor = await client.post("/api/shop/buy", json={"item_id": "shop_test"}, headers=headers(85))
     assert poor.status_code == 402 and poor.json()["error"]["code"] == "not_enough_coins"
     start = (await client.post("/api/runs/start", headers=headers(85))).json()
-    await finish(client, 85, start, score=50)
+    await finish(client, 85, start, score=50)  # 5 coins: still not enough for 30
+    assert (await client.post("/api/shop/buy", json={"item_id": "shop_test"}, headers=headers(85))).status_code == 402
+    async with SessionLocal() as s:
+        user = await s.get(User, 85)
+        user.coins = 50
+        await s.commit()
     ok = await client.post("/api/shop/buy", json={"item_id": "shop_test"}, headers=headers(85))
     assert ok.status_code == 200 and ok.json()["coins"] == 20 and "shop_test" in ok.json()["owned"]
     again = await client.post("/api/shop/buy", json={"item_id": "shop_test"}, headers=headers(85))
@@ -398,26 +404,166 @@ async def test_no_drop_without_a_roll(client, monkeypatch):
     assert r["new_items"] == []
 
 
-async def test_duel_win_streak_opens_ninja_parts(client):
+async def _play_duel(client, a, b, duel_no, score_a, score_b):
+    """A duel between two players: both finish a run on the same seed."""
     from app.services import game as game_service
 
-    await ready_player(client, 90)
-    await ready_player(client, 91)
-    for i in range(2):
-        duel_id = f"{i}" * 36
-        async with SessionLocal() as s:
-            ta = await game_service.start_run(s, await s.get(User, 90), seed=7, duel_id=duel_id)
-            tb = await game_service.start_run(s, await s.get(User, 91), seed=7, duel_id=duel_id)
-        await age_run(ta["run_id"], 60)
-        await age_run(tb["run_id"], 60)
-        await finish(client, 90, ta, score=40, duration_ms=20_000, captures=10)
-        await finish(client, 91, tb, score=12, duration_ms=20_000, captures=6)
+    duel_id = f"{duel_no:03d}".ljust(36, "0")
     async with SessionLocal() as s:
-        winner = await s.get(User, 90)
-        loser = await s.get(User, 91)
-        assert winner.duel_streak == 2 and winner.best_duel_streak == 2 and loser.duel_streak == 0
+        ta = await game_service.start_run(s, await s.get(User, a), seed=7, duel_id=duel_id)
+        tb = await game_service.start_run(s, await s.get(User, b), seed=7, duel_id=duel_id)
+    await age_run(ta["run_id"], 60)
+    await age_run(tb["run_id"], 60)
+    await finish(client, a, ta, score=score_a, duration_ms=20_000, captures=10)
+    return await finish(client, b, tb, score=score_b, duration_ms=20_000, captures=6)
+
+
+async def test_duel_win_streak_counts_different_opponents_only(client):
+    for uid in (90, 91, 92):
+        await ready_player(client, uid)
+    # Player 90 beats 91, then 92, then 91 again: three wins, but only two different opponents.
+    await _play_duel(client, 90, 91, 1, 40, 12)
+    await _play_duel(client, 90, 92, 2, 40, 12)
+    async with SessionLocal() as s:
+        w = await s.get(User, 90)
+        assert w.duel_streak == 2 and w.best_duel_streak == 2 and list(w.duel_streak_opps) == [91, 92]
     shop = (await client.get("/api/shop", headers=headers(90))).json()
     assert shop["owned"] == ["ninja_head"] and shop["duel_streak"] == 2
+    await _play_duel(client, 90, 91, 3, 40, 12)
+    async with SessionLocal() as s:
+        w = await s.get(User, 90)
+        assert w.duel_wins == 3 and w.duel_streak == 2  # the repeat win does not extend the streak
+        loser = await s.get(User, 91)
+        assert loser.duel_streak == 0
+    # A loss breaks the streak and the list of beaten players.
+    await _play_duel(client, 91, 90, 4, 40, 12)
+    async with SessionLocal() as s:
+        w = await s.get(User, 90)
+        assert w.duel_streak == 0 and list(w.duel_streak_opps) == [] and w.best_duel_streak == 2
+
+
+async def test_ten_different_wins_open_the_legion_set_and_the_trophy(client):
+    await ready_player(client, 130)
+    for i in range(10):
+        await ready_player(client, 131 + i)
+        await _play_duel(client, 130, 131 + i, 10 + i, 40, 12)
+    shop = (await client.get("/api/shop", headers=headers(130))).json()
+    owned = set(shop["owned"])
+    assert {"legion_head", "legion_torso", "legion_arms", "legion_legs", "legion_torch", "pet_trophy"} <= owned
+    assert shop["duel_streak"] == 10
+
+
+async def test_duel_loser_pays_the_stake_to_the_winner(client):
+    await ready_player(client, 150)
+    await ready_player(client, 151)
+    async with SessionLocal() as s:
+        (await s.get(User, 150)).coins = 100
+        (await s.get(User, 151)).coins = 700
+        await s.commit()
+    res = (await _play_duel(client, 150, 151, 40, 40, 12)).json()
+    # 151 lost: pays 500; 150 gets it.
+    assert res["duel"]["status"] == "done" and res["duel"]["stake"]["151"] == -500 and res["duel"]["stake"]["150"] == 500
+    async with SessionLocal() as s:
+        assert (await s.get(User, 150)).coins == 604 and (await s.get(User, 151)).coins == 201  # 4 and 1 coins for the points
+    # A poor loser pays only what he has. 150 now has 600 and loses against 151.
+    async with SessionLocal() as s:
+        (await s.get(User, 150)).coins = 300
+        await s.commit()
+    await _play_duel(client, 151, 150, 41, 40, 12)
+    async with SessionLocal() as s:
+        loser = await s.get(User, 150)
+        assert loser.coins == 0  # all he had (300 and the 1 coin for his points)
+    # A draw moves nothing.
+    async with SessionLocal() as s:
+        before = (await s.get(User, 151)).coins
+    await _play_duel(client, 150, 151, 42, 30, 30)
+    async with SessionLocal() as s:
+        assert (await s.get(User, 151)).coins == before + 3
+
+
+async def test_cannot_start_a_duel_without_the_stake(client):
+    import json
+
+    from app import duel_ws
+
+    class FakeWS:
+        def __init__(self):
+            self.sent = []
+
+        async def send_text(self, text):
+            self.sent.append(json.loads(text))
+
+    await ready_player(client, 160)
+    async with SessionLocal() as s:
+        (await s.get(User, 160)).coins = 499
+        await s.commit()
+    me = duel_ws.Conn(ws=FakeWS(), user_id=160, name="A", photo=None)
+    duel_ws.conns[160] = me
+    try:
+        await duel_ws.find(me)
+        assert me.ws.sent and me.ws.sent[-1]["t"] == "stake_short" and me.ws.sent[-1]["need"] == 500
+    finally:
+        duel_ws.conns.pop(160, None)
+
+
+async def test_chat_blocks(client):
+    await ready_player(client, 170)
+    await ready_player(client, 171)
+    me = headers(170)
+    assert (await client.get("/api/chat/blocks", headers=me)).json() == {"blocked": []}
+    assert (await client.post("/api/chat/block", json={"user_id": 170}, headers=me)).status_code == 400
+    assert (await client.post("/api/chat/block", json={"user_id": 999999}, headers=me)).status_code == 404
+    r = await client.post("/api/chat/block", json={"user_id": 171}, headers=me)
+    assert r.status_code == 200 and [b["id"] for b in r.json()["blocked"]] == [171]
+    # Blocking twice changes nothing.
+    again = await client.post("/api/chat/block", json={"user_id": 171}, headers=me)
+    assert [b["id"] for b in again.json()["blocked"]] == [171]
+    gone = await client.delete("/api/chat/block/171", headers=me)
+    assert gone.json() == {"blocked": []}
+
+
+async def test_chat_reports_hide_a_message_and_mute_the_author(client):
+    import json
+    import time
+
+    from app import duel_ws
+
+    class FakeWS:
+        def __init__(self):
+            self.sent = []
+
+        async def send_text(self, text):
+            self.sent.append(json.loads(text))
+
+    await ready_player(client, 180)  # the author
+    reporters = []
+    for uid in range(181, 186):
+        await ready_player(client, uid)
+        c = duel_ws.Conn(ws=FakeWS(), user_id=uid, name=f"R{uid}", photo=None, in_chat=True)
+        duel_ws.conns[uid] = c
+        reporters.append(c)
+    author = duel_ws.Conn(ws=FakeWS(), user_id=180, name="Author", photo=None, in_chat=True)
+    duel_ws.conns[180] = author
+    msg = {"id": 9001, "ts": int(time.time() * 1000), "user": duel_ws.chat_user(author), "text": "rude words"}
+    duel_ws.chat_history.append(msg)
+    try:
+        # A reason must be one of the known ones, and nobody reports himself.
+        await duel_ws.chat_report(reporters[0], 9001, "weird")
+        assert not reporters[0].ws.sent
+        await duel_ws.chat_report(author, 9001, "abuse")
+        assert author.ws.sent[-1]["t"] == "report_err"
+        for c in reporters[:2]:
+            await duel_ws.chat_report(c, 9001, "abuse")
+        assert msg in duel_ws.chat_history  # two complaints are not enough
+        # The same player complaining again counts once.
+        await duel_ws.chat_report(reporters[0], 9001, "abuse")
+        await duel_ws.chat_report(reporters[2], 9001, "spam")
+        assert msg not in duel_ws.chat_history  # the third one hides it
+        assert any(m["t"] == "chat_remove" and m["id"] == 9001 for m in reporters[3].ws.sent)
+    finally:
+        for uid in range(180, 186):
+            duel_ws.conns.pop(uid, None)
+        duel_ws.chat_history.clear()
 
 
 async def test_decor_rules_and_purchase(client, monkeypatch):
