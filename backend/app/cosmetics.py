@@ -6,15 +6,13 @@ one item per slot. Ways to get an item (`unlock`):
   {"record": N}   - the best score of a single run reached N (granted automatically)
   {"drop": True}  - found in a run: the server rolls a drop for the run at its start and grants it
                     when the finished run reports that it was picked up
-  {"duel_streak": N} - N duel wins in a row against different players (best streak, granted automatically)
+  {"duel_streak": N} - N duel wins in a row (best streak, granted automatically)
   price           - bought for coins (None = not for sale yet)
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-
-from . import tunables
 
 SLOTS = ("head", "torso", "arms", "legs", "feet", "torch")
 
@@ -70,18 +68,10 @@ ITEMS: dict[str, Item] = {
         *_set("ninja", FULL, duel_streak=(2, 4, 7, 10)),
         *_set("acrobat", FULL, drop=True),
         *_set("brute", FULL, record=(2600, 3000, 3500, 4000)),
-        # Reward for 10 duel wins in a row against different players: a chrome combat set (5 parts).
-        *_set("legion", ("head", "torso", "arms", "legs", "torch"), duel_streak=10),
-        # Flashlights: each one replaces the flashlight in the hand. Some are bought, some are found in runs.
-        *_set("phone", ("torch",), price=300),
-        *_set("wood", ("torch",), drop=True),
-        *_set("saber", ("torch",), price=900),
-        *_set("fireball", ("torch",), drop=True),
-        *_set("jar", ("torch",), price=600),
     )
 }
 
-# Main-screen decorations (and pets). For these items `slot` is the kind. The PRICES ARE PLACEHOLDERS (coins; 10 points of a run = 1 coin):
+# Main-screen decorations (and pets). For these items `slot` is the kind. The PRICES ARE PLACEHOLDERS (coins):
 # change them here. The default background (the brick alley) is free and is not an item.
 DECOR: tuple[Item, ...] = (
     Item("bg_dusk", "bg", kind="bg", record=100),
@@ -113,8 +103,6 @@ ITEMS.update({i.id: i for i in DECOR})
 PREMIUM_SET = ("head", "torso", "arms", "legs", "torch")
 ITEMS.update({i.id: i for i in _set("seraph", PREMIUM_SET, product="seraph_set")})
 ITEMS["pet_spark"] = Item("pet_spark", "pet", kind="pet", product="pet_spark")
-# A winged trophy that floats beside the player: the reward for 10 duel wins in a row.
-ITEMS["pet_trophy"] = Item("pet_trophy", "pet", kind="pet", duel_streak=10)
 
 
 @dataclass(frozen=True)
@@ -137,7 +125,8 @@ def products_public() -> list[dict]:
 
 
 # Run drops: chance that a run has a drop at all, and the least score a run needs to claim it.
-# The drop chance and the score needed live in tunables.py (drop_chance, drop_min_score).
+DROP_CHANCE = 0.35
+DROP_MIN_SCORE = 100
 
 
 def catalog_public() -> list[dict]:
@@ -147,9 +136,9 @@ def catalog_public() -> list[dict]:
             "id": i.id,
             "slot": i.slot,
             "set": i.set,
-            "record": record_of(i),
-            "duel_streak": streak_of(i),
-            "price": price_of(i),
+            "record": i.record,
+            "duel_streak": i.duel_streak,
+            "price": i.price,
             "drop": i.drop,
             "kind": i.kind,
             "product": i.product,
@@ -160,26 +149,13 @@ def catalog_public() -> list[dict]:
 
 def unlocked_by_record(best_score: int, owned: set[str]) -> list[str]:
     """Items that the player's best single run opens and that are not owned yet."""
-    return [i.id for i in ITEMS.values() if record_of(i) is not None and best_score >= record_of(i) and i.id not in owned]
-
-
-def price_of(i: Item) -> int | None:
-    """The price in coins, with the owner's override (see tunables.py)."""
-    return None if i.price is None else tunables.item_override("price", i.id, i.price)
-
-
-def record_of(i: Item) -> int | None:
-    return None if i.record is None else tunables.item_override("record", i.id, i.record)
-
-
-def streak_of(i: Item) -> int | None:
-    return None if i.duel_streak is None else tunables.item_override("streak", i.id, i.duel_streak)
+    return [i.id for i in ITEMS.values() if i.record is not None and best_score >= i.record and i.id not in owned]
 
 
 def unlocked_by_streak(best_streak: int, owned: set[str]) -> list[str]:
     """Items that a best duel win streak opens and that are not owned yet."""
     return [
-        i.id for i in ITEMS.values() if streak_of(i) is not None and best_streak >= streak_of(i) and i.id not in owned
+        i.id for i in ITEMS.values() if i.duel_streak is not None and best_streak >= i.duel_streak and i.id not in owned
     ]
 
 

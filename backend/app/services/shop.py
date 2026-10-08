@@ -7,7 +7,7 @@ import random
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .. import cosmetics, tunables
+from .. import cosmetics
 from ..core import utcnow
 from ..deps import ApiError
 from ..models import CoinTx, OwnedCosmetic, User
@@ -48,25 +48,20 @@ async def roll_drop(session: AsyncSession, user: User) -> str | None:
     The server rolls, so a player cannot claim a part the server did not offer for this run.
     """
     options = cosmetics.droppable(await owned_ids(session, user.id))
-    if not options or random.random() >= tunables.get("drop_chance"):
+    if not options or random.random() >= cosmetics.DROP_CHANCE:
         return None
     return random.choice(options)
 
 
 async def claim_drop(session: AsyncSession, user: User, drop_item: str | None, found: bool, score: int) -> list[str]:
     """Grants the rolled drop when the finished run reports it was picked up (and scored enough)."""
-    if not found or not drop_item or score < tunables.get("drop_min_score"):
+    if not found or not drop_item or score < cosmetics.DROP_MIN_SCORE:
         return []
     return await grant(session, user, [drop_item], "drop")
 
 
-# 10 points of a counted run = 1 coin (rounded down for each run): coins are meant to come slowly.
-POINTS_PER_COIN = 10  # the default; the live value is tunables.get("points_per_coin")
-
-
-async def credit_run(session: AsyncSession, user: User, run_id: str, score: int) -> int:
-    """Pays coins for a counted run. The journal row is unique per run, so it pays once."""
-    amount = max(0, score) // tunables.get("points_per_coin")
+async def credit_run(session: AsyncSession, user: User, run_id: str, amount: int) -> int:
+    """1 point of a counted run = 1 coin. The journal row is unique per run, so it pays once."""
     if amount <= 0:
         return 0
     user.coins = (user.coins or 0) + amount
@@ -74,25 +69,6 @@ async def credit_run(session: AsyncSession, user: User, run_id: str, score: int)
         CoinTx(user_id=user.id, delta=amount, reason="run", ref=run_id, balance_after=user.coins, created_at=utcnow())
     )
     return amount
-
-
-async def transfer_stake(session: AsyncSession, loser: User, winner: User, duel_id: str, stake: int) -> int:
-    """The loser of a duel pays the winner (at most what the loser has). Once per duel (unique journal rows)."""
-    amount = min(stake, max(0, loser.coins or 0))
-    if amount <= 0:
-        return 0
-    now = utcnow()
-    loser.coins = (loser.coins or 0) - amount
-    winner.coins = (winner.coins or 0) + amount
-    session.add(CoinTx(user_id=loser.id, delta=-amount, reason="duel", ref=duel_id, balance_after=loser.coins, created_at=now))
-    session.add(CoinTx(user_id=winner.id, delta=amount, reason="duel", ref=duel_id, balance_after=winner.coins, created_at=now))
-    return amount
-
-
-async def duel_stakes(session: AsyncSession, duel_id: str) -> dict[int, int]:
-    """Who got or paid how many coins in a duel: {user_id: delta}."""
-    rows = await session.execute(select(CoinTx.user_id, CoinTx.delta).where(CoinTx.reason == "duel", CoinTx.ref == duel_id))
-    return {int(u): int(d) for u, d in rows}
 
 
 async def run_payout(session: AsyncSession, user_id: int, run_id: str) -> int:
@@ -164,16 +140,15 @@ async def buy(session: AsyncSession, user: User, item_id: str) -> dict:
     item = cosmetics.ITEMS.get(item_id)
     if item is None:
         raise ApiError(404, "unknown_item", "No such item")
-    price = cosmetics.price_of(item)
-    if price is None:
+    if item.price is None:
         raise ApiError(400, "not_for_sale", "This item is not for sale")
     if item_id in await owned_ids(session, user.id):
         raise ApiError(409, "already_owned", "You already have this item")
-    if (user.coins or 0) < price:
+    if (user.coins or 0) < item.price:
         raise ApiError(402, "not_enough_coins", "Not enough coins")
-    user.coins -= price
+    user.coins -= item.price
     session.add(
-        CoinTx(user_id=user.id, delta=-price, reason="buy", ref=item_id, balance_after=user.coins, created_at=utcnow())
+        CoinTx(user_id=user.id, delta=-item.price, reason="buy", ref=item_id, balance_after=user.coins, created_at=utcnow())
     )
     session.add(OwnedCosmetic(user_id=user.id, item_id=item_id, source="buy", acquired_at=utcnow()))
     await session.commit()
