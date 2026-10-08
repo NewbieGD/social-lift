@@ -1067,7 +1067,7 @@ export function drawHeroBody(ctx: CanvasRenderingContext2D, pose: HeroPose, give
     ctx.rotate(rig.lean);
     // The wings come away from the body while he flies up and return as he falls back.
     const vy = pose.vy;
-    const detach = pose.dead ? 0 : air * (vy >= 0 ? 0.35 + 0.65 * Math.min(1, vy / 700) : Math.max(0, 0.35 + vy / 900));
+    const detach = pose.dead ? 0 : air * (vy >= 0 ? 0.5 + 0.5 * Math.min(1, vy / 380) : Math.max(0, 0.5 + vy / 700));
     drawSeraphWings(ctx, w.torso, rig.torsoLen, 'side', spread, t, detach);
     ctx.restore();
   }

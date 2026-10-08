@@ -5766,34 +5766,6 @@ body.reduced .coins-line svg {
     inset 0 0 0 2.5px var(--rar),
     0 0 14px color-mix(in srgb, var(--rar) 50%, transparent);
 }
-/* A glint that sweeps over rare things now and then. */
-.style-card.rarity-rare::after,
-.style-card.rarity-epic::after,
-.style-card.rarity-legendary::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  background: linear-gradient(105deg, transparent 38%, rgba(255, 255, 255, 0.38) 50%, transparent 62%);
-  transform: translateX(-130%);
-  pointer-events: none;
-  animation: card-glint 4.5s ease-in-out infinite;
-}
-.style-card.rarity-epic::after {
-  animation-duration: 3.8s;
-}
-.style-card.rarity-legendary::after {
-  animation-duration: 3s;
-}
-@keyframes card-glint {
-  0%,
-  55% {
-    transform: translateX(-130%);
-  }
-  100% {
-    transform: translateX(130%);
-  }
-}
 .rar-tag {
   display: block;
   margin-top: 1px;
@@ -5986,7 +5958,7 @@ body.reduced .coins-line svg {
   width: 100%;
   margin-top: 8px;
 }
-body.reduced .style-card::after,
+body.reduced .rar-star,
 body.reduced .style-card.is-new,
 body.reduced .reveal-rays,
 body.reduced .reveal-sparks i {
@@ -6133,4 +6105,46 @@ body.reduced .reveal-sparks i {
 }
 body.reduced .top-btn.more-btn {
   animation: none;
+}
+
+/* A small twinkling star on every rare card: the color tells the rarity (blue, purple, gold). */
+.style-card.rarity-legendary {
+  --glow: #ff9a2e;
+}
+.rar-star {
+  position: absolute;
+  top: 7px;
+  left: 7px;
+  width: 15px;
+  height: 15px;
+  fill: var(--rar);
+  pointer-events: none;
+  filter: drop-shadow(0 0 3px var(--glow, var(--rar)));
+  animation: star-twinkle 2.4s ease-in-out infinite;
+}
+.style-card.rarity-legendary .rar-star {
+  fill: #ffd25a;
+}
+/* Each card twinkles in its own time. */
+.style-grid > :nth-child(2n) .rar-star {
+  animation-delay: 0.7s;
+}
+.style-grid > :nth-child(3n) .rar-star {
+  animation-delay: 1.4s;
+}
+.style-grid > :nth-child(5n) .rar-star {
+  animation-delay: 0.3s;
+}
+@keyframes star-twinkle {
+  0%,
+  100% {
+    opacity: 0.4;
+    transform: scale(0.75) rotate(0deg);
+    filter: drop-shadow(0 0 1px var(--glow, var(--rar)));
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.2) rotate(18deg);
+    filter: drop-shadow(0 0 6px var(--glow, var(--rar))) drop-shadow(0 0 2px #fff);
+  }
 }

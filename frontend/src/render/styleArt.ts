@@ -2074,8 +2074,8 @@ export function drawSeraphWings(ctx: CanvasRenderingContext2D, d: StyleDef, len:
     for (const sd of [-1, 1]) {
       ctx.save();
       ctx.globalAlpha = 1 - 0.18 * detach;
-      ctx.translate(sd * (4.2 + detach * 10), -detach * 6);
-      ctx.rotate(sd * detach * 0.12);
+      ctx.translate(sd * (4.2 + detach * 22), -detach * 12);
+      ctx.rotate(sd * detach * 0.22);
       fan(sd, 0.1, false, 0);
       ctx.restore();
     }
@@ -2088,7 +2088,7 @@ export function drawSeraphWings(ctx: CanvasRenderingContext2D, d: StyleDef, len:
       for (const sd of [-1, 1]) {
         ctx.beginPath();
         ctx.moveTo(sd * 3, -len + 3.4);
-        ctx.quadraticCurveTo(sd * (4 + detach * 5), -len + 1 - detach * 4, sd * (4.2 + detach * 10), -len + 3.4 - detach * 6);
+        ctx.quadraticCurveTo(sd * (4 + detach * 11), -len + 1 - detach * 8, sd * (4.2 + detach * 22), -len + 3.4 - detach * 12);
         ctx.stroke();
       }
       ctx.restore();
@@ -2097,14 +2097,14 @@ export function drawSeraphWings(ctx: CanvasRenderingContext2D, d: StyleDef, len:
     // Seen from the side: both wings sweep back (to the left), the far one slightly higher.
     ctx.save();
     ctx.globalAlpha = 1 - 0.2 * detach;
-    ctx.translate(-1.5 - detach * 8, -1.5 - detach * 4);
-    ctx.rotate(-detach * 0.1);
+    ctx.translate(-1.5 - detach * 26, -1.5 - detach * 9);
+    ctx.rotate(-detach * 0.24);
     fan(-1, 0.3, true, 0);
     ctx.restore();
     ctx.save();
     ctx.globalAlpha = 1 - 0.15 * detach;
-    ctx.translate(-2 - detach * 12, 1 - detach * 6);
-    ctx.rotate(-detach * 0.14);
+    ctx.translate(-2 - detach * 38, 1 - detach * 14);
+    ctx.rotate(-detach * 0.34);
     fan(-1, 0.22, false, 0);
     ctx.restore();
     if (detach > 0.15) {
@@ -2115,9 +2115,12 @@ export function drawSeraphWings(ctx: CanvasRenderingContext2D, d: StyleDef, len:
       ctx.lineWidth = 0.9;
       ctx.lineCap = 'round';
       ctx.beginPath();
-      ctx.moveTo(0, -len + 3.4);
-      ctx.quadraticCurveTo(-3 - detach * 5, -len + 2 - detach * 3, -2 - detach * 12, -len + 4.4 - detach * 6);
-      ctx.stroke();
+      for (const k of [0.6, 1]) {
+        ctx.beginPath();
+        ctx.moveTo(0, -len + 3.4);
+        ctx.quadraticCurveTo(-3 - detach * 14 * k, -len + 2 - detach * 8 * k, -2 - detach * 38 * k, -len + 4.4 - detach * 14 * k);
+        ctx.stroke();
+      }
       ctx.restore();
     }
   }

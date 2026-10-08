@@ -407,7 +407,8 @@ export function stylesView(shop: ShopState | null, tab: 'mine' | 'premium' = 'mi
 /** Small labels of a card: NEW and (for rare things) the rarity name. */
 function rarityTag(c: CatalogItem | undefined, isNew: boolean): string {
   const r: Rarity = rarityOf(c);
-  return `${isNew ? `<i class="new-badge">${ru.shop.newBadge}</i>` : ''}${r === 'common' ? '' : `<i class="rar-tag">${ru.shop.rarity[r]}</i>`}`;
+  const star = '<svg class="rar-star" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 1l2.6 8.4L23 12l-8.4 2.6L12 23l-2.6-8.4L1 12l8.4-2.6z"/></svg>';
+  return `${isNew ? `<i class="new-badge">${ru.shop.newBadge}</i>` : ''}${r === 'common' ? '' : `${star}<i class="rar-tag">${ru.shop.rarity[r]}</i>`}`;
 }
 
 /** A progress bar of a collection: how many of the items of this kind the player has. */
