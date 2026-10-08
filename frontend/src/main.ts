@@ -15,16 +15,20 @@ import { ads, DEFAULT_ADS, type AdsConfig } from './platform/ads';
 import { canShare, initShare, shareStory, shareWall } from './platform/share';
 import { lockGestures } from './platform/gestures';
 import { askNotifications, initVk } from './platform/vk';
-import { DuelClient, type ChatMsg, type ChatUser, type DuelMsg, type DuelPlayer } from './net/duel';
+import { DuelClient, type SpecRow, type ChatMsg, type ChatUser, type DuelMsg, type DuelPlayer } from './net/duel';
 import { scenes } from './render/palette';
 import { buffIcon } from './ui/buffIcons';
 import { drawItem, ITEM_BY_TIER, itemCount, outfitFromMask, type Item } from './render/hero';
-import { fullscreenSupported, onFullscreenChange, toggleFullscreen } from './platform/fullscreen';
+import { fullscreenSupported, leaveFullscreenForAd, onFullscreenChange, toggleFullscreen } from './platform/fullscreen';
 import { StageWind, stageLayout } from './render/ground';
 import { drawMenuBackdrop } from './render/menuBackdrops';
 import { drawFrame, drawFx, drawProp, propHalfWidth, propHeight } from './render/menuProps';
 import { ReplayTv, saveReplay } from './render/replayTv';
 import { PetWalker } from './render/petMotion';
+import { LiveReplica } from './render/liveReplica';
+import { perf } from './core/perf';
+import { drawDayTint, drawWeather, weatherFor, weatherForced, type WeatherKind } from './render/menuWeather';
+import { menuState } from './render/menuState';
 import { drawPet, PET_IDS, petHeight, type PetKind } from './render/pets';
 import { buyWithVotes, canPay } from './platform/pay';
 import { isIOS } from './platform/vk';
@@ -196,6 +200,8 @@ function applySettings(s: Settings, changed?: (keyof Settings)[]): void {
   renderer.cinematic = s.cinematic;
   document.body.classList.toggle('reduced', s.reducedFx);
   document.body.classList.toggle('hide-opp', !s.duelPreview);
+  // "Reduced effects" forces the lowest quality; otherwise the monitor chooses (core/perf.ts).
+  perf.forced = s.reducedFx ? 2 : null;
   audio.musicOn = s.music;
   audio.musicVol = s.musicVol;
   audio.sfxVol = s.sfxVol;
@@ -258,7 +264,7 @@ renderer.onCaption = (kind, value) => {
   void el.offsetWidth;
   el.classList.add('on');
   clearTimeout(captionTimer);
-  captionTimer = window.setTimeout(() => el.classList.remove('on'), 3800);
+  captionTimer = window.setTimeout(() => el.classList.remove('on'), 2600);
 };
 
 renderer.onFlightStart = () => audio.play('servo');
@@ -550,9 +556,14 @@ async function startRun(): Promise<void> {
   renderer.prewarm(1, sim.viewH);
   if (!adAllowed()) console.info('[ads] не показываем:', adBlockReason());
   if (adAllowed()) {
+    // An ad cannot be shown over a page in full screen: leave it first, come back on the first tap.
+    const backToFullscreen = await leaveFullscreenForAd();
     audio.suspend();
     const shown = await ads.showInterstitial(adsConfig().timeout_sec);
     audio.resume();
+    backToFullscreen();
+    // The ad covered the game: forget any touch that began before it and measure the field again.
+    settleAfterAd();
     if (!shown) console.info('[ads] ВК не отдал рекламу (VKWebAppCheckNativeAds вернул false или ошибку)');
     if (shown) {
       adState.runsSince = 0;
@@ -565,6 +576,7 @@ async function startRun(): Promise<void> {
   const left = 1200 - (performance.now() - t0);
   if (left > 0) await new Promise((r) => setTimeout(r, left));
   starting = false;
+  settleAfterAd();
   // Items drop only in runs the server can verify, or locally when playing outside VK.
   runDrop = ticket?.drop ?? null;
   newSim(ticket ? ticket.seed : randomSeed(), false, !!ticket || session.mode === 'outside', !!runDrop);
@@ -575,6 +587,21 @@ async function startRun(): Promise<void> {
     const why = session.ticketError ? ru.result.reasons2[session.ticketError] : '';
     toast(why ? `${ru.result.unranked}: ${why}` : ru.result.unranked, 3200);
   }
+}
+
+/**
+ * After an ad the webview may have lost the end of a touch, kept a half-closed screen, or changed size
+ * without telling us: steering would then not work. Everything that steering depends on is renewed.
+ */
+function settleAfterAd(): void {
+  input.reset();
+  // Screens that were closing while the page was covered may never get their "finished" event.
+  document.querySelectorAll('#screens .screen.leaving').forEach((el) => el.remove());
+  layout();
+  window.setTimeout(() => {
+    input.reset();
+    layout();
+  }, 400);
 }
 
 // ---------- Ads policy (numbers come from the server) ----------
@@ -652,6 +679,17 @@ function finishRun(): void {
   adState.runsSince++;
   saveAdState();
   session.event('run_end', sim.score);
+  // How smoothly the run went on this device (anonymous; shows how the game runs on weak phones).
+  const speed = perf.report();
+  if (!deviceSent) {
+    deviceSent = true;
+    session.event('device_mem', Math.round(navigator.deviceMemory ?? 0));
+    session.event('device_cores', Math.min(64, navigator.hardwareConcurrency ?? 0));
+  }
+  if (speed.fps > 0) {
+    session.event('perf_fps', Math.min(240, speed.fps));
+    session.event('perf_level', speed.level);
+  }
   rememberLocalRun(sim.score, sim.tier);
   if (!finishedDuel && sim.score > 0) {
     // The TV on the main screen replays this run.
@@ -956,14 +994,53 @@ const stageWinds = new Map<string, { wind: StageWind; last: number }>();
 const petWalkers = new Map<string, PetWalker>();
 const petLast = new Map<string, number>();
 
-function paintStagePet(g: CanvasRenderingContext2D, walker: PetWalker, kind: PetKind, base: number, scale: number, t: number): void {
+/** When the player last tapped the pet on a canvas (seconds on the page clock). */
+const petReactions = new Map<string, number>();
+/** Where the pet of the main screen was drawn (for taps). */
+let menuPetBox: { x: number; y: number; r: number } | null = null;
+
+function paintStagePet(g: CanvasRenderingContext2D, walker: PetWalker, kind: PetKind, base: number, scale: number, t: number, canvasId = ''): void {
   const v = walker.view();
+  const since = petReactions.has(canvasId) ? performance.now() / 1000 - (petReactions.get(canvasId) ?? 0) : 99;
+  // A tap makes the pet hop.
+  const hopY = since < 1 ? Math.abs(Math.sin(since * 10)) * 9 * scale * Math.exp(-since * 3) : 0;
+  const py = base + (walker.lane === 'front' ? 3.2 : -3) * scale - v.lift - hopY;
   g.save();
   // Behind the hero the pet walks a little higher up the floor; in front of him a little lower.
-  g.translate(v.x, base + (walker.lane === 'front' ? 3.2 : -3) * scale - v.lift);
+  g.translate(v.x, py);
   g.scale(scale * v.facing, scale);
   drawPet(g, kind, { t, mode: v.mode, phase: v.phase });
   g.restore();
+  if (canvasId === 'menuHero') menuPetBox = { x: v.x, y: py - 7 * scale, r: 13 * scale };
+  if (since < 1.4) {
+    // Hearts (or sparkles for the flying ones) float up from the pet.
+    const flying = kind === 'spark' || kind === 'trophy' || kind === 'parrot';
+    for (let i = 0; i < 4; i++) {
+      const k = Math.max(0, since - i * 0.12) / 1.1;
+      if (k <= 0 || k >= 1) continue;
+      const x = v.x + (i - 1.5) * 7 * scale + Math.sin(k * 6 + i) * 3 * scale;
+      const y = py - 16 * scale - k * 26 * scale;
+      g.save();
+      g.globalAlpha = 1 - k;
+      g.translate(x, y);
+      g.scale(scale * 0.5, scale * 0.5);
+      g.fillStyle = flying ? '#FFE27A' : '#FF6F8E';
+      g.beginPath();
+      if (flying) {
+        for (let j = 0; j < 8; j++) {
+          const a = (j / 8) * Math.PI * 2;
+          const r = j % 2 ? 2 : 5;
+          g.lineTo(Math.cos(a) * r, Math.sin(a) * r);
+        }
+      } else {
+        g.moveTo(0, 4);
+        g.bezierCurveTo(-7, -1, -4, -7, 0, -3);
+        g.bezierCurveTo(4, -7, 7, -1, 0, 4);
+      }
+      g.fill();
+      g.restore();
+    }
+  }
 }
 
 /** Proportions of the main screen stage (the editor and profiles copy them). */
@@ -1016,7 +1093,7 @@ function paintStageProps(
     const py = p.y * h;
     const inFront = py > base + 1 * scale;
     if ((layer === 'front') !== inFront) {
-      if (p.id === 'prop_tv' && !stageOverride) tvShown = true;
+      if (p.id === 'prop_tv' && !stageOverride && menuState.tvOn) tvShown = true;
       continue;
     }
     const px = p.x * w;
@@ -1036,9 +1113,18 @@ function paintStageProps(
       g.fillRect(-hw - 2, 1.6, hw * 2 + 4, 0.8);
     }
     // Another player's TV shows no signal (their last run lives on their device).
-    drawProp(g, p.id, t, p.id === 'prop_tv' ? (gg, ww, hh) => (stageOverride ? tv.paintNoSignal(gg, ww, hh) : tv.paint(gg, ww, hh)) : undefined);
+    const since = menuState.touched.has(p.id) ? performance.now() / 1000 - (menuState.touched.get(p.id) ?? 0) : undefined;
+    const tvPainter =
+      p.id === 'prop_tv'
+        ? (gg: CanvasRenderingContext2D, ww: number, hh: number): void => {
+            if (stageOverride) tv.paintNoSignal(gg, ww, hh);
+            else if (!menuState.tvOn) paintTvOff(gg, ww, hh);
+            else tv.paint(gg, ww, hh);
+          }
+        : undefined;
+    drawProp(g, p.id, t, tvPainter, { on: p.id === 'prop_lamp' && !stageOverride ? menuState.lampOn : undefined, touch: since });
     g.restore();
-    if (p.id === 'prop_tv' && !stageOverride) tvShown = true;
+    if (p.id === 'prop_tv' && !stageOverride && menuState.tvOn) tvShown = true;
     // Bounds on the canvas (for picking the object up with a finger).
     const lenS = ph * scale;
     const thick = hw * 2 * scale;
@@ -1069,6 +1155,17 @@ function paintStageProps(
   }
 }
 
+/** A TV that is switched off: a dark glass with a faint reflection. */
+function paintTvOff(g: CanvasRenderingContext2D, w: number, h: number): void {
+  g.fillStyle = '#06070A';
+  g.fillRect(0, 0, w, h);
+  const r = g.createLinearGradient(0, 0, w, h);
+  r.addColorStop(0, 'rgba(120,150,200,0.16)');
+  r.addColorStop(0.5, 'rgba(120,150,200,0)');
+  g.fillStyle = r;
+  g.fillRect(0, 0, w, h);
+}
+
 const tv = new ReplayTv();
 tv.reload();
 let tvLast = -1;
@@ -1091,6 +1188,20 @@ function drawStageHero(c: HTMLCanvasElement, _tier: number, t: number, _silhouet
   const decorOn = c.id === 'menuHero' || c.id === 'decorHero' || c.id === 'petsHero' || c.id === 'profileHero';
   const decor = decorOn ? heroDecor() : ({} as Decor);
   drawMenuBackdrop(g, decor.bg, w, h, L, scale, t);
+  // The living main screen: the time of day, a darker room with the lamp off, and the weather.
+  let weather: WeatherKind = 'none';
+  if ((c.id === 'menuHero' || c.id === 'decorHero') && !stageOverride) {
+    const now = new Date();
+    drawDayTint(g, w, h, now.getHours() + now.getMinutes() / 60);
+    if (Array.isArray(decor.props) && decor.props.some((p) => p.id === 'prop_lamp') && !menuState.lampOn) {
+      g.fillStyle = 'rgba(4,8,28,0.3)';
+      g.fillRect(0, 0, w, h);
+    }
+    if (c.id === 'menuHero' && (perf.effective === 0 || weatherForced()) && !settingsStore.get().reducedFx) {
+      weather = weatherFor(decor.bg);
+      drawWeather(g, weather, 'back', w, h, L, scale, t);
+    }
+  }
   // Light wind: leaves and scraps of paper blow along the street (not with "less effects").
   const windOn = !settingsStore.get().reducedFx && !still;
   let wind: StageWind | null = null;
@@ -1164,7 +1275,7 @@ function drawStageHero(c: HTMLCanvasElement, _tier: number, t: number, _silhouet
     const dtPet = Math.max(0, Math.min(0.1, t - (petLast.get(c.id) ?? t)));
     petLast.set(c.id, t);
     walker.update(dtPet, petKind, 14 * scale, free - 14 * scale, scale);
-    if (walker.lane === 'back') paintStagePet(g, walker, petKind, base, scale, t);
+    if (walker.lane === 'back') paintStagePet(g, walker, petKind, base, scale, t, c.id);
   }
   g.save();
   g.translate(cx, base);
@@ -1179,8 +1290,9 @@ function drawStageHero(c: HTMLCanvasElement, _tier: number, t: number, _silhouet
   }
   g.restore();
   if (decorOn) paintStageProps(g, placed, c.id, w, h, L, scale, t, base, 'front', propLayer);
-  if (walker && petKind && walker.lane === 'front') paintStagePet(g, walker, petKind, base, scale, t);
+  if (walker && petKind && walker.lane === 'front') paintStagePet(g, walker, petKind, base, scale, t, c.id);
   wind?.draw(g, 1, scale);
+  if (weather !== 'none') drawWeather(g, weather, 'front', w, h, L, scale, t);
   if (decorOn && decor.fx) drawFx(g, decor.fx, w, h, t, cx, base);
   if (decorOn && decor.frame) drawFrame(g, decor.frame, w, h, t);
 }
@@ -1553,6 +1665,41 @@ function setupPropDragging(): void {
 }
 setupPropDragging();
 
+/** Taps on the main screen: the TV and the lamp switch on and off, balls bounce, the pet reacts. */
+function setupMenuTaps(): void {
+  document.addEventListener('click', (e) => {
+    const c = e.target as HTMLElement | null;
+    if (!c || c.id !== 'menuHero') return;
+    const r = c.getBoundingClientRect();
+    const px = e.clientX - r.left;
+    const py = e.clientY - r.top;
+    const now = performance.now() / 1000;
+    const boxes = propBoxes.get('menuHero') ?? [];
+    // The object drawn last (lowest on the screen) is on top.
+    const hit = [...boxes].reverse().find((b) => px >= b.x - 4 && px <= b.x + b.w + 4 && py >= b.y - 4 && py <= b.y + b.h + 4);
+    if (hit) {
+      if (hit.id === 'prop_tv') {
+        menuState.tvOn = !menuState.tvOn;
+        menuState.save();
+        tvLast = -1;
+      } else if (hit.id === 'prop_lamp') {
+        menuState.lampOn = !menuState.lampOn;
+        menuState.save();
+      }
+      menuState.touched.set(hit.id, now);
+      audio.play('click');
+      if (settingsStore.get().vibration) haptic('light');
+      return;
+    }
+    if (menuPetBox && Math.hypot(px - menuPetBox.x, py - menuPetBox.y) <= menuPetBox.r + 6) {
+      petReactions.set('menuHero', now);
+      audio.play('unlock');
+      if (settingsStore.get().vibration) haptic('light');
+    }
+  });
+}
+setupMenuTaps();
+
 /** The live preview of the hero in the styles screen. */
 function drawStylesPreview(t: number): void {
   const c = document.getElementById('stylesHero') as HTMLCanvasElement | null;
@@ -1791,13 +1938,36 @@ router.register('duels', {
       waitingFor: duelWaitingFor,
       leadersHtml: duelLbHtml,
       coins: session.data?.shop?.coins ?? null,
-      stake: DUEL_STAKE,
+      stake: duelStake(),
     }),
   cls: 'solid',
   mount: () => {
     if (session.mode === 'online') duelClient.connect();
     void loadDuelLeaders();
   },
+});
+/** Watching a duel (spectator): the list of running duels and the two live copies. */
+const spec = {
+  list: null as SpecRow[] | null,
+  match: null as { duel: string; a: LiveReplica; b: LiveReplica; ids: [number, number]; names: [string, string]; sized: boolean; ended: boolean } | null,
+};
+/** The live copies are created before the screen exists: put them onto the screen's canvases. */
+function bindSpecCanvases(m: NonNullable<typeof spec.match>, ca: HTMLCanvasElement, cb: HTMLCanvasElement): void {
+  for (const [r, c] of [[m.a, ca], [m.b, cb]] as [LiveReplica, HTMLCanvasElement][]) {
+    r.attach(c);
+    r.resize(Math.max(90, Math.floor(c.parentElement?.clientWidth ?? 160)));
+    (r as unknown as { canvasEl: HTMLCanvasElement }).canvasEl = c;
+  }
+  m.sized = true;
+}
+
+router.register('specList', {
+  html: () => V.specListView(spec.list),
+  cls: 'solid',
+});
+router.register('spectate', {
+  html: () => (spec.match ? V.spectateView(spec.match.names[0], spec.match.names[1]) : ''),
+  cls: 'solid',
 });
 router.register('msgMenu', { html: () => (chat.menuMsg ? V.chatMsgMenuView(chat.menuMsg) : ''), modal: true });
 router.register('reportReason', { html: () => V.reportReasonView(), modal: true });
@@ -1833,7 +2003,7 @@ router.register('profile', {
   mount: (root) => fitStage(root, '.profile-stage'),
 });
 router.register('moreMenu', { html: () => V.moreMenuView(), modal: true });
-router.register('coinsInfo', { html: () => V.coinsInfoView(session.data?.shop?.coins ?? 0), modal: true });
+router.register('coinsInfo', { html: () => V.coinsInfoView(session.data?.shop?.coins ?? 0, session.data?.tunables?.points_per_coin ?? 10), modal: true });
 router.register('share', { html: () => V.shareView(canShare()), modal: true });
 router.register('tutorialDone', { html: () => V.tutorialDoneView(), modal: true });
 let stubKind: V.StubKind = 'offline';
@@ -2041,9 +2211,9 @@ const actions: Record<string, (arg: string, el: HTMLElement) => void> = {
   },
   challenge: (arg) => {
     const have = session.data?.shop?.coins;
-    if (have !== undefined && have < DUEL_STAKE) {
+    if (have !== undefined && have < duelStake()) {
       router.back();
-      toast(ru.duel.needCoins(DUEL_STAKE, have), 4200);
+      toast(ru.duel.needCoins(duelStake(), have), 4200);
       return;
     }
     askNotificationsOnce();
@@ -2225,8 +2395,8 @@ const actions: Record<string, (arg: string, el: HTMLElement) => void> = {
   acceptConsent: () => void acceptConsent(),
   duelFind: () => {
     const have = session.data?.shop?.coins;
-    if (have !== undefined && have < DUEL_STAKE) {
-      toast(ru.duel.needCoins(DUEL_STAKE, have), 4200);
+    if (have !== undefined && have < duelStake()) {
+      toast(ru.duel.needCoins(duelStake(), have), 4200);
       router.refresh();
       return;
     }
@@ -2235,6 +2405,19 @@ const actions: Record<string, (arg: string, el: HTMLElement) => void> = {
     duelWaitingFor = null;
     duelClient.send({ t: 'find' });
     router.refresh();
+  },
+  // The list is asked for when the screen opens and on "refresh" (not on every redraw).
+  specOpen: () => {
+    spec.list = null;
+    router.open('specList');
+    duelClient.send({ t: 'spec_list' });
+  },
+  specRefresh: () => duelClient.send({ t: 'spec_list' }),
+  specJoin: (id) => duelClient.send({ t: 'spec_join', duel: id }),
+  specLeave: () => {
+    duelClient.send({ t: 'spec_leave' });
+    spec.match = null;
+    router.back();
   },
   duelCancel: () => {
     duelUi = 'idle';
@@ -2427,7 +2610,9 @@ function afterBoot(): void {
 // ---------- Chat ----------
 
 /** The stake of a duel in coins (the server decides and checks it; this is for the texts). */
-const DUEL_STAKE = 500;
+function duelStake(): number {
+  return session.data?.tunables?.duel_stake ?? 500;
+}
 
 const chat = {
   blocked: [] as BlockedPlayer[],
@@ -2702,7 +2887,7 @@ duelClient.onMessage = (m: DuelMsg) => {
         duelClient.send({ t: 'decline' });
         return;
       }
-      invite = { from: m.from, timeout: m.timeout, stake: m.stake ?? DUEL_STAKE };
+      invite = { from: m.from, timeout: m.timeout, stake: m.stake ?? duelStake() };
       audio.play('unlock');
       router.open('invite');
       break;
@@ -2739,6 +2924,61 @@ duelClient.onMessage = (m: DuelMsg) => {
     case 'result':
       showDuelOutcome(m.outcome, m.coins);
       break;
+    case 'spec_list':
+      spec.list = m.duels;
+      if (router.top === 'specList') router.refresh();
+      break;
+    case 'spec_err':
+      toast(ru.spec.unavailable, 3000);
+      if (router.top === 'specList') duelClient.send({ t: 'spec_list' });
+      break;
+    case 'spec_start': {
+      // Both runs are played again from the seed; the inputs sent so far catch them up.
+      const start = Date.now() - m.elapsed_ms;
+      const [pa, pb] = m.players;
+      const mk = (id: string, p: DuelPlayer): LiveReplica => {
+        const r = new LiveReplica(document.createElement('canvas'), m.seed, start, p.look);
+        r.push((m.logs[String(p.id)] ?? []) as never);
+        const sc = m.scores[String(p.id)];
+        if (typeof sc === 'number') r.finalScore = sc;
+        void id;
+        return r;
+      };
+      spec.match = {
+        duel: m.duel,
+        a: mk('a', pa),
+        b: mk('b', pb),
+        ids: [pa.id, pb.id],
+        names: [pa.name || ru.duel.player, pb.name || ru.duel.player],
+        sized: false,
+        ended: false,
+      };
+      router.open('spectate');
+      break;
+    }
+    case 'spec_inputs': {
+      const s = spec.match;
+      if (!s || s.duel !== m.duel) break;
+      (m.uid === s.ids[0] ? s.a : s.b).push(m.log as never);
+      break;
+    }
+    case 'spec_dead': {
+      const s = spec.match;
+      if (!s || s.duel !== m.duel) break;
+      (m.uid === s.ids[0] ? s.a : s.b).finalScore = m.score;
+      break;
+    }
+    case 'spec_end': {
+      const s = spec.match;
+      if (!s || s.duel !== m.duel) break;
+      s.ended = true;
+      const [ia, ib] = s.ids;
+      const ra = m.outcome[String(ia)];
+      const rb = m.outcome[String(ib)];
+      const res = document.getElementById('specResult');
+      if (res) res.textContent = `${ru.spec.ended}: ${ra === 'win' ? `${s.names[0]} ${ru.spec.won}` : rb === 'win' ? `${s.names[1]} ${ru.spec.won}` : ru.spec.draw}`;
+      break;
+    }
   }
 };
 
@@ -2956,8 +3196,28 @@ function showDuelOutcome(outcome: 'win' | 'loss' | 'draw', coins = 0): void {
 
 // ---------- Main loop ----------
 
+let deviceSent = false;
+
+/** Speed readout in a corner: open the game with ?perf=1 to see it (for testing on a phone). */
+let perfBox: HTMLElement | null = null;
+let perfShownAt = 0;
+function perfOverlay(now: number): void {
+  if (!new URLSearchParams(location.search).has('perf')) return;
+  if (!perfBox) {
+    perfBox = document.createElement('div');
+    perfBox.style.cssText = 'position:fixed;left:4px;top:4px;z-index:99;padding:4px 7px;border-radius:6px;background:rgba(0,0,0,.65);color:#9fff9f;font:11px/1.3 monospace;pointer-events:none;white-space:pre';
+    document.body.appendChild(perfBox);
+  }
+  if (now - perfShownAt < 500) return;
+  perfShownAt = now;
+  const r = perf.report(false);
+  perfBox.textContent = `${r.fps} fps  p95 ${r.p95} ms\nкачество ${perf.effective}  dpr ${Math.min(2, window.devicePixelRatio || 1)}\nпамять ${navigator.deviceMemory ?? '?'} ГБ  ядра ${navigator.hardwareConcurrency ?? '?'}`;
+}
+
 function frame(now: number): void {
   const realDt = Math.min((now - last) / 1000, gameConfig.sim.maxFrameSec);
+  perf.record(now - last);
+  perfOverlay(now);
   last = now;
   let scale = 1;
   const active = (mode === 'run' || mode === 'tutorial') && !paused;
@@ -3008,6 +3268,25 @@ function frame(now: number): void {
     const dc = document.getElementById('decorHero') as HTMLCanvasElement | null;
     if (dc) drawStageHero(dc, lastTier(), now / 1000);
   }
+  if (router.top === 'spectate' && spec.match) {
+    const m = spec.match;
+    const ca = document.getElementById('specA') as HTMLCanvasElement | null;
+    const cb = document.getElementById('specB') as HTMLCanvasElement | null;
+    if (ca && cb) {
+      // The live copies draw into the canvases of this screen (the placeholders are replaced once).
+      if (!m.sized || (m.a as unknown as { canvasEl?: HTMLCanvasElement }).canvasEl !== ca) bindSpecCanvases(m, ca, cb);
+      m.a.update();
+      m.b.update();
+      m.a.draw();
+      m.b.draw();
+      const sa = document.getElementById('specAScore');
+      const sb = document.getElementById('specBScore');
+      if (sa) sa.textContent = String(m.a.score);
+      if (sb) sb.textContent = String(m.b.score);
+      document.getElementById('specAOut')?.classList.toggle('hidden', !m.a.dead);
+      document.getElementById('specBOut')?.classList.toggle('hidden', !m.b.dead);
+    }
+  }
   if (router.top === 'pets') {
     const pc = document.getElementById('petsHero') as HTMLCanvasElement | null;
     if (pc) drawStageHero(pc, lastTier(), now / 1000);
@@ -3031,7 +3310,12 @@ initVk({
     pause();
     audio.suspend();
   },
-  onRestore: () => audio.resume(),
+  onRestore: () => {
+    audio.resume();
+    // Coming back from an ad or from another app: steering and the field size are renewed.
+    input.reset();
+    layout();
+  },
 });
 layout();
 requestAnimationFrame(frame);

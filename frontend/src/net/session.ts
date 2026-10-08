@@ -134,6 +134,8 @@ export interface Bootstrap {
   shop?: ShopState;
   /** Privacy choices of this player. */
   privacy?: { hide_vk_link: boolean };
+  /** Balance numbers the server currently uses (they can change without a new version of the game). */
+  tunables?: { duel_stake: number; points_per_coin: number };
   server_time: number;
   ads: Record<string, number | boolean>;
   crown?: CrownInfo;
@@ -346,7 +348,10 @@ export class Session {
   }
 
   /** Anonymous funnel event; failures are ignored. */
-  event(type: 'tutorial_start' | 'tutorial_end' | 'run_start' | 'run_end' | 'tier_reached' | 'ad_shown' | 'settings_changed', value?: number): void {
+  event(
+    type: 'tutorial_start' | 'tutorial_end' | 'run_start' | 'run_end' | 'tier_reached' | 'ad_shown' | 'settings_changed' | 'perf_fps' | 'perf_level' | 'device_mem' | 'device_cores',
+    value?: number,
+  ): void {
     if (this.mode !== 'online') return;
     api('POST', '/events', value === undefined ? { type } : { type, value }).catch(() => undefined);
   }

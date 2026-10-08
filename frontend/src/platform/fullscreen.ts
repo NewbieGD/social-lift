@@ -45,6 +45,29 @@ export async function toggleFullscreen(): Promise<boolean> {
   return false;
 }
 
+/**
+ * An ad cannot be shown over a page that is in full screen (VK draws it outside the game's frame,
+ * behind the full-screen element). So the game leaves full screen before asking for an ad and
+ * returns on the first tap or key press afterwards (the browser only allows entering full screen
+ * from a user action). Returns the function that arranges the return.
+ */
+export async function leaveFullscreenForAd(): Promise<() => void> {
+  if (!isFullscreen()) return () => undefined;
+  await toggleFullscreen();
+  await new Promise((r) => setTimeout(r, 300));
+  return () => {
+    const again = (): void => {
+      window.removeEventListener('pointerdown', again, true);
+      window.removeEventListener('pointerup', again, true);
+      window.removeEventListener('keydown', again, true);
+      if (!isFullscreen()) void toggleFullscreen();
+    };
+    window.addEventListener('pointerdown', again, true);
+    window.addEventListener('pointerup', again, true);
+    window.addEventListener('keydown', again, true);
+  };
+}
+
 /** Calls back when the page enters or leaves full screen (also on Esc). */
 export function onFullscreenChange(cb: (on: boolean) => void): void {
   const fire = (): void => cb(isFullscreen());

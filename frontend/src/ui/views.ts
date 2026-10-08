@@ -2,6 +2,7 @@
 import { AGE_LABEL } from '../config';
 import { legal, ru, type DocSection } from '../i18n/ru';
 import type { ChatMsg, ChatUser } from '../net/duel';
+import type { SpecRow } from '../net/duel';
 import type { BlockedPlayer, CatalogItem, FinishResult, Leaderboard, LeaderRow, PublicProfile, ShopState, Stats } from '../net/session';
 import { STYLE_SETS } from '../render/styles';
 import { esc } from './dom';
@@ -217,13 +218,13 @@ export function menuView(d: MenuData): string {
 }
 
 /** What coins are for: how they are earned and where to spend them. */
-export function coinsInfoView(coins: number): string {
+export function coinsInfoView(coins: number, perCoin = 10): string {
   return `<div class="panel coins-info">
     <button class="icon-btn close" data-action="back" aria-label="${ru.coinsInfo.close}">${CLOSE_ICON}</button>
     <div class="coins-big">${COIN_ICON}<b>${coins}</b></div>
     <p class="muted">${ru.coinsInfo.balance(coins)}</p>
     <h3>${ru.coinsInfo.earnTitle}</h3>
-    <p>${ru.coinsInfo.earn}</p>
+    <p>${ru.coinsInfo.earn(perCoin)}</p>
     <h3>${ru.coinsInfo.spendTitle}</h3>
     <p>${ru.coinsInfo.spend}</p>
     <button class="primary" data-action="openFromMore" data-arg="decor">${ru.coinsInfo.open}</button>
@@ -856,10 +857,36 @@ export function duelsView(d: DuelView): string {
         ? `<button class="secondary" data-action="duelCancel">${ru.duel.cancel}</button>`
         : `<button class="primary" data-action="duelFind" ${canFind ? '' : 'disabled'}>${ru.duel.find}</button>`
     }
+    ${d.status !== 'offline' && d.status !== 'connecting' ? `<button class="secondary" data-action="specOpen">${ru.spec.open}</button>` : ''}
     <h3 class="duel-lb-title"><span>${ru.duel.leaders}</span></h3>
     <div class="duel-lb" id="duelLbList">${d.leadersHtml?.rows ?? '<div class="lb-row skeleton"><span></span><span></span><span></span></div>'}</div>
     <div class="me-card" id="duelLbMe">${d.leadersHtml?.me ?? ''}</div>
   </div></div>`;
+}
+
+export function specListView(rows: SpecRow[] | null): string {
+  const list = (rows ?? [])
+    .map((r) => {
+      const n = (p: { name: string | null }): string => esc(p.name || ru.duel.player);
+      return `<div class="spec-row"><div class="spec-names"><b>${n(r.a)}</b> <span>vs</span> <b>${n(r.b)}</b><small>${ru.spec.elapsed(r.elapsed)} · ${ru.spec.watchers(r.watchers)}</small></div><button class="primary" data-action="specJoin" data-arg="${r.id}">${ru.spec.watch}</button></div>`;
+    })
+    .join('');
+  return `${header(ru.spec.title)}<div class="scroll"><div class="panel flat">
+    ${rows === null ? `<p class="status">${ru.chat.connecting}</p>` : list || `<p class="muted">${ru.spec.none}</p>`}
+    <button class="secondary" data-action="specRefresh">${ru.spec.refresh}</button>
+  </div></div>`;
+}
+
+/** The two live copies of a duel, side by side, with names and scores. */
+export function spectateView(a: string, b: string): string {
+  const side = (id: string, name: string): string =>
+    `<div class="spec-side"><div class="spec-head"><b>${esc(name)}</b><span id="${id}Score">0</span></div><div class="spec-field"><canvas id="${id}" aria-hidden="true"></canvas><div class="spec-out hidden" id="${id}Out">${ru.spec.out}</div></div></div>`;
+  return `<div class="spec-screen">
+    <div class="spec-top"><button class="secondary" data-action="specLeave">${ru.spec.leave}</button><span class="spec-live"><i></i>${ru.spec.live}</span></div>
+    <div class="spec-grid">${side('specA', a)}${side('specB', b)}</div>
+    <p class="spec-result" id="specResult"></p>
+    <p class="muted small">${ru.spec.hint}</p>
+  </div>`;
 }
 
 export function inviteView(from: { name: string | null; photo: string | null }, seconds: number, stake = 500): string {

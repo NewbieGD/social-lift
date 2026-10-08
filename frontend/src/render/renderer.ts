@@ -5,6 +5,8 @@ import { ru } from '../i18n/ru';
 import { isBuffOnly, type Slot } from './slots';
 import { tone } from './shade3d';
 import { DeathFx } from './deathFx';
+import { comboLevel, FireTrail } from './fireTrail';
+import { perf } from '../core/perf';
 import type { DeathReason } from '../core/types';
 import { drawPet, type PetKind } from './pets';
 import { PetFollower } from './petMotion';
@@ -167,6 +169,7 @@ export class Renderer {
   private bills: FlyBill[] = [];
   private particles = new Particles();
   private deathFx = new DeathFx();
+  private fireTrail = new FireTrail();
   private deathFxDone = false;
   private lastDeathReason: DeathReason = 'fall';
   private skies = new Map<number, HTMLCanvasElement>();
@@ -176,7 +179,6 @@ export class Renderer {
   private sceneTier = 0;
   private flashlightColor: [number, number, number] = [235, 235, 225];
   private auraPulse = 0;
-  private frameTimes: number[] = [];
   private lowQuality = false;
 
   reducedEffects = false;
@@ -270,6 +272,7 @@ export class Renderer {
     this.sceneTier = tier;
     this.cine = null;
     this.petFollower.reset();
+    this.fireTrail.reset();
     this.danger = 0;
     this.highlights.length = 0;
     this.sparkles.length = 0;
@@ -557,6 +560,7 @@ export class Renderer {
 
     this.particles.update(frameDt);
     this.deathFx.update(frameDt);
+    this.fireTrail.update(frameDt);
     if (!sim.dead && this.deathFxDone) {
       // A new run: the effect and the screen jolt are over.
       this.deathFx.reset();
@@ -1289,6 +1293,10 @@ export class Renderer {
     const beamAngle = hero.facing > 0 ? rig.torchAngle : Math.PI - rig.torchAngle;
     if (!sim.dead) this.drawBeam(sim, tipX, tipY, beamAngle, rgb, outfit.newTorch, dt);
 
+    // The fiery trail of a combo (see fireTrail.ts): behind the hero, stronger with the multiplier.
+    const combo = sim.dead || this.reducedEffects || sim.tutorial || perf.effective >= 2 ? 0 : comboLevel(sim.multiplier);
+    this.fireTrail.emit(dt * (perf.effective >= 1 ? 0.5 : 1), x, footY - 16 * sy, hero.vx, hero.vy, combo);
+    this.fireTrail.draw(ctx, combo, x, footY - 28 * sy);
     // The moment of death: the hero is replaced by his own shards (see deathFx.ts).
     if (sim.dead && !this.reducedEffects && !this.deathFxDone) {
       this.deathFxDone = true;
@@ -1793,14 +1801,10 @@ export class Renderer {
     ctx.globalAlpha = 1;
   }
 
-  /** Adaptive quality: if frames average over 20 ms for about 2 s, halve particles. */
-  private trackQuality(dt: number): void {
-    if (dt <= 0) return;
-    this.frameTimes.push(dt);
-    if (this.frameTimes.length < 120) return;
-    const avg = this.frameTimes.reduce((a, b) => a + b, 0) / this.frameTimes.length;
-    this.frameTimes.length = 0;
-    const low = avg > 0.02;
+  /** Adaptive quality: on a slow device particles are halved (the level is chosen by core/perf.ts). */
+  private trackQuality(_dt: number): void {
+    // The level comes from the shared monitor (core/perf.ts), which watches the real frame times.
+    const low = perf.effective >= 1;
     if (low !== this.lowQuality) {
       this.lowQuality = low;
       this.particles.cap = low ? MAX_PARTICLES / 2 : MAX_PARTICLES;

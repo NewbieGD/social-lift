@@ -1,0 +1,1 @@
+export default { send: (m, p) => { window.__bridgeCalls = (window.__bridgeCalls||[]).concat(m); if (m==='VKWebAppShowStoryBox') window.__story = p.blob; return Promise.resolve({result:true}); }, subscribe: (cb) => { window.__bridgeCb = cb; }, supportsAsync: () => Promise.resolve(true) };

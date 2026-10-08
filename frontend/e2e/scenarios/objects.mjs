@@ -1,0 +1,50 @@
+const BASE = process.env.BASE || 'http://localhost:8766';
+const OUT = process.env.OUT || 'e2e/.out';
+import { chromium } from 'playwright';
+import { readFileSync } from 'node:fs';
+const W = Number(process.argv[2]||390), H = Number(process.argv[3]||844);
+const catalog = JSON.parse(readFileSync('./e2e/catalog.json','utf8')).catalog;
+const replay = readFileSync('./e2e/replay.json','utf8');
+const b = await chromium.launch(); const ctx = await b.newContext({viewport:{width:W,height:H}, hasTouch: W<600});
+await ctx.addInitScript((r) => { localStorage.setItem('sl_lastrun', r); window.WebSocket = class { constructor(){ this.readyState=0; } send(){} close(){} }; }, replay);
+const p = await ctx.newPage(); const errs=[]; p.on('pageerror',e=>errs.push(String(e))); p.on('console',m=>{ if(m.type()==='error' && !/WebSocket|404/.test(m.text())) errs.push(m.text()); });
+let decor = {}; let coins = 5000; const puts=[];
+const owned = ['bg_dusk','prop_football','prop_basketball','prop_tv','prop_cup','prop_sword','prop_lamp','prop_bat','bg_neon'];
+await p.route('https://sociallift1-vkgamer.mia0.amvera.tech/api/**', async (route) => {
+  const req=route.request(); const path=new URL(req.url()).pathname;
+  const json=(o)=>route.fulfill({status:200,contentType:'application/json',headers:{'access-control-allow-origin':'*'},body:JSON.stringify(o)});
+  const state=()=>({coins,owned,loadout:{},decor,catalog});
+  if (path.endsWith('/session/bootstrap')) return json({profile:{id:5,name:'Я',photo:null},flags:{consent_ok:true,tutorial_done:true},terms_version:1,settings:{rulesCard:false},settings_updated_at:Date.now()+9999,stats:{best_all:1050,best_tier:6,best_week:300,last_score:76,total_runs:12,rank_all:59,rank_week:4,last_tier:6,items_mask:0},shop:state(),server_time:Date.now(),ads:{}});
+  if (path.endsWith('/decor')) { const body=JSON.parse(req.postData()).decor; puts.push(JSON.stringify(body).slice(0,160)); for (const k of ['bg','frame','fx','pet']) if (k in body) { if (body[k]) decor[k]=body[k]; else delete decor[k]; } if ('props' in body) { if (body.props.length) decor.props=body.props; else delete decor.props; } return json({decor}); }
+  if (path.endsWith('/shop')) return json(state());
+  return json({ok:true});
+});
+const top = () => p.evaluate(()=>document.querySelector('#screens .screen:not(.leaving)')?.dataset.screen ?? null);
+await p.goto(`${BASE}/index.html?vk_user_id=5&vk_app_id=7&sign=x`); await p.waitForTimeout(1500);
+await p.click('[data-arg="decor"]', {force:true}); await p.waitForTimeout(800);
+await p.click('[data-action="decorPick"][data-arg="bg_neon"]'); await p.waitForTimeout(300);
+await p.click('[data-action="decorTab"][data-arg="prop"]'); await p.waitForTimeout(500);
+for (const id of ['prop_football','prop_basketball','prop_lamp','prop_bat','prop_cup','prop_sword','prop_tv']) { await p.click(`[data-action="decorPick"][data-arg="${id}"]`); await p.waitForTimeout(150); }
+console.log('placed', decor.props?.length, decor.props?.map(x=>x.id+'@'+x.x+','+x.y).join(' '));
+await p.screenshot({path:`${OUT}/ob_1_${W}.png`});
+// drag the cup somewhere else with the mouse
+await p.evaluate(()=>document.querySelector('.styles-screen')?.scrollTo(0,0)); await p.waitForTimeout(300);
+const box = await p.locator('#decorHero').boundingBox();
+const cup = decor.props.find(x=>x.id==='prop_cup');
+const sx = box.x + cup.x*box.width, sy = box.y + cup.y*box.height - 50;
+await p.mouse.move(sx, sy); await p.mouse.down(); await p.mouse.move(sx+40, sy-60, {steps:6}); await p.mouse.move(box.x+box.width*0.62, box.y+box.height*0.52, {steps:6}); await p.mouse.up(); await p.waitForTimeout(500);
+const cup2 = decor.props.find(x=>x.id==='prop_cup');
+console.log('cup moved from', cup.x, cup.y, 'to', cup2.x, cup2.y, 'tv at', decor.props.find(x=>x.id==='prop_tv').x, decor.props.find(x=>x.id==='prop_tv').y, '| selected button enabled:', await p.locator('[data-action="decorTurn"]').isEnabled());
+await p.click('[data-action="decorTurn"]'); await p.waitForTimeout(300);
+console.log('cup turned r =', decor.props.find(x=>x.id==='prop_cup').r, '| last put:', puts[puts.length-1]);
+await p.click('[data-action="decorTurn"]'); await p.waitForTimeout(300);
+console.log('cup turned again r =', decor.props.find(x=>x.id==='prop_cup').r);
+await p.click('[data-action="decorTurn"]'); await p.waitForTimeout(300);
+await p.click('[data-action="decorTurn"]'); await p.waitForTimeout(300);
+await p.screenshot({path:`${OUT}/ob_2_${W}.png`});
+await p.click('[data-action="decorRemove"]'); await p.waitForTimeout(300);
+console.log('after remove', decor.props.length, 'saves:', puts.length);
+await p.click('[data-action="back"]'); await p.waitForTimeout(1500);
+await p.screenshot({path:`${OUT}/ob_3_${W}.png`});
+console.log('hscroll', await p.evaluate(()=>document.documentElement.scrollWidth>innerWidth+1), 'errors', errs);
+await b.close();

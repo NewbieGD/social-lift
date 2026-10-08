@@ -29,6 +29,15 @@ export interface ChatMsg {
   sys?: boolean;
 }
 
+/** A duel that is running now (for the list of duels to watch). */
+export interface SpecRow {
+  id: string;
+  a: { id: number; name: string | null; photo: string | null };
+  b: { id: number; name: string | null; photo: string | null };
+  elapsed: number;
+  watchers: number;
+}
+
 export type DuelMsg =
   | { t: 'chat_hist'; msgs: ChatMsg[]; users: ChatUser[]; wait: number }
   | { t: 'chat'; msg: ChatMsg }
@@ -57,6 +66,12 @@ export type DuelMsg =
       stake?: number;
     }
   | { t: 'inputs'; upto: number; log: number[][] }
+  | { t: 'spec_list'; duels: SpecRow[] }
+  | { t: 'spec_start'; duel: string; seed: number; elapsed_ms: number; players: DuelPlayer[]; logs: Record<string, number[][]>; scores: Record<string, number | null> }
+  | { t: 'spec_inputs'; duel: string; uid: number; upto: number; log: number[][] }
+  | { t: 'spec_dead'; duel: string; uid: number; score: number }
+  | { t: 'spec_end'; duel: string; outcome: Record<string, 'win' | 'loss' | 'draw'> }
+  | { t: 'spec_err'; code: string }
   | { t: 'opp_dead'; score: number }
   | { t: 'opp_left' }
   | { t: 'result'; duel: string; outcome: 'win' | 'loss' | 'draw'; coins?: number };

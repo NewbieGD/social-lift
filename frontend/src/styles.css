@@ -5567,3 +5567,153 @@ body.reduced .coins-line svg {
   font-size: 13px;
   line-height: 1.4;
 }
+
+/* ===== Watching duels ===== */
+.spec-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+.spec-names {
+  flex: 1;
+  min-width: 0;
+}
+.spec-names span {
+  color: var(--ink-dim);
+  margin: 0 4px;
+}
+.spec-names small {
+  display: block;
+  color: var(--ink-dim);
+}
+.spec-row .primary {
+  width: auto;
+  margin: 0;
+  padding: 8px 14px;
+}
+.spec-screen {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding: calc(8px + var(--safe-top, 0px)) 10px calc(8px + var(--safe-bottom, 0px));
+  box-sizing: border-box;
+}
+.spec-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+.spec-top .secondary {
+  width: auto;
+  margin: 0;
+  padding: 6px 14px;
+}
+.spec-live {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 800;
+  font-size: 13px;
+  color: #ff8a8a;
+}
+.spec-live i {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #ff3b3b;
+  animation: live-blink 1.2s ease-in-out infinite;
+}
+@keyframes live-blink {
+  50% {
+    opacity: 0.25;
+  }
+}
+.spec-grid {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.spec-side {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.spec-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 6px;
+  padding: 0 4px 4px;
+}
+.spec-head b {
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.spec-head span {
+  font-size: 20px;
+  font-weight: 900;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+.spec-field {
+  position: relative;
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: inset 0 0 0 1.5px rgba(255, 255, 255, 0.15);
+}
+.spec-field canvas {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+.spec-out {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgba(5, 6, 10, 0.6);
+  font-weight: 900;
+  font-size: 18px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #ff9a9a;
+}
+.spec-out.hidden {
+  display: none;
+}
+.spec-result {
+  margin: 8px 0 2px;
+  text-align: center;
+  font-weight: 800;
+  color: #ffe58a;
+  min-height: 1.4em;
+}
+
+/* The name of a found item: a small one-line label at the top, out of the way of the hero. */
+.caption {
+  top: 56px;
+  bottom: auto;
+  flex-direction: row;
+  align-items: baseline;
+  gap: 6px;
+  max-width: calc(100% - 24px);
+  padding: 3px 10px;
+  border-radius: 10px;
+  background: rgba(10, 12, 18, 0.66);
+  box-shadow: inset 0 0 0 1px rgba(255, 214, 64, 0.5);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cap-label {
+  font-size: 10px;
+}
+.cap-items {
+  font-size: 12.5px;
+}
