@@ -19,7 +19,7 @@ import { DuelClient, type SpecRow, type ChatMsg, type ChatUser, type DuelMsg, ty
 import { scenes } from './render/palette';
 import { buffIcon } from './ui/buffIcons';
 import { drawItem, ITEM_BY_TIER, itemCount, outfitFromMask, type Item } from './render/hero';
-import { fullscreenSupported, leaveFullscreenForAd, onFullscreenChange, toggleFullscreen } from './platform/fullscreen';
+import { fullscreenSupported, isFullscreen, leaveFullscreenForAd, onFullscreenChange, toggleFullscreen } from './platform/fullscreen';
 import { StageWind, stageLayout } from './render/ground';
 import { drawMenuBackdrop } from './render/menuBackdrops';
 import { drawFrame, drawFx, drawProp, propHalfWidth, propHeight } from './render/menuProps';
@@ -28,12 +28,14 @@ import { PetWalker } from './render/petMotion';
 import { LiveReplica } from './render/liveReplica';
 import { perf } from './core/perf';
 import { markSeen, unseen } from './ui/seen';
+import { gov as govApi, type GovPlayer, type GovState, type Notice } from './net/gov';
 import { drawDayTint, drawWeather, weatherFor, weatherForced, type WeatherKind } from './render/menuWeather';
 import { menuState } from './render/menuState';
 import { drawPet, PET_IDS, petHeight, type PetKind } from './render/pets';
 import { buyWithVotes, canPay } from './platform/pay';
 import { isIOS } from './platform/vk';
 import { CROWN_LIFT_FRONT, crownBob, drawCrown } from './render/crown';
+import { drawGovAura, drawThrone, type GovRole } from './render/govArt';
 import { occupiedSlots, splitBonus, type Slot } from './render/slots';
 import { STYLE_SETS, STYLES, type StyleLoadout } from './render/styles';
 import { drawStyleIcon } from './render/styleArt';
@@ -244,6 +246,16 @@ function renderBuffs(): void {
     chip.setAttribute('role', 'listitem');
     chip.title = `${ru.items[ITEM_BY_TIER[t]]}: +5%`;
     chip.appendChild(buffIcon(t));
+    buffsEl.appendChild(chip);
+  }
+  // The mayor's bonus to coins (while the mayor is in the game).
+  const g = session.data?.gov;
+  if (g?.bonus_active) {
+    const chip = document.createElement('span');
+    chip.className = 'buff gov-buff';
+    chip.setAttribute('role', 'listitem');
+    chip.title = ru.gov.buff(g.bonus_percent);
+    chip.textContent = `+${g.bonus_percent}%`;
     buffsEl.appendChild(chip);
   }
 }
@@ -547,6 +559,7 @@ function newSim(seed: number, tutorial = false, items = false, drop = false): vo
   document.body.style.backgroundColor = scenes[0].page;
   renderer.setScene(0);
   renderer.crown = hasCrown();
+  renderer.role = heroRole();
   renderer.heroTierOverride = null;
   renderer.menuGesture = null;
   renderer.sceneOnly = false;
@@ -576,11 +589,25 @@ async function startRun(): Promise<void> {
   renderer.prewarm(1, sim.viewH);
   if (!adAllowed()) console.info('[ads] не показываем:', adBlockReason());
   if (adAllowed()) {
-    // An ad cannot be shown over a page in full screen: leave it first, come back on the first tap.
-    const backToFullscreen = await leaveFullscreenForAd();
-    audio.suspend();
-    const shown = await ads.showInterstitial(adsConfig().timeout_sec);
-    audio.resume();
+    // Full screen is left alone unless an ad really does not show in it: some browsers hide VK's ad
+    // behind a full-screen page. After one such miss the game remembers it on this device, and then
+    // leaves full screen before asking for an ad and comes back on the first tap.
+    const inFs = isFullscreen();
+    const leave = inFs && fsBlocksAds();
+    const backToFullscreen = leave ? await leaveFullscreenForAd() : () => undefined;
+    // Never wait long for the answer: the loading screen must stay short.
+    const available = await ads.check(Math.min(adsConfig().timeout_sec, 3));
+    let shown = false;
+    if (available) {
+      audio.suspend();
+      shown = await ads.show();
+      audio.resume();
+      // An ad was offered, but nothing appeared while the page was in full screen: remember that.
+      if (!shown && inFs && !leave) setFsBlocksAds(true);
+    } else if (leave) {
+      // Full screen was left for nothing (no ad is available): it is not the cause.
+      setFsBlocksAds(false);
+    }
     backToFullscreen();
     // The ad covered the game: forget any touch that began before it and measure the field again.
     settleAfterAd();
@@ -606,6 +633,23 @@ async function startRun(): Promise<void> {
   if (!ticket && session.mode !== 'outside') {
     const why = session.ticketError ? ru.result.reasons2[session.ticketError] : '';
     toast(why ? `${ru.result.unranked}: ${why}` : ru.result.unranked, 3200);
+  }
+}
+
+/** Whether ads must be asked for outside full screen on this device (learned from a missed ad). */
+function fsBlocksAds(): boolean {
+  try {
+    return localStorage.getItem('sl_fs_blocks_ads') === '1';
+  } catch {
+    return false;
+  }
+}
+
+function setFsBlocksAds(on: boolean): void {
+  try {
+    localStorage.setItem('sl_fs_blocks_ads', on ? '1' : '0');
+  } catch {
+    /* ignore */
   }
 }
 
@@ -783,6 +827,10 @@ function finishRun(): void {
           const bestEl = document.getElementById('resultBest');
           if (bestEl) bestEl.textContent = String(res.best_all);
         }
+      }
+      if (res?.ring_found) {
+        audio.play('unlock');
+        toast(`${ru.gov.ringFound} ${ru.gov.ringNote}`, 5200);
       }
       if (res?.new_items?.length) {
         const line = document.getElementById('stylesLine');
@@ -1037,7 +1085,7 @@ function drawBuyPreview(t: number): void {
   else if (item.kind === 'fx') decor.fx = item.id;
   else if (item.kind === 'pet') decor.pet = item.id;
   else if (item.kind === 'prop') decor.props = [...(Array.isArray(decor.props) ? decor.props.filter((p) => p.id !== item.id) : []), { id: item.id, x: 0.78, y: 0.9, r: 0 }];
-  stageOverride = { decor, loadout: loadout as StyleLoadout, mask: ownedMask(), crown: hasCrown() };
+  stageOverride = { decor, loadout: loadout as StyleLoadout, mask: ownedMask(), crown: hasCrown(), role: heroRole() };
   drawStageHero(c, 0, t);
   stageOverride = null;
 }
@@ -1289,7 +1337,7 @@ function drawStageHero(c: HTMLCanvasElement, _tier: number, t: number, _silhouet
   g.clearRect(0, 0, w, h);
   // The hero stands on the street in front of a brick wall; the soles are on the `feet` line.
   const L = stageLayout(h);
-  const scale = Math.min(w / 58, (L.feet - 6) / (hasCrown() ? 124 : 96));
+  const scale = Math.min(w / 58, (L.feet - 6) / (crownShown() ? 124 : 96));
   let base = L.feet;
   // The main screen, the wardrobe and the previews wear the chosen decoration.
   const decorOn = c.id === 'menuHero' || c.id === 'decorHero' || c.id === 'petsHero' || c.id === 'profileHero' || c.id === 'wardHero' || c.id === 'buyPreview';
@@ -1346,13 +1394,13 @@ function drawStageHero(c: HTMLCanvasElement, _tier: number, t: number, _silhouet
     if (hint) {
       hint.style.left = `${cx}px`;
       // Just above the crown (or the head), with a small gap so they never touch.
-      const topY = base - (hasCrown() ? 100 : 72) * scale;
+      const topY = base - (crownShown() ? 100 : 72) * scale;
       hint.style.top = `${Math.max(0, topY - hint.offsetHeight - 6)}px`;
     }
     // Only the hero himself opens the wardrobe: an invisible button exactly over his figure.
     const hit = c.parentElement?.querySelector<HTMLElement>('.hero-hit');
     if (hit) {
-      const top = base - (hasCrown() ? 100 : 72) * scale;
+      const top = base - (crownShown() ? 100 : 72) * scale;
       hit.style.left = `${cx - 24 * scale}px`;
       hit.style.top = `${top}px`;
       hit.style.width = `${48 * scale}px`;
@@ -1397,12 +1445,14 @@ function drawStageHero(c: HTMLCanvasElement, _tier: number, t: number, _silhouet
   g.translate(cx, base - (c.id === 'menuHero' && heroDragging ? 5 * scale : 0));
   g.scale(scale, scale);
   const outfit = outfitFromMask(visibleMask(mask));
+  // The glow of the mayor or of an assistant, behind the hero.
+  drawGovAura(g, heroRole(), t, -34, settingsStore.get().reducedFx);
   drawHeroFront(g, outfit, t, still ? 'hips' : 'idle', !still && t % 6 < 2.2 ? 'grin' : 'normal', heroLoadout());
-  // The weekly leader's crown floats above the head (higher than a cap or a helmet).
-  if (hasCrown()) {
+  // The weekly leader's crown (or the mayor's diamond crown) floats above the head (higher than a cap or a helmet).
+  if (crownShown()) {
     g.translate(0, -(outfit.suit ? 68 : outfit.cap || heroLoadout().head ? 64 : 61) - CROWN_LIFT_FRONT - crownBob(t));
     g.scale(1.15, 1.15);
-    drawCrown(g, t, settingsStore.get().reducedFx);
+    drawCrown(g, t, settingsStore.get().reducedFx, heroRole() === 'mayor' ? 'mayor' : 'leader');
   }
   g.restore();
   if (decorOn) paintStageProps(g, placed, c.id, w, h, L, scale, t, base, 'front', propLayer);
@@ -1420,8 +1470,19 @@ interface StageView {
   loadout: StyleLoadout;
   mask: number;
   crown: boolean;
+  role?: GovRole;
 }
 let stageOverride: StageView | null = null;
+
+/** A post of the player (or of the player on view): the mayor or an assistant. */
+function heroRole(): GovRole {
+  return stageOverride ? stageOverride.role ?? null : session.data?.gov?.role ?? null;
+}
+
+/** Whether a crown floats above the hero: the leader's, or the mayor's (it takes its place). */
+function crownShown(): boolean {
+  return hasCrown() || heroRole() === 'mayor';
+}
 
 function hasCrown(): boolean {
   return stageOverride ? stageOverride.crown : !!session.data?.stats.crown;
@@ -1473,7 +1534,7 @@ function drawStyleIcons(root: HTMLElement): void {
 
 // ---------- Premium: things sold for VK votes ----------
 
-let stylesTab: 'mine' | 'premium' = 'mine';
+let stylesTab: 'mine' | 'premium' | 'gov' = 'mine';
 const SERAPH_LOADOUT = { head: 'seraph_head', torso: 'seraph_torso', arms: 'seraph_arms', legs: 'seraph_legs', torch: 'seraph_torch' } as StyleLoadout;
 let buying = false;
 
@@ -1578,6 +1639,105 @@ function drawPetIcons(root: HTMLElement): void {
 
 let decorTab: V.DecorTab = 'bg';
 let buyTarget: string | null = null;
+
+// ---------- The government (the weekly mayor election) ----------
+let govCache: GovState | null = null;
+let govNotices: Notice[] | null = null;
+let govFindTab: 'top' | 'chat' | 'rivals' = 'top';
+let govFindList: GovPlayer[] | null = null;
+let govFindQuery = '';
+
+/** The color of the Play button chosen by the mayor (it is the same for everybody). */
+function applyPlayColor(color: string | undefined): void {
+  document.body.dataset.play = color && color !== 'default' ? color : '';
+}
+
+/** Loads the state of the government and remembers what the rest of the game needs from it. */
+async function refreshGov(): Promise<void> {
+  if (session.mode !== 'online') return;
+  const res = await govApi.state();
+  if (!res.ok) return;
+  govCache = res.state;
+  const cur = session.data?.gov;
+  if (session.data) {
+    session.data.gov = {
+      role: res.state.me.role,
+      play_color: res.state.settings.play_color,
+      bonus_active: res.state.bonus_active,
+      bonus_percent: res.state.bonus_percent,
+      mayor_id: res.state.mayor?.id ?? null,
+      unread: cur?.unread ?? 0,
+    };
+  }
+  applyPlayColor(res.state.settings.play_color);
+  if (router.top === 'government' || router.top === 'govManage' || router.top === 'menu') router.refresh();
+}
+
+/** Loads the list of players the mayor can appoint (the search box keeps its focus while it is redrawn). */
+async function loadGovFind(show: boolean): Promise<void> {
+  govFindList = null;
+  if (show) router.refresh();
+  const list = await govApi.find(govFindTab, govFindQuery);
+  govFindList = list ?? [];
+  if (router.top !== 'govFind') return;
+  const hadFocus = document.activeElement?.id === 'govSearch';
+  router.refresh();
+  if (hadFocus) {
+    const input = document.getElementById('govSearch') as HTMLInputElement | null;
+    input?.focus();
+    input?.setSelectionRange(input.value.length, input.value.length);
+  }
+}
+
+async function loadNotices(): Promise<void> {
+  const res = await govApi.notices();
+  govNotices = res?.items ?? [];
+  if (session.data?.gov) session.data.gov.unread = 0;
+  if (router.top === 'notices') router.refresh();
+  // The messages are shown (the unread ones stay highlighted in this window), and now count as read.
+  void govApi.markRead();
+}
+
+/** The throne hall of the Government screen. */
+function drawGovThrone(t: number): void {
+  const c = document.getElementById('throneCanvas') as HTMLCanvasElement | null;
+  const g = c ? sizeCanvas(c) : null;
+  if (!c || !g) return;
+  drawThrone(g, c.clientWidth, c.clientHeight, t, govCache?.mayor ?? null);
+}
+
+/** The text of a failed government request. */
+function govError(code: string): string {
+  return ru.gov.errors[code] ?? ru.gov.errors.network;
+}
+
+/** The result of a government request: the new state is kept, a failure is explained. */
+function govDone(res: Awaited<ReturnType<typeof govApi.state>>, okText?: string): boolean {
+  if (!res.ok) {
+    toast(govError(res.code), 3400);
+    return false;
+  }
+  govCache = res.state;
+  if (session.data?.gov) {
+    session.data.gov.role = res.state.me.role;
+    session.data.gov.play_color = res.state.settings.play_color;
+    session.data.gov.bonus_active = res.state.bonus_active;
+  }
+  applyPlayColor(res.state.settings.play_color);
+  if (okText) toast(okText, 2400);
+  router.refresh();
+  return true;
+}
+
+/** The strip under the Play button: who is the mayor, or what stage the election is at. */
+function govStrip(): { kind: 'mayor' | 'voting' | 'candidacy' | 'empty'; text: string; unread: number } {
+  const unread = session.data?.gov?.unread ?? 0;
+  const g = govCache;
+  if (g?.mayor) return { kind: 'mayor', text: ru.gov.stripMayor(g.mayor.name || ru.leaders.player), unread };
+  if (g?.phase === 'voting') return { kind: 'voting', text: ru.gov.stripVoting, unread };
+  if (g) return { kind: 'candidacy', text: ru.gov.stripCandidacy, unread };
+  return { kind: 'empty', text: ru.gov.stripEmpty, unread };
+}
 /** The item shown in the "new thing!" card after a purchase. */
 let revealId: string | null = null;
 
@@ -1844,6 +2004,22 @@ function setupMenuTaps(): void {
 }
 setupMenuTaps();
 
+// The government: load it soon after the start, keep it fresh, and let the server know that the mayor is in the game.
+window.setTimeout(() => void refreshGov(), 1800);
+window.setInterval(() => {
+  if (document.visibilityState !== 'visible') return;
+  void refreshGov();
+  void govApi.notices().then((r) => {
+    if (r && session.data?.gov) {
+      session.data.gov.unread = r.unread;
+      if (router.top === 'menu') router.refresh();
+    }
+  });
+}, 90_000);
+window.setInterval(() => {
+  if (document.visibilityState === 'visible' && session.data?.gov?.role === 'mayor') govApi.ping();
+}, 60_000);
+
 /** The live preview of the hero in the styles screen. */
 function drawStylesPreview(t: number): void {
   const c = document.getElementById('stylesHero') as HTMLCanvasElement | null;
@@ -2019,6 +2195,28 @@ router.register('buyConfirm', {
   },
   modal: true,
 });
+router.register('government', {
+  html: () => V.governmentView(govCache, session.data?.profile.id ?? 0),
+  cls: 'solid',
+});
+router.register('govCandidacy', { html: () => V.candidacyView(govCache), modal: true });
+router.register('govManage', { html: () => V.govManageView(govCache), cls: 'solid' });
+router.register('govFind', {
+  html: () => V.govFindView(govFindTab, govFindList, govFindQuery),
+  modal: true,
+  mount: (root) => {
+    const input = root.querySelector<HTMLInputElement>('#govSearch');
+    let timer = 0;
+    input?.addEventListener('input', () => {
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => {
+        govFindQuery = input.value.trim();
+        void loadGovFind(false);
+      }, 350);
+    });
+  },
+});
+router.register('notices', { html: () => V.noticesView(govNotices), cls: 'solid' });
 router.register('reveal', {
   html: () => {
     const c = revealId ? session.data?.shop?.catalog.find((x) => x.id === revealId) : undefined;
@@ -2059,6 +2257,7 @@ router.register('menu', {
         const u = unseenByArea();
         return { styles: u.styles.size > 0, decor: u.decor.size > 0, pets: u.pets.size > 0 };
       })(),
+      gov: govStrip(),
       coins: session.mode === 'online' && session.data?.shop ? session.data.shop.coins : null,
       mode: session.mode,
     }),
@@ -2354,7 +2553,40 @@ const actions: Record<string, (arg: string, el: HTMLElement) => void> = {
     toast(ru.menu.heroReset, 2000);
     router.back();
   },
+  govApply: () => {
+    void govApi.apply().then((res) => {
+      if (govDone(res, ru.gov.applied)) {
+        audio.play('unlock');
+        router.back();
+        router.refresh();
+      }
+    });
+  },
+  govVote: (id) => void govApi.vote(Number(id)).then((res) => govDone(res, ru.gov.voteDone)),
+  govRespond: (arg) => void govApi.respond(arg === 'yes').then((res) => govDone(res)),
+  govInvite: (id) => {
+    void govApi.invite(Number(id)).then((res) => {
+      if (govDone(res, ru.gov.invited) && router.top === 'govFind') router.back();
+    });
+  },
+  govRemove: (id) => void govApi.remove(Number(id)).then((res) => govDone(res, ru.gov.removed)),
+  govBonus: () => void govApi.settings({ bonus: !govCache?.settings.bonus_on }).then((res) => govDone(res)),
+  govColor: (c) => void govApi.settings({ play_color: c }).then((res) => govDone(res)),
+  govFindTab: (tab) => {
+    govFindTab = tab === 'chat' || tab === 'rivals' ? tab : 'top';
+    void loadGovFind(true);
+  },
   open: (arg) => {
+    if (arg === 'government' || arg === 'govCandidacy' || arg === 'govManage') void refreshGov();
+    if (arg === 'govFind') {
+      govFindTab = 'top';
+      govFindQuery = '';
+      void loadGovFind(true);
+    }
+    if (arg === 'notices') {
+      govNotices = null;
+      void loadNotices();
+    }
     if (arg === 'styles' || arg === 'decor' || arg === 'pets') enterShopArea(arg);
     // A hold-and-drag of the hero ends with a click: it must not open the wardrobe.
     if (arg === 'wardrobe' && performance.now() - lastHeroDragEnd < 600) return;
@@ -2499,7 +2731,7 @@ const actions: Record<string, (arg: string, el: HTMLElement) => void> = {
     });
   },
   stylesTab: (tab) => {
-    stylesTab = tab === 'premium' ? 'premium' : 'mine';
+    stylesTab = tab === 'premium' ? 'premium' : tab === 'gov' ? 'gov' : 'mine';
     router.refresh();
   },
   openPremium: () => {
@@ -2992,6 +3224,18 @@ function onChatMessage(m: DuelMsg): void {
     case 'report_ok':
       toast(ru.chat.reportSent, 2600);
       break;
+    case 'chat_notice': {
+      // The government in the chat: arrivals and departures of the mayor and his assistants, appointments.
+      const name = m.user.name || ru.leaders.player;
+      const f = ru.gov.chat as Record<string, (n: string) => string>;
+      const text = f[m.kind]?.(name);
+      if (text) {
+        appendChat({ id: -Date.now(), ts: Date.now(), user: m.user, text, sys: true });
+      }
+      if (m.kind === 'mayor_in') celebrate();
+      else if (m.kind === 'mayor_out') audio.play('crowd');
+      break;
+    }
     case 'chat_warned':
       // Somebody complained about this player's message. In a run only a toast, never a window.
       if (mode === 'run' || mode === 'tutorial') {
@@ -3498,6 +3742,7 @@ function frame(now: number): void {
     }
   }
   if (router.top === 'buyConfirm') drawBuyPreview(now / 1000);
+  if (router.top === 'government') drawGovThrone(now / 1000);
   if (router.top === 'pets') {
     const pc = document.getElementById('petsHero') as HTMLCanvasElement | null;
     if (pc) drawStageHero(pc, lastTier(), now / 1000);
@@ -3505,7 +3750,7 @@ function frame(now: number): void {
   if (router.top === 'profile' && profileData) {
     const hc = document.getElementById('profileHero') as HTMLCanvasElement | null;
     if (hc) {
-      stageOverride = { decor: profileData.decor, loadout: profileData.loadout as StyleLoadout, mask: profileData.items_mask, crown: profileData.crown };
+      stageOverride = { decor: profileData.decor, loadout: profileData.loadout as StyleLoadout, mask: profileData.items_mask, crown: profileData.crown, role: profileData.role ?? null };
       drawStageHero(hc, profileData.stats.last_tier, now / 1000);
       stageOverride = null;
     }

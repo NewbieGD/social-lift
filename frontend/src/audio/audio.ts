@@ -4,7 +4,7 @@ import type { ColorId } from '../core/gameConfig';
 
 type Sfx =
   | 'jump' | 'land' | 'capture' | 'tick' | 'auraOn' | 'auraOff' | 'death' | 'bell' | 'click' | 'unlock'
-  | 'snap' | 'fanfare' | 'combo' | 'break' | 'close' | 'servo' | 'wall';
+  | 'snap' | 'fanfare' | 'crowd' | 'combo' | 'break' | 'close' | 'servo' | 'wall';
 
 interface MusicStyle {
   bpm: number;
@@ -233,6 +233,12 @@ export class AudioEngine {
       case 'fanfare':
         [523, 659, 784, 1046].forEach((f, i) => this.tone(t + i * 0.11, 'square', f, f, i === 3 ? 0.6 : 0.14, 0.12));
         [523, 659, 784].forEach((f) => this.tone(t + 0.33, 'triangle', f, f, 0.7, 0.1));
+        break;
+      case 'crowd':
+        // A disappointed crowd: a murmur that sags, and two falling "ooh" notes.
+        this.noiseHit(t, 0.9, 500, 0.1);
+        this.tone(t, 'sawtooth', 330, 200, 0.6, 0.07);
+        this.tone(t + 0.35, 'sawtooth', 262, 150, 0.8, 0.07);
         break;
       case 'tick':
         if (t - this.lastTick < 0.2) return; // many warnings must not turn into noise

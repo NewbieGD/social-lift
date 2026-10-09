@@ -543,7 +543,83 @@ const space: Painter = (g, w, h, L, u) => {
   vignette(g, w, h, 0.35);
 };
 
-const PAINTERS: Record<string, Painter> = { bg_roof: roof, bg_metro: metro, bg_neon: neon, bg_winter: winter, bg_space: space };
+/** The mayor's hall: red curtains, marble columns, a golden throne on the wall and a carpet on the floor. */
+const throneRoom: Painter = (g, w, h, L, u) => {
+  const wall = g.createLinearGradient(0, 0, 0, L.wallBase);
+  wall.addColorStop(0, '#2A1A3A');
+  wall.addColorStop(1, '#4A2440');
+  g.fillStyle = wall;
+  g.fillRect(0, 0, w, L.wallBase);
+  // Marble columns.
+  for (const x of [0.12, 0.88]) {
+    const cx = w * x;
+    const cg = g.createLinearGradient(cx - 9 * u, 0, cx + 9 * u, 0);
+    cg.addColorStop(0, '#7A7F9A');
+    cg.addColorStop(0.5, '#D8DCEC');
+    cg.addColorStop(1, '#6A6F8A');
+    g.fillStyle = cg;
+    g.fillRect(cx - 9 * u, h * 0.02, 18 * u, L.wallBase - h * 0.02);
+    g.fillStyle = '#E8B53A';
+    g.fillRect(cx - 12 * u, h * 0.02, 24 * u, 5 * u);
+    g.fillRect(cx - 12 * u, L.wallBase - 5 * u, 24 * u, 5 * u);
+  }
+  // A great throne in the middle of the wall, with a golden arch over it.
+  const tx = w / 2;
+  const top = h * 0.08;
+  const gold = g.createLinearGradient(tx - 30 * u, 0, tx + 30 * u, 0);
+  gold.addColorStop(0, '#9A6A12');
+  gold.addColorStop(0.5, '#FFE08A');
+  gold.addColorStop(1, '#9A6A12');
+  g.fillStyle = gold;
+  g.beginPath();
+  g.moveTo(tx - 30 * u, L.wallBase);
+  g.lineTo(tx - 30 * u, top + 20 * u);
+  g.lineTo(tx - 18 * u, top + 8 * u);
+  g.lineTo(tx - 9 * u, top + 18 * u);
+  g.lineTo(tx, top);
+  g.lineTo(tx + 9 * u, top + 18 * u);
+  g.lineTo(tx + 18 * u, top + 8 * u);
+  g.lineTo(tx + 30 * u, top + 20 * u);
+  g.lineTo(tx + 30 * u, L.wallBase);
+  g.closePath();
+  g.fill();
+  g.fillStyle = '#B01C34';
+  g.fillRect(tx - 21 * u, top + 24 * u, 42 * u, L.wallBase - top - 24 * u);
+  // Red curtains on both sides.
+  for (const sd of [-1, 1]) {
+    const x0 = sd < 0 ? 0 : w;
+    const cg = g.createLinearGradient(x0, 0, x0 - sd * w * 0.22, 0);
+    cg.addColorStop(0, '#6A0F20');
+    cg.addColorStop(1, '#B01C34');
+    g.fillStyle = cg;
+    g.beginPath();
+    g.moveTo(x0, 0);
+    g.lineTo(x0 - sd * w * 0.2, 0);
+    g.quadraticCurveTo(x0 - sd * w * 0.08, L.wallBase * 0.5, x0 - sd * w * 0.14, L.wallBase);
+    g.lineTo(x0, L.wallBase);
+    g.closePath();
+    g.fill();
+  }
+  // The floor: dark marble with a red carpet.
+  const fl = g.createLinearGradient(0, L.wallBase, 0, h);
+  fl.addColorStop(0, '#2A2438');
+  fl.addColorStop(1, '#1A1626');
+  g.fillStyle = fl;
+  g.fillRect(0, L.wallBase, w, h - L.wallBase);
+  g.fillStyle = '#A01830';
+  g.beginPath();
+  g.moveTo(w * 0.36, L.wallBase);
+  g.lineTo(w * 0.64, L.wallBase);
+  g.lineTo(w * 0.86, h);
+  g.lineTo(w * 0.14, h);
+  g.closePath();
+  g.fill();
+  g.strokeStyle = '#E8B53A';
+  g.lineWidth = Math.max(1.5, 1.6 * u);
+  g.stroke();
+};
+
+const PAINTERS: Record<string, Painter> = { bg_throne: throneRoom, bg_roof: roof, bg_metro: metro, bg_neon: neon, bg_winter: winter, bg_space: space };
 
 // ===========================================================================
 // Animated details
@@ -551,6 +627,24 @@ const PAINTERS: Record<string, Painter> = { bg_roof: roof, bg_metro: metro, bg_n
 
 function animate(g: Ctx, id: string, w: number, h: number, L: StageLayout, u: number, t: number): void {
   switch (id) {
+    case 'bg_throne': {
+      // Sparks of gold light rise over the hall.
+      g.save();
+      g.globalCompositeOperation = 'lighter';
+      for (let i = 0; i < 14; i++) {
+        const ph = (t * 0.16 + i * 0.0714) % 1;
+        const x = w * (0.2 + 0.6 * ((i * 0.37) % 1)) + Math.sin(t * 0.7 + i) * 6 * u;
+        const y = L.wallBase - ph * L.wallBase * 0.95;
+        const a = Math.sin(ph * Math.PI);
+        const sg = g.createRadialGradient(x, y, 0, x, y, 3.2 * u);
+        sg.addColorStop(0, `rgba(255,236,170,${0.9 * a})`);
+        sg.addColorStop(1, 'rgba(255,210,100,0)');
+        g.fillStyle = sg;
+        g.fillRect(x - 3.2 * u, y - 3.2 * u, 6.4 * u, 6.4 * u);
+      }
+      g.restore();
+      return;
+    }
     case 'bg_dusk': {
       // Garlands across the wall with twinkling bulbs.
       const cols = ['#FFD27A', '#FF8FB1', '#8FE3FF', '#B9FF9C'];

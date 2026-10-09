@@ -123,6 +123,8 @@ export interface MenuData {
   stats: Stats | null;
   /** The statistics cards are unfolded. */
   statsOpen: boolean;
+  /** The government strip under the Play button and the bell. */
+  gov: { kind: 'mayor' | 'voting' | 'candidacy' | 'empty'; text: string; unread: number };
   /** Something new (not seen yet) in Styles, Decoration or Pets. */
   newDots: { styles: boolean; decor: boolean; pets: boolean };
   /** Coin balance; null when there is no server (offline, outside VK). */
@@ -190,6 +192,7 @@ export function menuView(d: MenuData): string {
       <div class="stage-top">
         <button class="top-btn more-btn" data-action="open" data-arg="moreMenu" aria-label="${ru.menu.more}" title="${ru.menu.more}">${MORE_ICON}<span>${ru.menu.more}</span></button>
         ${fullscreenSupported() ? `<button class="top-btn fs-btn" data-action="fullscreen" aria-label="${ru.menu.fullscreen}" title="${ru.menu.fullscreen}">${FS_ICON}</button>` : ''}
+        <button class="top-btn bell-btn" data-action="open" data-arg="notices" aria-label="${ru.gov.bell}" title="${ru.gov.bell}">🔔${d.gov.unread > 0 ? `<i class="bell-count">${Math.min(99, d.gov.unread)}</i>` : ''}</button>
         ${d.coins === null ? '' : `<button class="coin-pill" data-action="open" data-arg="coinsInfo" title="${ru.menu.coins}" aria-label="${ru.menu.coins}: ${d.coins}">${COIN_ICON}<b>${d.coins}</b></button>`}
       </div>
       <div class="hero-stage">
@@ -207,6 +210,7 @@ export function menuView(d: MenuData): string {
     </div>
     <div class="menu-actions">
       <button class="primary big play" data-action="play">${ICON.play}<span>${ru.common.play}</span></button>
+      <button class="gov-strip ${d.gov.kind}" data-action="open" data-arg="government"><span class="gov-strip-ico">👑</span><b>${ru.gov.strip}</b><span class="gov-strip-text">${esc(d.gov.text)}</span></button>
       <div class="menu-grid stagger">
         <button class="tile accent duel-tile" data-action="open" data-arg="duels">${ICON.swords}<span>${ru.menu.duels}</span></button>
         <button class="tile accent chat-tile" data-action="open" data-arg="chat">${ICON.chat}<span>${ru.menu.chat}</span></button>
@@ -338,19 +342,23 @@ function requirementText(c: CatalogItem | undefined, shop?: ShopState): string {
   return ru.styles.requireNone;
 }
 
-export function stylesView(shop: ShopState | null, tab: 'mine' | 'premium' = 'mine', canBuy = true, showPremiumTab = true, newIds: Set<string> = new Set()): string {
+export function stylesView(shop: ShopState | null, tab: 'mine' | 'premium' | 'gov' = 'mine', canBuy = true, showPremiumTab = true, newIds: Set<string> = new Set()): string {
   if (!shop) {
     return `${header(ru.styles.title)}<div class="panel flat"><p class="status warn">${ru.duel.offline}</p></div>`;
   }
   const owned = new Set(shop.owned);
   const byId = new Map(shop.catalog.map((c) => [c.id, c]));
   const worn = (slot: string): string | undefined => (shop.loadout as Record<string, string | undefined>)[slot];
-  const tabs = showPremiumTab
-    ? `<div class="tabs tabs-2" role="tablist">
+  // The things lent to the mayor or an assistant have a tab of their own, only for the holder of a post.
+  const hasGov = shop.catalog.some((c) => c.gov && owned.has(c.id));
+  const tabs =
+    showPremiumTab || hasGov
+      ? `<div class="tabs ${hasGov && showPremiumTab ? 'tabs-3' : 'tabs-2'}" role="tablist">
         <button role="tab" class="${tab === 'mine' ? 'on' : ''}" aria-selected="${tab === 'mine'}" data-action="stylesTab" data-arg="mine">${ru.premium.tabMine}</button>
-        <button role="tab" class="${tab === 'premium' ? 'on' : ''} premium-tab" aria-selected="${tab === 'premium'}" data-action="stylesTab" data-arg="premium">${ru.premium.tab}</button>
+        ${showPremiumTab ? `<button role="tab" class="${tab === 'premium' ? 'on' : ''} premium-tab" aria-selected="${tab === 'premium'}" data-action="stylesTab" data-arg="premium">${ru.premium.tab}</button>` : ''}
+        ${hasGov ? `<button role="tab" class="${tab === 'gov' ? 'on' : ''} gov-tab" aria-selected="${tab === 'gov'}" data-action="stylesTab" data-arg="gov">${ru.gov.stylesTab}</button>` : ''}
       </div>`
-    : '';
+      : '';
   if (tab === 'premium' && showPremiumTab) return `${header(ru.styles.title)}<div class="scroll styles-screen">${tabs}${premiumBody(shop, canBuy)}</div>`;
   const slotChips = (['head', 'torso', 'arms', 'legs', 'feet', 'torch'] as const)
     .map((slot) => {
@@ -361,7 +369,7 @@ export function stylesView(shop: ShopState | null, tab: 'mine' | 'premium' = 'mi
       </button>`;
     })
     .join('');
-  const sets = STYLE_SETS.map((set) => {
+  const sets = STYLE_SETS.filter((set) => (tab === 'gov' ? !!set.gov : !set.gov)).map((set) => {
     const ids = set.parts.map((slot) => `${set.id}_${slot}`).filter((id) => byId.has(id));
     const have = ids.filter((id) => owned.has(id));
     const allWorn = have.length > 0 && have.every((id) => worn(byId.get(id)!.slot) === id);
@@ -391,7 +399,7 @@ export function stylesView(shop: ShopState | null, tab: 'mine' | 'premium' = 'mi
       <div class="style-grid">${cards}</div>
     </section>`;
   }).join('');
-  const styleItems = shop.catalog.filter((c) => c.kind === 'style');
+  const styleItems = shop.catalog.filter((c) => c.kind === 'style' && (tab === 'gov' ? !!c.gov : !c.gov));
   return `${header(ru.styles.title)}<div class="scroll styles-screen">
     ${tabs}
     ${collectionBar(styleItems.filter((c) => owned.has(c.id)).length, styleItems.length)}
@@ -483,7 +491,7 @@ export function decorView(shop: ShopState | null, tab: DecorTab, selected: strin
   const owned = new Set(shop.owned);
   const byId = new Map(shop.catalog.map((c) => [c.id, c]));
   const decor = shop.decor ?? {};
-  const ids = tab === 'bg' ? BG_IDS : tab === 'prop' ? PROP_LIST : tab === 'frame' ? FRAME_LIST : FX_LIST;
+  const ids = tab === 'bg' ? (owned.has('bg_throne') ? [...BG_IDS, 'bg_throne'] : BG_IDS) : tab === 'prop' ? PROP_LIST : tab === 'frame' ? FRAME_LIST : FX_LIST;
   const isChosen = (id: string): boolean => {
     if (tab === 'bg') return (decor.bg ?? 'bg_default') === id;
     if (tab === 'prop') return (decor.props ?? []).some((p) => p.id === id);
@@ -1137,7 +1145,7 @@ export function chatMsgHtml(m: ChatMsg, myId: number | null): string {
   return `<div class="chat-msg${m.user.id === myId ? ' mine' : ''}">
     ${chatAva(m.user)}
     <div class="chat-body">
-      <div class="chat-meta"><button type="button" class="chat-name" data-action="player" data-arg="${m.user.id}">${esc(name)}</button>${m.user.rank ? `<span class="chat-rank">#${m.user.rank}</span>` : ''}<time>${time}</time>${m.user.id === myId || m.id < 0 ? '' : `<button type="button" class="chat-more" data-action="msgMenu" data-arg="${m.id}" aria-label="${ru.chat.more}">⋯</button>`}</div>
+      <div class="chat-meta"><button type="button" class="chat-name" data-action="player" data-arg="${m.user.id}">${esc(name)}</button>${m.user.role ? `<span class="role-tag ${m.user.role}">${m.user.role === 'mayor' ? ru.gov.roleMayor : ru.gov.roleAssistant}</span>` : ''}${m.user.rank ? `<span class="chat-rank">#${m.user.rank}</span>` : ''}<time>${time}</time>${m.user.id === myId || m.id < 0 ? '' : `<button type="button" class="chat-more" data-action="msgMenu" data-arg="${m.id}" aria-label="${ru.chat.more}">⋯</button>`}</div>
       <p>${esc(m.text)}</p>
     </div>
   </div>`;
@@ -1279,4 +1287,171 @@ export function playerCardView(u: ChatUser, mine: boolean): string {
     ${mine ? '' : `<button class="primary" data-action="challenge" data-arg="${u.id}">${ru.chat.duelBtn}</button>`}
     <button class="secondary" data-action="profile" data-arg="${u.id}">${ru.chat.profileBtn}</button>
   </div>`;
+}
+
+
+// ===================================================================== Government (the weekly mayor election)
+
+import type { GovPlayer, GovState, Notice } from '../net/gov';
+
+function avatarHtml(p: GovPlayer | null | undefined, cls = ''): string {
+  if (!p) return `<span class="gov-ava empty ${cls}"></span>`;
+  const img = p.photo ? `<img src="${esc(p.photo)}" alt="" referrerpolicy="no-referrer" />` : `<b>${esc((p.name || '?').slice(0, 1).toUpperCase())}</b>`;
+  return `<span class="gov-ava ${cls}">${img}</span>`;
+}
+
+function leftText(ms: number): string {
+  const m = Math.max(0, Math.floor(ms / 60000));
+  const d = Math.floor(m / 1440);
+  const h = Math.floor((m % 1440) / 60);
+  return d > 0 ? `${d} д ${h} ч` : h > 0 ? `${h} ч ${m % 60} мин` : `${m % 60} мин`;
+}
+
+export function governmentView(g: GovState | null, myId: number): string {
+  if (!g) return `${header(ru.gov.title)}<div class="scroll"><p class="status">${ru.chat.connecting}</p></div>`;
+  const role = g.me.role;
+  const slots = Array.from({ length: 4 }, (_, i) => {
+    const a = g.assistants[i];
+    return a
+      ? `<button class="slot filled" data-action="player" data-arg="${a.id}">${avatarHtml(a)}<b>${esc(a.name || ru.leaders.player)}</b><small>${a.status === 'invited' ? ru.gov.waiting : ru.gov.roleAssistant}</small></button>`
+      : `<div class="slot">${avatarHtml(null)}<b>${ru.gov.free}</b></div>`;
+  }).join('');
+  const how = ru.gov.about.map(([h, t]) => `<div class="duel-card"><div><h4>${h}</h4><p>${t}</p></div></div>`).join('');
+  const cal = ru.gov.calendar.map(([a, b]) => `<div class="cal-row"><b>${a}</b><span>${b}</span></div>`).join('');
+  const left = leftText((g.phase === 'candidacy' ? g.voting_opens_at : g.ends_at) - Date.now());
+  const invite = g.me.invited
+    ? `<div class="duel-card reward"><div><h4>${ru.gov.inviteTitle}</h4><p>${ru.gov.inviteText}</p><div class="btn-row"><button class="primary" data-action="govRespond" data-arg="yes">${ru.gov.accept}</button><button class="secondary" data-action="govRespond" data-arg="no">${ru.gov.decline}</button></div></div></div>`
+    : '';
+  const cands = g.candidates.length
+    ? g.candidates
+        .map((c) => {
+          const mine = g.me.my_vote === c.id;
+          let act = '';
+          if (g.phase === 'voting' && c.id !== myId) {
+            act = mine
+              ? `<span class="voted">✓ ${ru.gov.voted}</span>`
+              : `<button class="primary small" data-action="govVote" data-arg="${c.id}" ${g.me.can_vote ? '' : 'disabled'}>${ru.gov.vote}</button>`;
+          }
+          return `<div class="cand-row ${mine ? 'mine' : ''}"><button class="cand-name" data-action="player" data-arg="${c.id}">${avatarHtml(c)}<b>${esc(c.name || ru.leaders.player)}</b></button>${act}</div>`;
+        })
+        .join('')
+    : `<p class="muted">${ru.gov.noCandidates}</p>`;
+  const voteNote =
+    g.phase === 'voting'
+      ? `<p class="muted small">${ru.gov.votingHidden}${g.me.can_vote ? '' : `<br />${ru.gov.canNotVote(g.me.vote_need_runs, g.me.runs)}`}</p>`
+      : '';
+  return `${header(ru.gov.title)}<div class="scroll gov-screen">
+    <section class="throne-card">
+      <canvas id="throneCanvas" aria-hidden="true"></canvas>
+      <div class="throne-caption">${g.mayor ? `<span class="role-tag mayor">${ru.gov.roleMayor}</span><b>${esc(g.mayor.name || ru.leaders.player)}</b>` : `<b>${ru.gov.throneEmpty}</b><small>${ru.gov.throneEmptyNote}</small>`}</div>
+    </section>
+    <h3 class="gov-h">${ru.gov.assistants}</h3>
+    <div class="assist-slots">${slots}</div>
+    ${invite}
+    <div class="phase-pill ${g.phase}"><b>${g.phase === 'voting' ? ru.gov.phaseVoting : ru.gov.phaseCandidacy}</b><span>${ru.gov.left(left)}</span></div>
+    <div class="gov-actions">
+      ${role ? `<button class="primary" data-action="open" data-arg="govManage">${ru.gov.manage}</button>` : ''}
+      <button class="${role ? 'secondary' : 'primary'}" data-action="open" data-arg="govCandidacy">${ru.gov.run}</button>
+    </div>
+    <h3 class="gov-h">${ru.gov.candidates}</h3>
+    ${cands}${voteNote}
+    <h3 class="gov-h">${ru.gov.aboutTitle}</h3>
+    ${how}
+    <div class="calendar">${cal}<small>${ru.gov.mskNote}</small></div>
+  </div>`;
+}
+
+export function candidacyView(g: GovState | null): string {
+  if (!g) return '';
+  const e = g.me.eligibility;
+  const row = (ok: boolean, text: string, pct: number, extra = ''): string =>
+    `<div class="req ${ok ? 'ok' : ''}"><span class="req-mark">${ok ? '✓' : '○'}</span><div><b>${text}</b><div class="bar"><i style="width:${Math.round(pct * 100)}%"></i></div>${extra}</div></div>`;
+  return `<div class="panel cand-panel">
+    <button class="icon-btn close" data-action="back" aria-label="${ru.chat.close}">${CLOSE_ICON}</button>
+    <h2>${ru.gov.candTitle}</h2>
+    <p class="muted small">${ru.gov.candLead}</p>
+    ${row(e.wins.have >= e.wins.need, ru.gov.reqWins(e.wins.have, e.wins.need), e.wins.need ? Math.min(1, e.wins.have / e.wins.need) : 1)}
+    ${row(e.record.have >= e.record.need, ru.gov.reqRecord(e.record.have, e.record.need), e.record.need ? Math.min(1, e.record.have / e.record.need) : 1)}
+    ${row(e.ring, e.ring ? ru.gov.reqRingHave : ru.gov.reqRing, e.ring ? 1 : 0, e.ring ? '' : `<small>${ru.gov.reqRingNo}</small>`)}
+    <p class="muted small">${ru.gov.candNote}</p>
+    ${e.is_candidate ? `<p class="status">${ru.gov.applied}</p>` : e.can_apply ? `<button class="primary" data-action="govApply">${ru.gov.apply}</button>` : `<p class="status warn">${esc(ru.gov.reasons[e.reason ?? 'conditions'] ?? ru.gov.reasons.conditions)}</p>`}
+  </div>`;
+}
+
+export function govManageView(g: GovState | null): string {
+  if (!g) return '';
+  if (g.me.role !== 'mayor') {
+    return `${header(ru.gov.manageTitle)}<div class="scroll"><div class="panel flat"><div class="duel-card warn"><div><h4>${ru.gov.assistantOnlyTitle}</h4><p>${ru.gov.assistantOnlyText}</p></div></div></div></div>`;
+  }
+  const free = 4 - g.assistants.length;
+  const list = g.assistants
+    .map((a) => `<div class="cand-row"><button class="cand-name" data-action="player" data-arg="${a.id}">${avatarHtml(a)}<b>${esc(a.name || ru.leaders.player)}</b><small>${a.status === 'invited' ? ru.gov.waiting : ''}</small></button><button class="secondary small" data-action="govRemove" data-arg="${a.id}">${ru.gov.remove}</button></div>`)
+    .join('');
+  const colors = g.settings.colors
+    .map((c) => `<button class="color-btn play-${c} ${g.settings.play_color === c ? 'on' : ''}" data-action="govColor" data-arg="${c}"><i></i>${ru.gov.colors[c] ?? c}</button>`)
+    .join('');
+  return `${header(ru.gov.manageTitle)}<div class="scroll gov-screen">
+    <h3 class="gov-h">${ru.gov.assistantsManage}</h3>
+    ${list || `<p class="muted">${ru.gov.free}</p>`}
+    <button class="primary" data-action="open" data-arg="govFind" ${free > 0 ? '' : 'disabled'}>${ru.gov.find}</button>
+    <h3 class="gov-h">${ru.gov.bonusTitle}</h3>
+    <div class="duel-card"><div><p>${ru.gov.bonusText(g.bonus_percent)}</p></div><button class="switch ${g.settings.bonus_on ? 'on' : ''}" data-action="govBonus" aria-pressed="${g.settings.bonus_on}">${g.settings.bonus_on ? ru.gov.bonusOn : ru.gov.bonusOff}</button></div>
+    <h3 class="gov-h">${ru.gov.colorTitle}</h3>
+    <div class="color-row">${colors}</div>
+  </div>`;
+}
+
+export function govFindView(tab: string, players: GovPlayer[] | null, q: string): string {
+  const tabs = (['top', 'chat', 'rivals'] as const)
+    .map((k) => `<button role="tab" class="${tab === k ? 'on' : ''}" data-action="govFindTab" data-arg="${k}">${ru.gov.findTabs[k]}</button>`)
+    .join('');
+  const rows =
+    players === null
+      ? `<p class="status">${ru.chat.connecting}</p>`
+      : players.length
+        ? players.map((p) => `<div class="cand-row"><button class="cand-name" data-action="player" data-arg="${p.id}">${avatarHtml(p)}<b>${esc(p.name || ru.leaders.player)}</b></button><button class="primary small" data-action="govInvite" data-arg="${p.id}">${ru.gov.appoint}</button></div>`).join('')
+        : `<p class="muted">${ru.gov.findEmpty}</p>`;
+  return `<div class="panel cand-panel find-panel">
+    <button class="icon-btn close" data-action="back" aria-label="${ru.chat.close}">${CLOSE_ICON}</button>
+    <h2>${ru.gov.findTitle}</h2>
+    <div class="tabs tabs-3" role="tablist">${tabs}</div>
+    <input id="govSearch" class="find-input" type="text" maxlength="30" placeholder="${ru.gov.findSearch}" value="${esc(q)}" />
+    <div class="find-list">${rows}</div>
+  </div>`;
+}
+
+export function noticesView(items: Notice[] | null): string {
+  const text = (n: Notice): string => {
+    const f = ru.gov.notice;
+    const who = (p?: GovPlayer | null): string => p?.name || ru.leaders.player;
+    switch (n.kind) {
+      case 'voting_started':
+        return f.voting_started();
+      case 'mayor_elected':
+        return f.mayor_elected(who(n.payload.user));
+      case 'no_mayor':
+        return f.no_mayor();
+      case 'mayor_you':
+        return f.mayor_you();
+      case 'assistant_invite':
+        return f.assistant_invite(who(n.payload.from));
+      case 'assistant_answer':
+        return f.assistant_answer(who(n.payload.user), !!n.payload.accepted);
+      case 'assistant_set':
+        return f.assistant_set(who(n.payload.user));
+      case 'assistant_removed':
+        return f.assistant_removed();
+      default:
+        return '';
+    }
+  };
+  const rows = (items ?? [])
+    .map((n) => {
+      const who = n.payload.user ?? n.payload.from ?? null;
+      const when = new Date(n.at).toLocaleString('ru-RU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+      const open = n.kind === 'assistant_invite' || n.kind === 'mayor_you' || n.kind === 'voting_started' || n.kind === 'mayor_elected';
+      return `<${open ? 'button data-action="open" data-arg="government"' : 'div'} class="notice ${n.unread ? 'unread' : ''}">${who ? avatarHtml(who) : '<span class="gov-ava bell">🔔</span>'}<div><p>${esc(text(n))}</p><small>${when}</small></div></${open ? 'button' : 'div'}>`;
+    })
+    .join('');
+  return `${header(ru.gov.noticesTitle)}<div class="scroll"><div class="panel flat">${items === null ? `<p class="status">${ru.chat.connecting}</p>` : rows || `<p class="muted">${ru.gov.noNotices}</p>`}</div></div>`;
 }

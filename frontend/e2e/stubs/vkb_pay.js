@@ -6,6 +6,8 @@ export default {
     if (m === 'VKWebAppCheckNativeAds') return Promise.resolve({ result: !!window.__adAvailable });
     if (m === 'VKWebAppShowNativeAds') {
       window.__adLog = (window.__adLog || []).concat([{ fullscreen: !!document.fullscreenElement }]);
+      // The test can make the ad fail while the page is in full screen (as some browsers do).
+      if (window.__blockInFs && document.fullscreenElement) return Promise.resolve({ result: false });
       return new Promise((r) => setTimeout(() => r({ result: true }), 500));
     }
     return Promise.resolve({ result: true }); },

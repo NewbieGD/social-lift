@@ -504,6 +504,47 @@ export function drawStyleHead(ctx: CanvasRenderingContext2D, d: StyleDef, view: 
       ctx.stroke();
       break;
     }
+    case 'mayorHat':
+    case 'advisorCap': {
+      // A peaked cap: a dome, a band, a visor, and a small badge (the mayor's shows the city).
+      const mayor = d.kind === 'mayorHat';
+      const hx = cx - (side ? 1 : 0);
+      ctx.beginPath();
+      ctx.ellipse(hx, -4.4, rx + 2.4, 8.8, 0, Math.PI, Math.PI * 2);
+      ctx.closePath();
+      const dg = ctx.createLinearGradient(0, -13, 0, -3);
+      dg.addColorStop(0, tone(p.main, 0.3));
+      dg.addColorStop(1, p.main);
+      ctx.fillStyle = dg;
+      ctx.fill();
+      edge(ctx, p.dark, 0.8);
+      ctx.fillStyle = p.sub;
+      ctx.fillRect(hx - rx - 2.4, -5.6, (rx + 2.4) * 2, 2.6);
+      ctx.beginPath();
+      if (side) ctx.ellipse(cx + rx + 2.4, -3.2, 5, 1.7, 0.08, 0, Math.PI * 2);
+      else ctx.ellipse(0, -3, rx + 3, 1.8, 0, 0, Math.PI * 2);
+      ctx.fillStyle = p.dark;
+      ctx.fill();
+      const bx = side ? cx + rx - 1 : 0;
+      if (mayor) {
+        ctx.fillStyle = p.sub;
+        for (const [dx, hgt] of [[-3, 3], [-1.2, 5], [0.6, 3.6], [2.4, 4.4]] as [number, number][]) ctx.fillRect(bx + dx - 0.7, -9.6 - hgt + 3, 1.5, hgt);
+        ctx.fillStyle = p.accent;
+        ctx.fillRect(bx - 1.6, -8.4, 0.6, 0.6);
+        ctx.fillRect(bx + 0.8, -9.6, 0.6, 0.6);
+      } else {
+        ctx.fillStyle = p.sub;
+        ctx.beginPath();
+        for (let i = 0; i < 10; i++) {
+          const a = (i / 10) * Math.PI * 2 - Math.PI / 2;
+          const r = i % 2 ? 1.2 : 3;
+          ctx.lineTo(bx + Math.cos(a) * r, -8.4 + Math.sin(a) * r);
+        }
+        ctx.closePath();
+        ctx.fill();
+      }
+      break;
+    }
     case 'legionHead': {
       // A chrome skull: a metal cranium, cheek plates, a grille of teeth and glowing red eyes.
       ctx.beginPath();
@@ -646,6 +687,9 @@ export function torsoColor(d: StyleDef): string {
       return d.palette.main;
     case 'legionArmor':
       return d.palette.sub;
+    case 'mayorCoat':
+    case 'advisorSuit':
+      return d.palette.main;
     case 'bare':
       return d.palette.skin ?? SKIN;
     default:
@@ -657,6 +701,47 @@ export function torsoColor(d: StyleDef): string {
 export function drawStyleBack(ctx: CanvasRenderingContext2D, d: StyleDef, len: number, hw: number, view: View, t: number): void {
   const p = d.palette;
   const wave = Math.sin(t * 3.2) * 1.4;
+  if (d.kind === 'mayorCoat') {
+    // The cape is a night city: a dark cloth whose hem is a skyline, with windows that light up.
+    ctx.beginPath();
+    if (view === 'side') {
+      ctx.moveTo(-hw * 0.7, -len + 1);
+      ctx.quadraticCurveTo(-hw - 8 - wave, -len * 0.4, -hw - 11 - wave * 1.4, 16);
+      ctx.lineTo(-3, 16);
+      ctx.lineTo(-1, -len + 3);
+    } else {
+      ctx.moveTo(-hw * 0.9, -len + 1);
+      ctx.quadraticCurveTo(-hw - 7, -len * 0.3, -hw - 10, 16 + wave * 0.5);
+      ctx.lineTo(hw + 10, 16 - wave * 0.5);
+      ctx.quadraticCurveTo(hw + 7, -len * 0.3, hw * 0.9, -len + 1);
+    }
+    ctx.closePath();
+    const cg = ctx.createLinearGradient(0, -len, 0, 16);
+    cg.addColorStop(0, '#1B1430');
+    cg.addColorStop(1, '#3A1E50');
+    ctx.fillStyle = cg;
+    ctx.fill();
+    edge(ctx, p.dark, 0.8);
+    ctx.save();
+    ctx.clip();
+    // The skyline along the hem, and yellow windows that blink.
+    const x0 = view === 'side' ? -hw - 12 : -hw - 11;
+    const x1 = view === 'side' ? -2 : hw + 11;
+    let i = 0;
+    for (let x = x0; x < x1; x += 3.2, i++) {
+      const hgt = 5 + ((i * 7) % 9);
+      ctx.fillStyle = '#0C0818';
+      ctx.fillRect(x, 16 - hgt, 3.2, hgt);
+      for (let wy = 16 - hgt + 1.4; wy < 15; wy += 2.6) {
+        if (Math.sin(t * 1.3 + i * 2.1 + wy) > -0.2) {
+          ctx.fillStyle = 'rgba(255,214,110,0.95)';
+          ctx.fillRect(x + 1, wy, 1, 1);
+        }
+      }
+    }
+    ctx.restore();
+    return;
+  }
   if (d.kind === 'tunic' || d.kind === 'suit') {
     const outer = d.kind === 'suit' ? p.accent : p.main;
     const inner = d.kind === 'suit' ? '#B5481A' : p.accent;
@@ -975,6 +1060,64 @@ export function drawStyleTorso(ctx: CanvasRenderingContext2D, d: StyleDef, len: 
       }
       break;
     }
+    case 'mayorCoat':
+    case 'advisorSuit': {
+      const mayor = d.kind === 'mayorCoat';
+      ctx.fillStyle = mayor ? '#F2E6C8' : '#F2F4F8';
+      ctx.beginPath();
+      ctx.moveTo(mid - 3.4, -len);
+      ctx.lineTo(mid + 3.4, -len);
+      ctx.lineTo(mid, -len * 0.45);
+      ctx.closePath();
+      ctx.fill();
+      for (const sd of [-1, 1]) {
+        ctx.beginPath();
+        ctx.moveTo(mid + sd * 3.2, -len);
+        ctx.lineTo(mid + sd * 8.6, -len + 1);
+        ctx.lineTo(mid + sd * 1.2, -len * 0.4);
+        ctx.lineTo(mid + sd * 0.4, -len * 0.45);
+        ctx.closePath();
+        ctx.fillStyle = p.sub;
+        ctx.fill();
+        edge(ctx, p.dark, 0.5);
+      }
+      if (mayor) {
+        ctx.fillStyle = p.sub;
+        for (let i = 0; i < 3; i++)
+          for (const sd of [-1, 1]) {
+            ctx.beginPath();
+            ctx.arc(mid + sd * 2.6, -len * 0.7 + i * 3.6, 0.9, 0, Math.PI * 2);
+            ctx.fill();
+          }
+        ctx.strokeStyle = '#B01C34';
+        ctx.lineWidth = 2.2;
+        ctx.beginPath();
+        ctx.moveTo(mid - hw + 1, -len + 1.5);
+        ctx.lineTo(mid + hw - 1, -4);
+        ctx.stroke();
+        ctx.strokeStyle = p.sub;
+        ctx.lineWidth = 0.5;
+        ctx.stroke();
+      } else {
+        ctx.fillStyle = '#A01830';
+        ctx.beginPath();
+        ctx.moveTo(mid - 0.9, -len + 1.4);
+        ctx.lineTo(mid + 0.9, -len + 1.4);
+        ctx.lineTo(mid + 1.4, -len * 0.5);
+        ctx.lineTo(mid, -len * 0.42);
+        ctx.lineTo(mid - 1.4, -len * 0.5);
+        ctx.closePath();
+        ctx.fill();
+        ctx.fillStyle = p.sub;
+        ctx.beginPath();
+        ctx.arc(mid - hw * 0.5, -len * 0.62, 2, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      rr(ctx, -hw - 1, -4.6, hw * 2 + 2, 4.6, 1);
+      ctx.fillStyle = p.sub;
+      ctx.fill();
+      break;
+    }
     case 'legionArmor': {
       // A ribcage of chrome plates over dark steel, a glowing core, pistons at the sides.
       ctx.fillStyle = p.dark;
@@ -1112,6 +1255,10 @@ export function handColor(d: StyleDef | undefined, skin: string): string {
     case 'seraphGauntlet':
     case 'legionArms':
       return d.palette.sub;
+    case 'mayorGloves':
+      return d.palette.sub;
+    case 'advisorSleeves':
+      return '#F2F4F8';
     case 'bracer':
       return d.palette.dark;
     case 'glove':
@@ -1140,6 +1287,19 @@ export function drawStyleArm(ctx: CanvasRenderingContext2D, d: StyleDef, l: Limb
     case 'bracer':
       limb3d(ctx, lerp(el, wr, 0.3), lerp(el, wr, 0.65), wr, [5.2, 5, 4.6], tone(p.sub, k), 1);
       break;
+    case 'mayorGloves':
+    case 'advisorSleeves': {
+      if (d.kind === 'mayorGloves') {
+        sphere(ctx, l[0].x, l[0].y + 0.4, 3.6, 3.2, tone(p.sub, k));
+        ctx.strokeStyle = tone(p.dark, k);
+        ctx.lineWidth = 0.6;
+        ctx.beginPath();
+        ctx.arc(l[0].x, l[0].y + 0.4, 2.2, Math.PI * 1.1, Math.PI * 1.9);
+        ctx.stroke();
+      }
+      limb3d(ctx, lerp(el, wr, 0.5), lerp(el, wr, 0.78), wr, [5.4, 5.2, 4.8], tone(p.sub, k), 1);
+      break;
+    }
     case 'legionArms': {
       // Mechanical arms: a steel shoulder joint, a piston along the forearm, chrome plates and
       // a red light at the elbow and the wrist.
@@ -1253,6 +1413,9 @@ export function legColors(d: StyleDef): { thigh: string; shin: string } {
       return { thigh: p.main, shin: p.main };
     case 'legionLegs':
       return { thigh: p.sub, shin: p.main };
+    case 'mayorLegs':
+    case 'advisorLegs':
+      return { thigh: p.main, shin: p.main };
     default:
       return { thigh: p.main, shin: p.main };
   }
@@ -1333,6 +1496,17 @@ export function drawStyleLeg(ctx: CanvasRenderingContext2D, d: StyleDef, l: Limb
       ctx.stroke();
       ctx.globalAlpha = 1;
       break;
+    case 'mayorLegs':
+    case 'advisorLegs': {
+      ctx.strokeStyle = tone(p.sub, k);
+      ctx.lineWidth = 1.3;
+      ctx.beginPath();
+      ctx.moveTo(knee.x + 2.4, knee.y - 3);
+      ctx.lineTo(knee.x + 2.4, knee.y);
+      ctx.lineTo(ank.x + 2.2, ank.y - 2);
+      ctx.stroke();
+      break;
+    }
     case 'legionLegs': {
       // Piston legs: a bare hydraulic knee with a glowing red joint and a chrome shin guard
       // that has a red light strip.
@@ -1416,7 +1590,7 @@ export function drawStyleFoot(ctx: CanvasRenderingContext2D, d: StyleDef, view: 
   const upper = d.kind === 'sneaker' ? '#F2F4F8' : d.kind === 'barefoot' || d.kind === 'torn' ? p.skin ?? SKIN : p.main;
   const sole = d.kind === 'sneaker' ? '#C5CCD8' : d.kind === 'torn' ? p.skinShade ?? tone(p.skin ?? SKIN, -0.3) : p.dark;
   const trim = d.kind === 'sneaker' ? '#D94A4A' : d.kind === 'captainboot' ? '#fff' : p.sub;
-  const boot = ['plates', 'trousers', 'bodysuit', 'wraplegs', 'weblegs', 'seraphGreaves', 'legionLegs'].includes(d.kind);
+  const boot = ['plates', 'trousers', 'bodysuit', 'wraplegs', 'weblegs', 'seraphGreaves', 'legionLegs', 'mayorLegs', 'advisorLegs'].includes(d.kind);
   const col = tone(upper, k);
   if (view === 'side') {
     // Sole
@@ -1523,6 +1697,10 @@ export function drawStyleFoot(ctx: CanvasRenderingContext2D, d: StyleDef, view: 
  */
 export function drawStyleTorch(ctx: CanvasRenderingContext2D, d: StyleDef, len: number, lensTilt: number, t: number): void {
   switch (d.kind) {
+    case 'mayorBeacon':
+      return mayorBeacon(ctx, d, len, t);
+    case 'advisorClip':
+      return advisorPen(ctx, d, len, t);
     case 'legionTorch':
       return legionLantern(ctx, d, len, lensTilt, t);
     case 'phoneTorch':
@@ -1774,6 +1952,65 @@ function jarTorch(ctx: CanvasRenderingContext2D, d: StyleDef, len: number, t: nu
     ctx.arc(fx, fy, 0.6, 0, Math.PI * 2);
     ctx.fill();
   }
+}
+
+/** The mayor's beacon: a golden handle and a glass dome with a star of light that turns inside. */
+function mayorBeacon(ctx: CanvasRenderingContext2D, d: StyleDef, len: number, t: number): void {
+  const p = d.palette;
+  const g = ctx.createLinearGradient(0, -2.2, 0, 2.2);
+  g.addColorStop(0, tone(p.sub, 0.4));
+  g.addColorStop(0.5, p.sub);
+  g.addColorStop(1, tone(p.sub, -0.4));
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  ctx.roundRect(-4.6, -2, len * 0.62, 4, 1.6);
+  ctx.fill();
+  edge(ctx, p.dark, 0.6);
+  ctx.fillStyle = p.main;
+  for (let i = 0; i < 3; i++) ctx.fillRect(1 + i * 2, -2, 0.9, 4);
+  const hx = len * 0.6;
+  ctx.beginPath();
+  ctx.ellipse(hx + 3.4, 0, 4.6, 4.2, 0, 0, Math.PI * 2);
+  ctx.fillStyle = 'rgba(255,248,215,0.9)';
+  ctx.fill();
+  edge(ctx, p.sub, 0.8);
+  glowDot(ctx, hx + 3.4, 0, 13, p.glow ?? '#FFD25A', 0.7);
+  ctx.save();
+  ctx.translate(hx + 3.4, 0);
+  ctx.rotate(t * 3);
+  ctx.fillStyle = '#FFFFFF';
+  for (let i = 0; i < 4; i++) {
+    ctx.rotate(Math.PI / 2);
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.lineTo(0.8, -1);
+    ctx.lineTo(0, -3.8);
+    ctx.lineTo(-0.8, -1);
+    ctx.closePath();
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+/** An assistant's pen-torch: a slim silver body with a clip and a soft white light. */
+function advisorPen(ctx: CanvasRenderingContext2D, d: StyleDef, len: number, t: number): void {
+  const p = d.palette;
+  const g = ctx.createLinearGradient(0, -1.8, 0, 1.8);
+  g.addColorStop(0, '#FFFFFF');
+  g.addColorStop(0.5, p.sub);
+  g.addColorStop(1, tone(p.sub, -0.4));
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  ctx.roundRect(-4.4, -1.8, len + 4, 3.6, 1.6);
+  ctx.fill();
+  edge(ctx, p.main, 0.6);
+  ctx.fillStyle = p.main;
+  ctx.fillRect(len * 0.3, -2.8, len * 0.3, 1);
+  ctx.fillStyle = p.accent;
+  ctx.beginPath();
+  ctx.ellipse(len + 0.2, 0, 1.2, 2.2, 0, 0, Math.PI * 2);
+  ctx.fill();
+  glowDot(ctx, len + 1.4, 0, 9 + Math.sin(t * 5), '#FFFFFF', 0.7);
 }
 
 /** A plasma lantern: black-chrome, with cooling fins and a red glowing lens ring. */

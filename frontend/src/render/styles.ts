@@ -29,6 +29,8 @@ export interface StyleSet {
   id: string;
   /** Sold for VK votes (not found or earned). */
   premium?: boolean;
+  /** Lent to the mayor or to an assistant for the term of the post. */
+  gov?: boolean;
   palette: Palette;
   /** Parts in display order. */
   parts: Slot[];
@@ -89,6 +91,21 @@ export const STYLE_SETS: StyleSet[] = [
     palette: { main: '#C9CFD8', sub: '#4A515C', accent: '#FF2A2A', dark: '#1B1F26', glow: '#FF6A4A' },
     parts: ['head', 'torso', 'arms', 'legs', 'torch'],
   },
+  {
+    // The mayor's set (for the term of his post): a black coat with gold, a peaked cap with the city on it,
+    // a cape that is a night skyline with lit windows, gold gloves, and a lighthouse beacon for a flashlight.
+    id: 'mayor',
+    gov: true,
+    palette: { main: '#17131F', sub: '#E8B53A', accent: '#FFF2B0', dark: '#08060C', glow: '#FFD25A' },
+    parts: ['head', 'torso', 'arms', 'legs', 'torch'],
+  },
+  {
+    // The assistants' set: a navy suit with a silver badge and a soft silver glow.
+    id: 'advisor',
+    gov: true,
+    palette: { main: '#1E2D58', sub: '#C8D4EC', accent: '#E8F0FF', dark: '#0C1630', glow: '#B8CCF0' },
+    parts: ['head', 'torso', 'arms', 'legs', 'torch'],
+  },
   // Flashlights: each one replaces the flashlight in the hero's hand.
   { id: 'phone', palette: { main: '#2B3038', sub: '#8FA0B8', accent: '#FFFFFF', dark: '#14171C' }, parts: ['torch'] },
   { id: 'wood', palette: { main: '#8A5A33', sub: '#C9A06A', accent: '#FFB02E', dark: '#4A2F18' }, parts: ['torch'] },
@@ -112,6 +129,8 @@ const KINDS: Record<string, Partial<Record<Slot, string>>> = {
   acrobat: { head: 'mask', torso: 'web', arms: 'webglove', legs: 'weblegs' },
   brute: { head: 'brute', torso: 'bare', arms: 'big', legs: 'torn' },
   seraph: { head: 'seraphHelm', torso: 'seraphArmor', arms: 'seraphGauntlet', legs: 'seraphGreaves', torch: 'seraphLantern' },
+  mayor: { head: 'mayorHat', torso: 'mayorCoat', arms: 'mayorGloves', legs: 'mayorLegs', torch: 'mayorBeacon' },
+  advisor: { head: 'advisorCap', torso: 'advisorSuit', arms: 'advisorSleeves', legs: 'advisorLegs', torch: 'advisorClip' },
   legion: { head: 'legionHead', torso: 'legionArmor', arms: 'legionArms', legs: 'legionLegs', torch: 'legionTorch' },
   phone: { torch: 'phoneTorch' },
   wood: { torch: 'woodTorch' },

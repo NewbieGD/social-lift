@@ -3,6 +3,8 @@
 // head, so it never collides with anything the hero wears (cap, glasses, helmet).
 // Origin: the middle of the crown's base; y grows downward, the crown rises to about -13.
 
+import { drawMayorCrown } from './govArt';
+
 export const CROWN_LIFT_SIDE = 13; // how far above the head top the base floats (side view)
 export const CROWN_LIFT_FRONT = 11; // the same for the front view
 
@@ -15,7 +17,12 @@ export function crownBob(t: number): number {
  * Draws the crown. `t` is a clock in seconds; `calm` turns off the rays and the stars
  * (the "less effects" setting) and keeps only a soft glow.
  */
-export function drawCrown(ctx: CanvasRenderingContext2D, t: number, calm = false): void {
+export function drawCrown(ctx: CanvasRenderingContext2D, t: number, calm = false, kind: 'leader' | 'mayor' = 'leader'): void {
+  // The mayor's diamond crown takes the place of the weekly leader's crown.
+  if (kind === 'mayor') {
+    drawMayorCrown(ctx, t, calm);
+    return;
+  }
   ctx.save();
 
   // ---- Glow behind the crown ----

@@ -116,7 +116,7 @@ export function drawHeroFront(
     sleeve = forearm = armColor(w.arms);
   } else if (w.torso) {
     // A worn top brings its own sleeves (or leaves the arms bare for armor and bare chests).
-    sleeve = forearm = ['hoodie', 'tunic', 'suit', 'wraps', 'web', 'seraphArmor', 'legionArmor'].includes(w.torso.kind) ? torsoColor(w.torso) : SKIN;
+    sleeve = forearm = ['hoodie', 'tunic', 'suit', 'wraps', 'web', 'seraphArmor', 'legionArmor', 'mayorCoat', 'advisorSuit'].includes(w.torso.kind) ? torsoColor(w.torso) : SKIN;
   }
   const handSkin = handColor(w.arms, skin);
   const asc = armScale(w.arms);
@@ -149,7 +149,7 @@ export function drawHeroFront(
     ctx.restore();
   }
   // Capes and the shell hang behind the whole body.
-  if (w.torso && (w.torso.kind === 'tunic' || w.torso.kind === 'suit' || w.torso.kind === 'wraps')) {
+  if (w.torso && (w.torso.kind === 'tunic' || w.torso.kind === 'suit' || w.torso.kind === 'wraps' || w.torso.kind === 'mayorCoat')) {
     ctx.save();
     ctx.translate(0, ty + 21);
     drawStyleBack(ctx, w.torso, 21, 9.6, 'front', t);
@@ -421,7 +421,7 @@ export function drawHeroFront(
   ctx.save();
   ctx.translate(0, hy);
   ctx.rotate(Math.sin(t * 1.3) * 0.03);
-  const coversHair = !!w.head && ['helmet', 'cowl', 'mask', 'brute', 'beanie', 'seraphHelm', 'legionHead'].includes(w.head.kind);
+  const coversHair = !!w.head && ['helmet', 'cowl', 'mask', 'brute', 'beanie', 'seraphHelm', 'legionHead', 'mayorHat', 'advisorCap'].includes(w.head.kind);
   if (!coversHair || w.head?.kind === 'beanie') sphere(ctx, 0, -2, 12.4, 11.6, HAIR);
   for (const s of [-1, 1]) {
     sphere(ctx, s * 11.2, 1.4, 2.5, 3.2, skinHead);

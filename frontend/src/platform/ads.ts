@@ -27,6 +27,10 @@ function withTimeout<T>(p: Promise<T>, ms: number, fallback: T): Promise<T> {
 }
 
 export interface AdService {
+  /** True if VK has an ad to show right now (answers within `timeoutSec`, otherwise false). */
+  check(timeoutSec: number): Promise<boolean>;
+  /** Shows the ad. Resolves true if it was shown. Never rejects. */
+  show(): Promise<boolean>;
   /** Resolves true if an ad was shown. Never rejects; silently false when unavailable. */
   showInterstitial(timeoutSec: number): Promise<boolean>;
   /** Reserved for a future rewarded ad with an explicit bonus (rule 5.1.5.1 "б"). Not shown in the UI. */
@@ -34,7 +38,7 @@ export interface AdService {
 }
 
 class VkAds implements AdService {
-  async showInterstitial(timeoutSec: number): Promise<boolean> {
+  async check(timeoutSec: number): Promise<boolean> {
     if (!isInVk()) return false;
     try {
       const check = (await withTimeout(
@@ -42,7 +46,14 @@ class VkAds implements AdService {
         timeoutSec * 1000,
         { result: false },
       )) as { result?: boolean };
-      if (!check?.result) return false;
+      return !!check?.result;
+    } catch {
+      return false;
+    }
+  }
+
+  async show(): Promise<boolean> {
+    try {
       // The ad itself can last up to ~30 s; a hard cap keeps the game from hanging.
       const shown = (await withTimeout(
         loose.send('VKWebAppShowNativeAds', { ad_format: 'interstitial' }),
@@ -53,6 +64,10 @@ class VkAds implements AdService {
     } catch {
       return false;
     }
+  }
+
+  async showInterstitial(timeoutSec: number): Promise<boolean> {
+    return (await this.check(timeoutSec)) && (await this.show());
   }
 
   async showRewarded(): Promise<boolean> {

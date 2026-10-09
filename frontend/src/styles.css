@@ -6148,3 +6148,475 @@ body.reduced .top-btn.more-btn {
     filter: drop-shadow(0 0 6px var(--glow, var(--rar))) drop-shadow(0 0 2px #fff);
   }
 }
+
+/* ===================== Government ===================== */
+.top-btn.bell-btn {
+  position: relative;
+  width: 36px;
+  padding: 0;
+  font-size: 16px;
+}
+.bell-count {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  min-width: 17px;
+  padding: 1px 4px;
+  border-radius: 9px;
+  background: #ff3b4a;
+  color: #fff;
+  font-style: normal;
+  font-size: 10px;
+  font-weight: 900;
+  line-height: 1.3;
+  text-align: center;
+  box-shadow: 0 2px 6px rgba(255, 59, 74, 0.6);
+}
+.gov-strip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  margin: 8px 0 0;
+  padding: 8px 12px;
+  border: 0;
+  border-radius: 14px;
+  background: linear-gradient(90deg, rgba(120, 70, 190, 0.55), rgba(190, 120, 40, 0.5));
+  box-shadow: inset 0 0 0 1.5px rgba(255, 214, 90, 0.7);
+  color: #fff;
+  font: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+.gov-strip b {
+  font-size: 14px;
+}
+.gov-strip-text {
+  margin-left: auto;
+  font-size: 11.5px;
+  color: #ffe58a;
+  text-align: right;
+}
+.gov-strip.voting {
+  animation: gov-pulse 1.8s ease-in-out infinite;
+}
+.gov-strip.mayor {
+  background: linear-gradient(90deg, rgba(190, 130, 30, 0.6), rgba(150, 60, 120, 0.5));
+}
+@keyframes gov-pulse {
+  50% {
+    box-shadow:
+      inset 0 0 0 2px #ffe27a,
+      0 0 18px rgba(255, 214, 90, 0.7);
+  }
+}
+.gov-screen .gov-h {
+  margin: 16px 0 6px;
+  font-size: 15px;
+  color: #ffe58a;
+}
+.throne-card {
+  position: relative;
+  border-radius: 18px;
+  overflow: hidden;
+  box-shadow: inset 0 0 0 2px rgba(255, 214, 90, 0.5), 0 10px 28px rgba(0, 0, 0, 0.4);
+}
+.throne-card canvas {
+  display: block;
+  width: 100%;
+  height: 300px;
+}
+.throne-caption {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 10px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  text-shadow: 0 2px 6px rgba(0, 0, 0, 0.8);
+}
+.throne-caption b {
+  font-size: 18px;
+}
+.throne-caption small {
+  color: #ffe0a0;
+}
+.role-tag {
+  display: inline-block;
+  margin: 0 4px;
+  padding: 1px 6px;
+  border-radius: 7px;
+  font-size: 9px;
+  font-weight: 900;
+  font-style: normal;
+  letter-spacing: 0.04em;
+  vertical-align: middle;
+}
+.role-tag.mayor {
+  background: linear-gradient(90deg, #ffd640, #ff9a2e);
+  color: #3a2300;
+  box-shadow: 0 0 8px rgba(255, 200, 60, 0.7);
+}
+.role-tag.assistant {
+  background: linear-gradient(90deg, #b8c8e8, #8aa4d8);
+  color: #14233f;
+}
+.assist-slots {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+}
+.slot {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  padding: 8px 2px;
+  border: 0;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.05);
+  color: inherit;
+  font: inherit;
+  text-align: center;
+  min-width: 0;
+}
+.slot b {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+}
+.slot small {
+  font-size: 9px;
+  color: #b8c8e8;
+}
+.slot.filled {
+  background: linear-gradient(180deg, rgba(150, 190, 255, 0.2), rgba(255, 255, 255, 0.05));
+  box-shadow: inset 0 0 0 1px rgba(170, 200, 255, 0.5);
+  cursor: pointer;
+}
+.gov-ava {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: #34405c;
+  overflow: hidden;
+  font-weight: 900;
+}
+.gov-ava img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.gov-ava.empty {
+  background: transparent;
+  box-shadow: inset 0 0 0 2px dashed rgba(255, 255, 255, 0.3);
+  border: 2px dashed rgba(255, 255, 255, 0.28);
+}
+.phase-pill {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin: 14px 0 8px;
+  padding: 8px;
+  border-radius: 14px;
+  background: rgba(60, 130, 220, 0.2);
+  box-shadow: inset 0 0 0 1px rgba(110, 170, 255, 0.5);
+  font-size: 12px;
+}
+.phase-pill.voting {
+  background: rgba(220, 150, 40, 0.22);
+  box-shadow: inset 0 0 0 1px rgba(255, 200, 90, 0.6);
+}
+.gov-actions {
+  display: grid;
+  gap: 8px;
+}
+.cand-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+.cand-row.mine {
+  background: linear-gradient(90deg, rgba(255, 214, 90, 0.12), transparent);
+}
+.cand-name {
+  display: flex;
+  align-items: center;
+  flex: 1;
+  gap: 10px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.cand-name b {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cand-row .primary.small,
+.cand-row .secondary.small {
+  width: auto;
+  margin: 0;
+  padding: 7px 12px;
+  font-size: 12px;
+}
+.voted {
+  font-weight: 900;
+  color: #8ff0a8;
+  font-size: 12px;
+}
+.calendar {
+  margin: 8px 0;
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.05);
+}
+.cal-row {
+  display: flex;
+  gap: 10px;
+  padding: 3px 0;
+  font-size: 12px;
+}
+.cal-row b {
+  flex: none;
+  min-width: 110px;
+  color: #ffe58a;
+}
+.calendar small {
+  color: var(--ink-dim);
+}
+.btn-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+.btn-row button {
+  flex: 1;
+  margin: 0;
+}
+.cand-panel .req {
+  display: flex;
+  gap: 10px;
+  padding: 8px 0;
+  text-align: left;
+}
+.cand-panel .req-mark {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.12);
+  font-weight: 900;
+}
+.cand-panel .req.ok .req-mark {
+  background: #2f9e55;
+}
+.cand-panel .req > div {
+  flex: 1;
+}
+.cand-panel .req small {
+  display: block;
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--ink-dim);
+}
+.cand-panel .bar {
+  height: 6px;
+  margin-top: 5px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.12);
+  overflow: hidden;
+}
+.cand-panel .bar i {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, #4da3ff, #ffc93c);
+}
+.find-panel {
+  max-height: 86%;
+  display: flex;
+  flex-direction: column;
+}
+.find-list {
+  overflow-y: auto;
+  margin-top: 8px;
+  text-align: left;
+}
+.find-input {
+  width: 100%;
+  margin-top: 8px;
+  padding: 9px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(0, 0, 0, 0.3);
+  color: #fff;
+  font: inherit;
+  box-sizing: border-box;
+}
+.tabs.tabs-3 {
+  grid-template-columns: repeat(3, 1fr);
+}
+.tabs.tabs-3 button {
+  font-size: 11px;
+  padding: 7px 4px;
+}
+.switch {
+  flex: none;
+  width: auto;
+  padding: 8px 14px;
+  border: 0;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
+  font: 800 12px/1 var(--font);
+  cursor: pointer;
+}
+.switch.on {
+  background: linear-gradient(90deg, #2f9e55, #52c47a);
+}
+.color-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+}
+.color-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  padding: 8px 2px;
+  border: 0;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #fff;
+  font: 700 11px/1.1 var(--font);
+  cursor: pointer;
+}
+.color-btn i {
+  width: 100%;
+  max-width: 54px;
+  height: 20px;
+  border-radius: 8px;
+}
+.color-btn.on {
+  box-shadow: inset 0 0 0 2px #ffe27a;
+}
+.color-btn.play-default i {
+  background: linear-gradient(180deg, #ffe066, #ffc419);
+}
+.color-btn.play-fire i {
+  background: linear-gradient(180deg, #ffb347, #ff3d1f);
+}
+.color-btn.play-ice i {
+  background: linear-gradient(180deg, #bff3ff, #3aa8ff);
+}
+.color-btn.play-emerald i {
+  background: linear-gradient(180deg, #8dffb4, #1fae5c);
+}
+/* The Play button in the color the mayor chose (for everybody). */
+body[data-play='fire'] .primary.big.play {
+  background: linear-gradient(180deg, #ffb347, #ff3d1f);
+  color: #3a0d00;
+  box-shadow: 0 0 0 2px rgba(255, 220, 160, 0.5), 0 8px 22px rgba(255, 90, 30, 0.55);
+  animation: fire-glow 1.6s ease-in-out infinite;
+}
+body[data-play='ice'] .primary.big.play {
+  background: linear-gradient(180deg, #bff3ff, #3aa8ff);
+  color: #04243f;
+  box-shadow: 0 0 0 2px rgba(220, 245, 255, 0.6), 0 8px 22px rgba(60, 160, 255, 0.5);
+}
+body[data-play='emerald'] .primary.big.play {
+  background: linear-gradient(180deg, #8dffb4, #1fae5c);
+  color: #04301a;
+  box-shadow: 0 0 0 2px rgba(210, 255, 225, 0.6), 0 8px 22px rgba(40, 200, 110, 0.5);
+}
+@keyframes fire-glow {
+  50% {
+    box-shadow: 0 0 0 2px rgba(255, 240, 200, 0.8), 0 0 28px rgba(255, 110, 30, 0.9);
+  }
+}
+.notice {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 6px;
+  border: 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+button.notice {
+  cursor: pointer;
+}
+.notice p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.35;
+}
+.notice small {
+  color: var(--ink-dim);
+  font-size: 11px;
+}
+.notice.unread {
+  background: linear-gradient(90deg, rgba(255, 214, 90, 0.14), transparent);
+}
+.gov-ava.bell {
+  background: #34405c;
+}
+.buff.gov-buff {
+  display: inline-grid;
+  place-items: center;
+  min-width: 34px;
+  height: 30px;
+  padding: 0 6px;
+  border-radius: 8px;
+  background: linear-gradient(90deg, #ffd640, #ff9a2e);
+  color: #3a2300;
+  font-size: 11px;
+  font-weight: 900;
+}
+.chat-sys {
+  text-align: center;
+}
+.chat-sys {
+  color: #ffe58a;
+}
+body.reduced .gov-strip.voting,
+body[data-play='fire'].reduced .primary.big.play {
+  animation: none;
+}
+
+/* The labeled Menu button keeps its icon and text on one line. */
+.top-btn.more-btn {
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  white-space: nowrap;
+  height: 36px;
+}
+
+.switch {
+  white-space: nowrap;
+  min-width: 96px;
+  text-align: center;
+}

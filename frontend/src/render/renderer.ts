@@ -14,6 +14,7 @@ import { STYLES, torchReach, type StyleLoadout } from './styles';
 import { drawHeroBody, drawItem, heroRig, ITEM_ANCHOR, ITEM_BY_TIER, outfitFromMask, type AttachPoint, type Face, type Gesture, type HeroPose, type Item, type Rig } from './hero';
 import { palette } from './palette';
 import { CROWN_LIFT_SIDE, crownBob, drawCrown } from './crown';
+import { drawGovAura, type GovRole } from './govArt';
 import { paintParallax, paintScene, paintSky } from './scenes';
 
 const MAX_PARTICLES = 220;
@@ -219,6 +220,8 @@ export class Renderer {
   private lastMult = 1;
   /** The player holds the weekly crown: it floats above the hero's head. */
   crown = false
+  /** The player is the mayor or an assistant: the glow around him (and the mayor's diamond crown). */
+  role: GovRole = null
   private motes: Mote[] = [];
   private beamMotes: { u: number; v: number; s: number }[] = Array.from({ length: 12 }, () => ({
     u: Math.random(),
@@ -1297,6 +1300,13 @@ export class Renderer {
     const combo = sim.dead || this.reducedEffects || sim.tutorial || perf.effective >= 2 ? 0 : comboLevel(sim.multiplier);
     this.fireTrail.emit(dt * (perf.effective >= 1 ? 0.5 : 1), x, footY - 16 * sy, hero.vx, hero.vy, combo);
     this.fireTrail.draw(ctx, combo, x, footY - 28 * sy);
+    if (this.role && !sim.dead && !this.reducedEffects) {
+      ctx.save();
+      ctx.translate(x, footY - 30 * sy);
+      ctx.scale(sy, sy);
+      drawGovAura(ctx, this.role, this.clock, 0, perf.effective >= 1);
+      ctx.restore();
+    }
     // The moment of death: the hero is replaced by his own shards (see deathFx.ts).
     if (sim.dead && !this.reducedEffects && !this.deathFxDone) {
       this.deathFxDone = true;
@@ -1328,7 +1338,7 @@ export class Renderer {
     if (shielded) this.drawShieldGlow(pose, rig, x, footY, sx * hero.facing, sy, sim.time, dt, 'rim');
 
     // The weekly leader's crown floats above the head, above any cap or helmet.
-    if (this.crown && !sim.dead) {
+    if ((this.crown || this.role === 'mayor') && !sim.dead) {
       const up = outfit.suit ? 8 : outfit.cap ? 3 : 0;
       const cx = x + rig.points.headTop.x * sx * hero.facing;
       const cy = footY + rig.points.headTop.y * sy - CROWN_LIFT_SIDE - 4 - up + crownBob(this.clock * 1 + sim.time);
@@ -1336,7 +1346,7 @@ export class Renderer {
       ctx.translate(cx, cy);
       ctx.rotate(hero.vx * 0.0004);
       ctx.scale(1.3, 1.3);
-      drawCrown(ctx, this.clock, this.reducedEffects);
+      drawCrown(ctx, this.clock, this.reducedEffects, this.role === 'mayor' ? 'mayor' : 'leader');
       ctx.restore();
     }
 

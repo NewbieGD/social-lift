@@ -40,6 +40,8 @@ export interface CatalogItem {
   kind: string;
   /** Premium: the product (sold for VK votes) this item belongs to, or "". */
   product: string;
+  /** Lent to the mayor ("mayor") or to an assistant ("advisor") for the term of the post, or "". */
+  gov?: string;
 }
 
 /** Something sold for VK votes: all of its items come at once. */
@@ -94,6 +96,8 @@ export interface PublicProfile {
   photo: string | null;
   link: boolean;
   crown: boolean;
+  /** A post in the government (the mayor or his assistant), or null. */
+  role?: 'mayor' | 'assistant' | null;
   stats: {
     best_all: number;
     best_tier: number;
@@ -134,6 +138,15 @@ export interface Bootstrap {
   shop?: ShopState;
   /** Privacy choices of this player. */
   privacy?: { hide_vk_link: boolean };
+  /** The government: my post, the color of the Play button, the mayor's bonus, unread bell messages. */
+  gov?: {
+    role: 'mayor' | 'assistant' | null;
+    play_color: string;
+    bonus_active: boolean;
+    bonus_percent: number;
+    mayor_id: number | null;
+    unread: number;
+  };
   /** Balance numbers the server currently uses (they can change without a new version of the game). */
   tunables?: { duel_stake: number; points_per_coin: number };
   server_time: number;
@@ -184,6 +197,8 @@ export interface FinishResult {
   /** Coins paid for this run, the new balance, and cosmetics this run opened. */
   coins?: number;
   coins_earned?: number;
+  /** The candidate's ring was found in this run. */
+  ring_found?: boolean;
   new_items?: string[];
 }
 

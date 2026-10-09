@@ -516,7 +516,7 @@ function drawHead(ctx: CanvasRenderingContext2D, rig: Rig, o: Outfit, tier: numb
   ctx.rotate(rig.headTilt);
   const face = rig.face;
 
-  const coversHair = !!w?.head && ['helmet', 'cowl', 'mask', 'brute', 'beanie', 'seraphHelm', 'legionHead'].includes(w.head.kind);
+  const coversHair = !!w?.head && ['helmet', 'cowl', 'mask', 'brute', 'beanie', 'seraphHelm', 'legionHead', 'mayorHat', 'advisorCap'].includes(w.head.kind);
   // Back hair mass behind the head (a knitted cap leaves the hair at the back visible).
   if (!coversHair || w?.head?.kind === 'beanie') {
     ctx.fillStyle = HAIR;
@@ -990,7 +990,7 @@ function drawArm(ctx: CanvasRenderingContext2D, l: Limb3, o: Outfit, back: boole
     drawStyleArm(ctx, w.arms, l, back);
     return;
   }
-  if (w?.torso && ['hoodie', 'tunic', 'suit', 'wraps', 'web', 'seraphArmor', 'legionArmor'].includes(w.torso.kind)) {
+  if (w?.torso && ['hoodie', 'tunic', 'suit', 'wraps', 'web', 'seraphArmor', 'legionArmor', 'mayorCoat', 'advisorSuit'].includes(w.torso.kind)) {
     // Sleeves of the worn top, when the arms have no style of their own.
     const kk = back ? 0.14 : 0;
     const col = shade(torsoColor(w.torso), kk);
@@ -1071,7 +1071,7 @@ export function drawHeroBody(ctx: CanvasRenderingContext2D, pose: HeroPose, give
     drawSeraphWings(ctx, w.torso, rig.torsoLen, 'side', spread, t, detach);
     ctx.restore();
   }
-  if (w.torso && (w.torso.kind === 'tunic' || w.torso.kind === 'suit' || w.torso.kind === 'wraps')) {
+  if (w.torso && (w.torso.kind === 'tunic' || w.torso.kind === 'suit' || w.torso.kind === 'wraps' || w.torso.kind === 'mayorCoat')) {
     // Capes and the shell hang behind the whole body.
     ctx.save();
     ctx.translate(rig.hip.x, rig.hip.y);

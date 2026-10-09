@@ -18,6 +18,8 @@ export interface ChatUser {
   rank: number | null;
   /** The game may offer a link to this player's VK page. */
   link?: boolean;
+  /** A post in the government: the mayor or an assistant. */
+  role?: 'mayor' | 'assistant' | null;
 }
 
 export interface ChatMsg {
@@ -46,6 +48,7 @@ export type DuelMsg =
   | { t: 'chat_err'; code: 'empty' | 'link' | 'words' | 'cooldown' | 'muted'; wait?: number }
   | { t: 'chat_remove'; id: number }
   | { t: 'report_ok' }
+  | { t: 'chat_notice'; kind: string; user: ChatUser }
   | { t: 'chat_warned'; removed: boolean; text: string }
   | { t: 'report_err'; code: 'gone' | 'too_many' }
   | { t: 'stake_short'; need: number; have: number; who: 'me' | 'them'; name?: string | null }
