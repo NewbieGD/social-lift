@@ -46,6 +46,8 @@ class RunFinishIn(Strict):
     items: int = Field(default=0, ge=0, lt=1 << gc.ITEM_COUNT)
     # The cosmetic offered for this run (if any) was picked up from a platform.
     drop_found: bool = False
+    # The candidate's ring (rolled by the server for this run) was picked up from a platform.
+    ring_found: bool = False
     input_log: list[list[int]] = Field(default_factory=list, max_length=gc.MAX_INPUT_LOG)
 
     @field_validator("input_log")

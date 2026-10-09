@@ -98,6 +98,8 @@ class Run(Base):
     duel_id: Mapped[str | None] = mapped_column(String(36), index=True)
     # The cosmetic the server rolled for this run (it can be claimed once, when the run finishes).
     drop_item: Mapped[str | None] = mapped_column(String(40))
+    # The candidate's ring will lie on a platform in this run (decided by the server at the start).
+    ring_roll: Mapped[bool] = mapped_column(Boolean, default=False)
 
     user: Mapped[User] = relationship(back_populates="runs")
 

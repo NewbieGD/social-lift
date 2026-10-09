@@ -171,6 +171,7 @@ async def start_run(session: AsyncSession, user: User, *, seed: int | None = Non
         duel_id=duel_id,
         # Cosmetics can be found in solo runs only: duels are the same for both players.
         drop_item=None if duel_id else await shop.roll_drop(session, user),
+        ring_roll=False if duel_id else await gov.roll_ring(session, user.id),
     )
     session.add(run)
     await session.commit()
@@ -186,6 +187,8 @@ async def start_run(session: AsyncSession, user: User, *, seed: int | None = Non
         "item_misses": parse_misses(user.item_misses),
         # The mayor's bonus to coins is on right now (shown to the player in the run).
         "gov_bonus": gov.bonus_active(),
+        # A ring of a mayor candidate lies on a platform in this run.
+        "ring": bool(run.ring_roll),
     }
 
 
@@ -297,7 +300,7 @@ async def finish_run(session: AsyncSession, caller: Caller, body: RunFinishIn) -
         new_items += await shop.claim_drop(session, user, run.drop_item, body.drop_found, body.score)
         # What counts for the weekly election; and the ring of a candidate, found only in solo runs.
         await gov.add_run(session, user.id, body.score, solo=not run.duel_id)
-        ring_found = False if run.duel_id else await gov.maybe_ring(session, user.id, body.score)
+        ring_found = bool(run.ring_roll and body.ring_found and not run.duel_id and await gov.grant_ring(session, user.id, body.score))
         gov.touch(user.id)
     await session.commit()
 

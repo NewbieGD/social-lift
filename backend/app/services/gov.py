@@ -146,14 +146,21 @@ async def add_duel_win(session: AsyncSession, user_id: int) -> None:
     row.duel_wins = (row.duel_wins or 0) + 1
 
 
-async def maybe_ring(session: AsyncSession, user_id: int, score: int) -> bool:
-    """The ring of a candidate: rare, once a week, only in a solo run with a good score."""
+async def roll_ring(session: AsyncSession, user_id: int) -> bool:
+    """At the start of a solo run: will the candidate's ring lie on a platform in it? Rare, and a player
+    who already has this week's ring never gets another."""
+    wk = week_key(week_start(now()))
+    if await session.get(GovRing, (wk, user_id)) is not None:
+        return False
+    return random.random() < tunables.get("gov_ring_chance")
+
+
+async def grant_ring(session: AsyncSession, user_id: int, score: int) -> bool:
+    """The ring was picked up in a counted solo run (and the run was good enough): it is the player's for the week."""
     wk = week_key(week_start(now()))
     if score < tunables.get("gov_ring_min_score"):
         return False
     if await session.get(GovRing, (wk, user_id)) is not None:
-        return False
-    if random.random() >= tunables.get("gov_ring_chance"):
         return False
     session.add(GovRing(week=wk, user_id=user_id, found_at=utcnow()))
     return True

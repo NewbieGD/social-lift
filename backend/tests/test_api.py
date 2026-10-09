@@ -1125,21 +1125,25 @@ async def _gov_headers(client, uid):
     return headers(uid)
 
 
-async def test_gov_ring_is_rare_and_once_a_week(client, monkeypatch):
+async def test_gov_ring_is_rolled_at_the_start_and_granted_once_a_week(client, monkeypatch):
     import random
 
     from app.services import gov
 
     monkeypatch.setattr(gov, "now", lambda: _msk(2026, 12, 7, 12))
     await ready_player(client, 320)
+    # Luck: the server decides at the start that the ring lies in this run; it is granted only when the
+    # player picks it up in a counted run with a good score.
     monkeypatch.setattr(random, "random", lambda: 0.0)
     async with SessionLocal() as s:
-        assert await gov.maybe_ring(s, 320, 799) is False  # too low a score
-        assert await gov.maybe_ring(s, 320, 900) is True
+        assert await gov.roll_ring(s, 320) is True
+        assert await gov.grant_ring(s, 320, 799) is False  # too low a score
+        assert await gov.grant_ring(s, 320, 900) is True
         await s.commit()
     async with SessionLocal() as s:
-        assert await gov.maybe_ring(s, 320, 3000) is False  # one ring per week
+        assert await gov.roll_ring(s, 320) is False  # one ring per week: no more rolls
+        assert await gov.grant_ring(s, 320, 3000) is False
     monkeypatch.setattr(random, "random", lambda: 0.5)
     await ready_player(client, 321)
     async with SessionLocal() as s:
-        assert await gov.maybe_ring(s, 321, 3000) is False  # luck is needed
+        assert await gov.roll_ring(s, 321) is False  # no luck, no ring
