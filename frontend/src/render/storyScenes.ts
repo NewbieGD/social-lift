@@ -6,7 +6,7 @@
 // Everything static is drawn once into cached tiles (see scenes.ts and Renderer); the small living
 // details are drawn on top each frame by drawStoryDecor, each with a slow period (no flicker), and
 // are simply left out on weak phones. No brands or logos (rule 2.1.4): signs are generic words.
-import { bins, car, rect, rng, rr, type G } from './scenes';
+import { car, rect, rng, rr, type G } from './scenes';
 
 export const STORY_TIERS = 3;
 
@@ -91,79 +91,271 @@ export function paintStoryTile(g: G, tier: number, W: number, H: number): void {
   return showroomTile(g, W, H);
 }
 
-function yardTile(g: G, W: number, H: number): void {
-  const r = rng(1000);
-  for (const side of ['left', 'right'] as const) {
-    const x = side === 'left' ? 0 : W - WALL;
-    rect(g, x, 0, WALL, H, '#3C3331');
-    g.fillStyle = 'rgba(0,0,0,0.2)';
-    for (let y = 0; y < H; y += 8) for (let bx = (y / 8) % 2 ? 0 : 7; bx < WALL; bx += 14) g.fillRect(x + bx, y, 12, 1);
-    // The shade next to the open yard.
-    const sg = g.createLinearGradient(side === 'left' ? WALL - 14 : x, 0, side === 'left' ? WALL : x + 14, 0);
-    sg.addColorStop(side === 'left' ? 0 : 1, 'rgba(0,0,0,0)');
-    sg.addColorStop(side === 'left' ? 1 : 0, 'rgba(0,0,0,0.35)');
-    g.fillStyle = sg;
-    g.fillRect(side === 'left' ? WALL - 14 : x, 0, 14, H);
-    // A drainpipe along the inner edge.
-    rect(g, side === 'left' ? WALL - 5 : x, 0, 5, H, '#59606A');
-    g.fillStyle = 'rgba(255,255,255,0.18)';
-    g.fillRect(side === 'left' ? WALL - 4 : x + 1, 0, 1.4, H);
-    for (let y = 40; y < H; y += 110) rect(g, side === 'left' ? WALL - 7 : x - 2, y, 9, 4, '#3A4048');
-    // Splashes of paint on the bricks.
-    for (let i = 0; i < 3; i++) {
-      g.globalAlpha = 0.45;
-      g.fillStyle = ['#C0397A', '#3AA0C0', '#D8B030'][i];
-      rr(g, x + 6 + r() * 20, 30 + i * (H / 3) + r() * 60, 14 + r() * 14, 8 + r() * 6, 4, g.fillStyle as string);
-      g.globalAlpha = 1;
-    }
+/** Where the props of the yard stand on one storey of the wall (fractions of the tile height). */
+const YARD = {
+  winA: { x: 40, y: 0.1, w: 54, h: 70 },
+  winB: { x: 292, y: 0.58, w: 50, h: 66 },
+  lamp: { x: 262, y: 0.33 },
+  box: { x: 98, y: 0.76 },
+  poster: { x: 214, y: 0.14 },
+  pipeX: 14,
+};
+
+function yardWindow(g: G, x: number, y: number, w: number, h: number, lit: boolean, bars: boolean): void {
+  // A dark frame, a stone sill and a deep glass.
+  g.fillStyle = '#1B1614';
+  g.fillRect(x - 4, y - 4, w + 8, h + 8);
+  const gl = g.createLinearGradient(x, y, x, y + h);
+  if (lit) {
+    gl.addColorStop(0, '#F2B866');
+    gl.addColorStop(1, '#C97F32');
+  } else {
+    gl.addColorStop(0, '#26323F');
+    gl.addColorStop(1, '#141B24');
   }
-  // Windows with bars and fire escapes, bins and lamps.
-  for (let y = 110; y < H; y += 260) {
-    rect(g, 14, y, 22, 28, '#1A1E24');
-    g.fillStyle = 'rgba(255,214,140,0.28)';
-    g.fillRect(16, y + 2, 18, 24);
+  g.fillStyle = gl;
+  g.fillRect(x, y, w, h);
+  // The mullions and a reflection.
+  g.fillStyle = '#1B1614';
+  g.fillRect(x + w / 2 - 1.2, y, 2.4, h);
+  g.fillRect(x, y + h * 0.42, w, 2.4);
+  g.fillStyle = lit ? 'rgba(255,240,200,0.28)' : 'rgba(180,210,255,0.12)';
+  g.beginPath();
+  g.moveTo(x + 3, y + 3);
+  g.lineTo(x + w * 0.4, y + 3);
+  g.lineTo(x + 3, y + h * 0.4);
+  g.closePath();
+  g.fill();
+  if (bars) {
     g.fillStyle = '#6A7078';
-    for (let bx = 18; bx < 34; bx += 5) g.fillRect(bx, y + 1, 1.6, 26);
-    // A fire escape on the right wall: a landing, a rail and a ladder.
-    const fx = W - WALL + 4;
-    rect(g, fx, y + 70, 46, 3, '#4A5058');
-    g.strokeStyle = '#5A6068';
-    g.lineWidth = 1.4;
-    g.beginPath();
-    g.moveTo(fx, y + 56);
-    g.lineTo(fx + 46, y + 56);
-    g.stroke();
-    for (let bx = fx + 6; bx < fx + 46; bx += 9) {
-      g.beginPath();
-      g.moveTo(bx, y + 56);
-      g.lineTo(bx, y + 70);
-      g.stroke();
-    }
-    g.beginPath();
-    g.moveTo(fx + 4, y + 73);
-    g.lineTo(fx + 4, y + 120);
-    g.moveTo(fx + 14, y + 73);
-    g.lineTo(fx + 14, y + 120);
-    g.stroke();
-    for (let ry = y + 78; ry < y + 120; ry += 7) {
-      g.beginPath();
-      g.moveTo(fx + 4, ry);
-      g.lineTo(fx + 14, ry);
-      g.stroke();
-    }
+    for (let bx = x + 6; bx < x + w - 2; bx += 8) g.fillRect(bx, y - 2, 2, h + 4);
   }
-  for (let y = 150; y < H; y += 220) {
-    bins(g, 4, y, '#2F4F6F');
-    bins(g, W - 54, y + 110, '#3F5F3F');
-  }
-  for (let y = 60; y < H; y += 260) {
-    rect(g, WALL, y, 14, 3, '#555');
-    rect(g, WALL + 12, y - 2, 3, 8, '#555');
-    g.fillStyle = 'rgba(255,224,150,0.95)';
+  // The sill, with a shadow under it on the wall.
+  g.fillStyle = '#A8A39A';
+  g.fillRect(x - 7, y + h + 4, w + 14, 5);
+  g.fillStyle = '#D0CBC0';
+  g.fillRect(x - 7, y + h + 4, w + 14, 1.6);
+  const sh = g.createLinearGradient(0, y + h + 9, 0, y + h + 30);
+  sh.addColorStop(0, 'rgba(0,0,0,0.38)');
+  sh.addColorStop(1, 'rgba(0,0,0,0)');
+  g.fillStyle = sh;
+  g.fillRect(x - 6, y + h + 9, w + 12, 22);
+}
+
+function flowerPot(g: G, x: number, y: number): void {
+  g.fillStyle = '#B5562E';
+  g.beginPath();
+  g.moveTo(x - 7, y - 10);
+  g.lineTo(x + 7, y - 10);
+  g.lineTo(x + 5, y);
+  g.lineTo(x - 5, y);
+  g.closePath();
+  g.fill();
+  g.fillStyle = 'rgba(0,0,0,0.25)';
+  g.fillRect(x - 5, y - 4, 10, 2);
+  g.fillStyle = '#3F7A3C';
+  for (const [dx, dy, rx] of [[-5, -15, 5], [0, -18, 5.5], [5, -14, 5]] as [number, number, number][]) {
     g.beginPath();
-    g.arc(WALL + 14, y + 8, 4, 0, Math.PI * 2);
+    g.ellipse(x + dx, y + dy, rx, 3.6, dx * 0.1, 0, Math.PI * 2);
     g.fill();
   }
+  g.fillStyle = '#E8445A';
+  for (const [dx, dy] of [[-4, -19], [3, -21], [6, -16]]) {
+    g.beginPath();
+    g.arc(x + dx, y + dy, 1.8, 0, Math.PI * 2);
+    g.fill();
+  }
+}
+
+function yardTile(g: G, W: number, H: number): void {
+  const r = rng(77);
+  // The brick wall of the main screen: a mortar bed, bricks of several reds with a lighter top edge,
+  // a darker bottom edge and now and then a sooty one. The rows are fitted so that the tile repeats.
+  const bw = 10;
+  const rows = Math.max(2, 2 * Math.round(H / (2 * 3.8)));
+  const bh = H / rows;
+  const palette = ['#7B3B2D', '#6C3226', '#86442F', '#5E2C23', '#8C4B35', '#72372A'];
+  g.fillStyle = '#2E2220';
+  g.fillRect(0, 0, W, H);
+  for (let row = 0; row < rows; row++) {
+    const y = row * bh;
+    const off = row % 2 ? -bw / 2 : 0;
+    for (let x = off; x < W; x += bw) {
+      g.fillStyle = palette[Math.floor(r() * palette.length)];
+      g.fillRect(x + 0.7, y + 0.7, bw - 1.4, bh - 1.4);
+      g.fillStyle = 'rgba(255,200,170,0.10)';
+      g.fillRect(x + 0.7, y + 0.7, bw - 1.4, Math.max(1, bh * 0.14));
+      g.fillStyle = 'rgba(0,0,0,0.16)';
+      g.fillRect(x + 0.7, y + bh - 0.7 - Math.max(1, bh * 0.16), bw - 1.4, Math.max(1, bh * 0.16));
+      if (r() < 0.08) {
+        g.fillStyle = 'rgba(0,0,0,0.22)';
+        g.fillRect(x + 0.7, y + 0.7, bw - 1.4, bh - 1.4);
+      }
+    }
+  }
+  // Damp streaks and a patch of moss: the wall is old.
+  for (let i = 0; i < 7; i++) {
+    const x = 20 + r() * (W - 40);
+    const y = r() * H;
+    const sg = g.createLinearGradient(0, y, 0, y + 90);
+    sg.addColorStop(0, 'rgba(10,8,8,0.28)');
+    sg.addColorStop(1, 'rgba(10,8,8,0)');
+    g.fillStyle = sg;
+    g.fillRect(x, y, 6 + r() * 10, 90);
+  }
+  g.fillStyle = 'rgba(70,110,60,0.22)';
+  for (const [mx, my] of [[0.5, 0.92], [0.18, 0.5], [0.8, 0.28]] as [number, number][]) {
+    g.beginPath();
+    g.ellipse(W * mx, H * my, 18, 7, 0, 0, Math.PI * 2);
+    g.fill();
+  }
+
+  // A stone band at the top of every storey with its shadow.
+  g.fillStyle = '#8C877C';
+  g.fillRect(0, 0, W, 7);
+  g.fillStyle = '#B6B1A4';
+  g.fillRect(0, 0, W, 2);
+  const cs = g.createLinearGradient(0, 7, 0, 30);
+  cs.addColorStop(0, 'rgba(0,0,0,0.5)');
+  cs.addColorStop(1, 'rgba(0,0,0,0)');
+  g.fillStyle = cs;
+  g.fillRect(0, 7, W, 23);
+
+  // The light of the main screen: the walls darken towards the sides, the middle stays light.
+  const sides = g.createLinearGradient(0, 0, W, 0);
+  sides.addColorStop(0, 'rgba(8,6,10,0.5)');
+  sides.addColorStop(0.24, 'rgba(8,6,10,0)');
+  sides.addColorStop(0.76, 'rgba(8,6,10,0)');
+  sides.addColorStop(1, 'rgba(8,6,10,0.55)');
+  g.fillStyle = sides;
+  g.fillRect(0, 0, W, H);
+
+  // Windows with their sills, a flower pot and bars.
+  const a = YARD.winA;
+  yardWindow(g, a.x, H * a.y, a.w, a.h, true, true);
+  flowerPot(g, a.x + 14, H * a.y + a.h + 4);
+  const b2 = YARD.winB;
+  yardWindow(g, b2.x, H * b2.y, b2.w, b2.h, false, false);
+  // Shutters on the second window.
+  g.fillStyle = '#3F5F58';
+  g.fillRect(b2.x - 14, H * b2.y - 2, 11, b2.h + 4);
+  g.fillRect(b2.x + b2.w + 4, H * b2.y - 2, 11, b2.h + 4);
+  g.fillStyle = 'rgba(0,0,0,0.28)';
+  for (let sy = H * b2.y + 2; sy < H * b2.y + b2.h; sy += 6) {
+    g.fillRect(b2.x - 14, sy, 11, 1.4);
+    g.fillRect(b2.x + b2.w + 4, sy, 11, 1.4);
+  }
+
+  // A drainpipe along the left side with brackets and joints, and one more by the right edge.
+  for (const px of [YARD.pipeX, W - 12]) {
+    const pg = g.createLinearGradient(px, 0, px + 7, 0);
+    pg.addColorStop(0, '#454C56');
+    pg.addColorStop(0.45, '#8A929E');
+    pg.addColorStop(1, '#3A4048');
+    g.fillStyle = pg;
+    g.fillRect(px, 0, 7, H);
+    for (let y = 26; y < H; y += 72) {
+      g.fillStyle = '#2A2F36';
+      g.fillRect(px - 2, y, 11, 3);
+      g.fillStyle = 'rgba(0,0,0,0.35)';
+      g.fillRect(px + 7, y, 3, 3);
+    }
+    g.fillStyle = '#2F353D';
+    g.fillRect(px - 1.5, H * 0.48, 10, 6);
+  }
+
+  // A wall lamp with a pool of warm light on the bricks.
+  const lx = YARD.lamp.x;
+  const ly = H * YARD.lamp.y;
+  g.save();
+  g.globalCompositeOperation = 'lighter';
+  const lg = g.createRadialGradient(lx, ly + 6, 0, lx, ly + 6, 84);
+  lg.addColorStop(0, 'rgba(255,196,110,0.5)');
+  lg.addColorStop(0.5, 'rgba(255,150,70,0.16)');
+  lg.addColorStop(1, 'rgba(255,150,70,0)');
+  g.fillStyle = lg;
+  g.fillRect(lx - 84, ly - 78, 168, 168);
+  g.restore();
+  g.fillStyle = '#15110F';
+  g.fillRect(lx - 1.2, ly - 12, 2.4, 12);
+  g.fillRect(lx - 9, ly - 14, 18, 3);
+  g.beginPath();
+  g.moveTo(lx - 8, ly);
+  g.quadraticCurveTo(lx, ly - 12, lx + 8, ly);
+  g.closePath();
+  g.fill();
+  g.fillStyle = '#FFE9A8';
+  g.beginPath();
+  g.ellipse(lx, ly + 1.4, 4.2, 2.2, 0, 0, Math.PI * 2);
+  g.fill();
+
+  // A steel electrical box with a warning sign.
+  const bx = YARD.box.x;
+  const by = H * YARD.box.y;
+  const eg = g.createLinearGradient(bx, by, bx + 32, by);
+  eg.addColorStop(0, '#6A727C');
+  eg.addColorStop(1, '#4A515A');
+  g.fillStyle = '#15110F';
+  g.fillRect(bx - 2, by - 2, 36, 52);
+  g.fillStyle = eg;
+  g.fillRect(bx, by, 32, 48);
+  g.fillStyle = 'rgba(0,0,0,0.3)';
+  g.fillRect(bx + 15, by, 1.6, 48);
+  g.fillStyle = '#E8C030';
+  g.beginPath();
+  g.moveTo(bx + 16, by + 8);
+  g.lineTo(bx + 26, by + 26);
+  g.lineTo(bx + 6, by + 26);
+  g.closePath();
+  g.fill();
+  g.fillStyle = '#15110F';
+  g.fillRect(bx + 15, by + 13, 2, 6);
+  g.fillRect(bx + 15, by + 21, 2, 2);
+  g.fillStyle = '#C9A24A';
+  g.fillRect(bx + 26, by + 30, 3, 5);
+  // A conduit runs up from the box to the top of the tile.
+  g.fillStyle = '#3A3F46';
+  g.fillRect(bx + 4, 0, 3, by);
+
+  // A torn poster held with tape, and scribbles of paint.
+  g.save();
+  g.translate(YARD.poster.x, H * YARD.poster.y);
+  g.rotate(-0.05);
+  g.fillStyle = '#E8E0C8';
+  g.fillRect(0, 0, 38, 50);
+  g.fillStyle = '#C0397A';
+  g.fillRect(4, 4, 30, 12);
+  g.fillStyle = 'rgba(40,40,60,0.55)';
+  for (let ly2 = 22; ly2 < 44; ly2 += 5) g.fillRect(5, ly2, 24 + (ly2 % 3) * 2, 1.6);
+  g.fillStyle = 'rgba(255,255,255,0.5)';
+  g.fillRect(-3, -2, 9, 5);
+  g.fillRect(32, -2, 9, 5);
+  g.fillStyle = 'rgba(0,0,0,0.25)';
+  g.beginPath();
+  g.moveTo(30, 50);
+  g.lineTo(38, 38);
+  g.lineTo(38, 50);
+  g.closePath();
+  g.fill();
+  g.restore();
+  g.globalAlpha = 0.5;
+  for (const [cx, cy, c] of [[0.62, 0.22, '#3AA0C0'], [0.7, 0.9, '#D8B030']] as [number, number, string][]) {
+    rr(g, W * cx, H * cy, 22, 9, 4, c);
+  }
+  g.globalAlpha = 1;
+
+  // Wires sag between the pipe, the box and the lamp.
+  g.strokeStyle = 'rgba(12,10,10,0.85)';
+  g.lineWidth = 1.2;
+  g.beginPath();
+  g.moveTo(YARD.pipeX + 7, H * 0.3);
+  g.quadraticCurveTo(W * 0.3, H * 0.3 + 22, W * 0.52, H * 0.27);
+  g.quadraticCurveTo(W * 0.66, H * 0.25 + 10, lx - 9, ly - 10);
+  g.stroke();
+  g.beginPath();
+  g.moveTo(bx + 5, by - 2);
+  g.quadraticCurveTo(W * 0.4, by - 28, W * 0.62, by - 4);
+  g.stroke();
 }
 
 function basementTile(g: G, W: number, H: number): void {
@@ -300,7 +492,7 @@ function showroomTile(g: G, W: number, H: number): void {
 
 // ------------------------------------------------------------------ far layer of the parallax
 export function paintStoryParallax(g: G, tier: number, W: number, H: number, layer: 0 | 1 | 2): void {
-  if (layer !== 0) return;
+  if (layer !== 0 || tier === 0) return; // the yard wall is opaque: nothing shows behind it
   const r = rng(7700 + tier);
   if (tier === 0) {
     // Far roofs of the neighbourhood with a few lit windows.
@@ -348,101 +540,103 @@ export function paintStoryParallax(g: G, tier: number, W: number, H: number, lay
 export function drawStoryDecor(ctx: CanvasRenderingContext2D, tier: number, W: number, H: number, off: number, t: number, low: boolean): void {
   const at = (y: number): number[] => [y + off - H, y + off];
   ctx.save();
-  if (tier === 0) yardDecor(ctx, W, H, at, t, low);
+  if (tier === 0) yardDecor(ctx, H, at, t, low);
   else if (tier === 1) basementDecor(ctx, W, H, at, t, low);
   else showroomDecor(ctx, W, H, at, t, low);
   ctx.restore();
 }
 
-function yardDecor(ctx: CanvasRenderingContext2D, W: number, H: number, at: (y: number) => number[], t: number, low: boolean): void {
-  // A cat on the bins, tail swishing.
-  for (let y = 150; y < H; y += 220) {
-    for (const sy of at(y - 22)) {
-      ctx.fillStyle = 'rgba(15,15,20,0.92)';
-      ctx.beginPath();
-      ctx.ellipse(14, sy - 5, 7, 5, 0, 0, Math.PI * 2);
-      ctx.arc(20, sy - 11, 4, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.beginPath();
-      ctx.moveTo(18, sy - 14);
-      ctx.lineTo(19, sy - 18);
-      ctx.lineTo(21, sy - 14);
-      ctx.moveTo(21, sy - 14);
-      ctx.lineTo(23, sy - 18);
-      ctx.lineTo(24, sy - 13);
-      ctx.fill();
-      ctx.strokeStyle = 'rgba(15,15,20,0.92)';
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.moveTo(8, sy - 4);
-      ctx.quadraticCurveTo(2, sy - 10 + Math.sin(t * 2.2) * 4, 4 + Math.sin(t * 2.2) * 3, sy - 16);
-      ctx.stroke();
-      ctx.fillStyle = 'rgba(255,220,120,0.9)';
-      ctx.fillRect(21, sy - 12, 1.5, 1.5);
+function yardDecor(ctx: CanvasRenderingContext2D, H: number, at: (y: number) => number[], t: number, low: boolean): void {
+  const wa = YARD.winA;
+  const wb = YARD.winB;
+  // The light of the lamp breathes a little, and a moth circles it.
+  for (const sy of at(H * YARD.lamp.y)) {
+    ctx.globalAlpha = 0.12 + 0.06 * Math.sin(t * 1.3);
+    ctx.fillStyle = '#FFD88C';
+    ctx.beginPath();
+    ctx.arc(YARD.lamp.x, sy + 4, 30, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+    if (!low) {
+      ctx.fillStyle = 'rgba(255,244,210,0.95)';
+      ctx.fillRect(YARD.lamp.x + Math.cos(t * 2.6) * 13, sy + 2 + Math.sin(t * 3.4) * 8, 1.6, 1.6);
     }
   }
-  // Lamps breathe, and a moth circles the light.
-  for (let y = 60; y < H; y += 260) {
-    for (const sy of at(y + 8)) {
-      ctx.globalAlpha = 0.2 + 0.08 * Math.sin(t * 1.3 + y);
-      ctx.fillStyle = '#FFDC8C';
-      ctx.beginPath();
-      ctx.arc(72, sy, 20, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.globalAlpha = 1;
-      if (!low) {
-        ctx.fillStyle = 'rgba(255,240,200,0.9)';
-        ctx.fillRect(72 + Math.cos(t * 2.6 + y) * 11, sy - 4 + Math.sin(t * 3.4 + y) * 7, 1.5, 1.5);
-      }
-    }
+  // A curtain in the lit window moves in the draught.
+  for (const sy of at(H * wa.y)) {
+    const sw = Math.sin(t * 1.1) * (low ? 1.5 : 3.5);
+    ctx.fillStyle = 'rgba(230,80,100,0.82)';
+    ctx.beginPath();
+    ctx.moveTo(wa.x, sy);
+    ctx.lineTo(wa.x + 18, sy);
+    ctx.quadraticCurveTo(wa.x + 12 + sw, sy + wa.h * 0.5, wa.x + 15 + sw * 1.4, sy + wa.h * 0.9);
+    ctx.lineTo(wa.x, sy + wa.h * 0.9);
+    ctx.closePath();
+    ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(wa.x + wa.w, sy);
+    ctx.lineTo(wa.x + wa.w - 18, sy);
+    ctx.quadraticCurveTo(wa.x + wa.w - 12 - sw, sy + wa.h * 0.5, wa.x + wa.w - 15 - sw * 1.4, sy + wa.h * 0.9);
+    ctx.lineTo(wa.x + wa.w, sy + wa.h * 0.9);
+    ctx.closePath();
+    ctx.fill();
   }
-  // Washing on a line between the wall and the drainpipe sways in the wind.
-  for (let y = 110; y < H; y += 260) {
-    for (const sy of at(y + 40)) {
-      ctx.strokeStyle = 'rgba(200,200,210,0.6)';
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(W - 58, sy);
-      ctx.lineTo(W - 118, sy + 6);
-      ctx.stroke();
-      const colors = ['#D84A5A', '#E8E0C8', '#4A8AD8'];
-      for (let i = 0; i < 3; i++) {
-        const px = W - 66 - i * 17;
-        const py = sy + 1 + (i * 2) / 1;
-        const sw = Math.sin(t * 1.8 + i * 1.2 + y) * (low ? 1 : 2.6);
-        ctx.fillStyle = colors[i];
-        ctx.beginPath();
-        ctx.moveTo(px, py);
-        ctx.lineTo(px + 10, py);
-        ctx.lineTo(px + 10 + sw, py + 15);
-        ctx.lineTo(px + sw * 0.5, py + 15);
-        ctx.closePath();
-        ctx.fill();
-      }
-    }
+  // A cat on the sill of the shuttered window, tail swishing.
+  for (const sy of at(H * wb.y + wb.h + 4)) {
+    const cx = wb.x + 12;
+    ctx.fillStyle = 'rgba(15,15,20,0.95)';
+    ctx.beginPath();
+    ctx.ellipse(cx, sy - 6, 9, 6, 0, 0, Math.PI * 2);
+    ctx.arc(cx + 8, sy - 13, 4.6, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(cx + 5, sy - 16);
+    ctx.lineTo(cx + 6, sy - 21);
+    ctx.lineTo(cx + 9, sy - 16.5);
+    ctx.moveTo(cx + 9, sy - 16.5);
+    ctx.lineTo(cx + 11.5, sy - 21);
+    ctx.lineTo(cx + 12.5, sy - 15);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(15,15,20,0.95)';
+    ctx.lineWidth = 2.2;
+    ctx.beginPath();
+    ctx.moveTo(cx - 8, sy - 4);
+    ctx.quadraticCurveTo(cx - 15, sy - 11 + Math.sin(t * 2.2) * 5, cx - 12 + Math.sin(t * 2.2) * 4, sy - 19);
+    ctx.stroke();
+    ctx.fillStyle = 'rgba(255,224,120,0.95)';
+    ctx.fillRect(cx + 9, sy - 13, 1.6, 1.6);
   }
   if (low) return;
-  // A crow sits on the fire escape and every few seconds shifts its wings.
-  for (let y = 110; y < H; y += 260) {
-    for (const sy of at(y + 52)) {
-      const flap = Math.sin(t * 0.7 + y) > 0.93 ? Math.sin(t * 26) * 3 : 0;
-      const cx = W - 36;
-      ctx.fillStyle = '#0E1014';
-      ctx.beginPath();
-      ctx.ellipse(cx, sy, 6, 4, -0.2, 0, Math.PI * 2);
-      ctx.arc(cx - 6, sy - 3, 3, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.beginPath();
-      ctx.moveTo(cx - 8.5, sy - 3);
-      ctx.lineTo(cx - 12, sy - 2);
-      ctx.lineTo(cx - 8.5, sy - 1);
-      ctx.fill();
-      ctx.beginPath();
-      ctx.moveTo(cx + 2, sy - 1);
-      ctx.lineTo(cx + 5, sy - 5 - flap);
-      ctx.lineTo(cx + 8, sy);
-      ctx.fill();
-    }
+  // A crow on the electrical box: it shifts its wings now and then.
+  for (const sy of at(H * YARD.box.y - 2)) {
+    const flap = Math.sin(t * 0.7) > 0.93 ? Math.sin(t * 26) * 3.5 : 0;
+    const cx = YARD.box.x + 16;
+    ctx.fillStyle = '#0E1014';
+    ctx.beginPath();
+    ctx.ellipse(cx, sy - 5, 7, 4.6, -0.2, 0, Math.PI * 2);
+    ctx.arc(cx - 7, sy - 9, 3.4, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(cx - 10, sy - 9);
+    ctx.lineTo(cx - 14.5, sy - 8);
+    ctx.lineTo(cx - 10, sy - 7);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(cx + 2, sy - 7);
+    ctx.lineTo(cx + 6, sy - 12 - flap);
+    ctx.lineTo(cx + 9, sy - 5);
+    ctx.fill();
+  }
+  // A scrap of paper comes loose from the poster corner and flutters.
+  for (const sy of at(H * YARD.poster.y + 46)) {
+    const k = (t * 0.2) % 1;
+    ctx.save();
+    ctx.translate(YARD.poster.x + 30 + Math.sin(k * 14) * 8 * k, sy + k * 60);
+    ctx.rotate(k * 6);
+    ctx.globalAlpha = 1 - k;
+    ctx.fillStyle = '#E8E0C8';
+    ctx.fillRect(-4, -3, 8, 6);
+    ctx.restore();
   }
 }
 
