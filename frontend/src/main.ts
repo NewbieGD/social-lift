@@ -274,6 +274,11 @@ renderer.onCaption = (kind, value) => {
   if (!el) return;
   if (kind === 'stage') {
     el.innerHTML = `<span class="cap-label">${ru.look.stage}</span><span class="cap-items">${ru.tiers[value]}</span>`;
+  } else if (kind === 'ring') {
+    // The candidate's ring: a small label like the other finds.
+    el.innerHTML = `<span class="cap-label">${ru.gov.ringLabel}</span><span class="cap-items">${ru.gov.ringName}</span>`;
+    audio.play('unlock');
+    if (settingsStore.get().vibration) haptic('light');
   } else {
     const n = itemCount(sim.owned);
     el.innerHTML = `<span class="cap-label">${ru.look.item(n)}</span><span class="cap-items">${ru.items[ITEM_BY_TIER[value]]}</span>`;
@@ -535,11 +540,13 @@ function visibleMask(mask: number): number {
 
 /** The cosmetic the server offered for the current run (it may lie on a platform). */
 let runDrop: string | null = null;
+/** The ring of a mayor candidate lies on a platform in this run. */
+let runRing = false;
 
-function newSim(seed: number, tutorial = false, items = false, drop = false): void {
+function newSim(seed: number, tutorial = false, items = false, drop = false, ring = false): void {
   renderer.cinematic = duel ? false : settingsStore.get().cinematic;
   // Every run starts with nothing worn; items found along the way count for this run only.
-  sim = new Sim(seed, sim.viewH, { tutorial, items, drop });
+  sim = new Sim(seed, sim.viewH, { tutorial, items, drop, ring });
   renderer.styles = heroLoadout();
   renderer.pet = PET_IDS[heroDecor().pet ?? ''] ?? null;
   renderer.dropColor = (runDrop && STYLES[runDrop]?.palette.main) || '#FFD640';
@@ -626,7 +633,8 @@ async function startRun(): Promise<void> {
   settleAfterAd();
   // Items drop only in runs the server can verify, or locally when playing outside VK.
   runDrop = ticket?.drop ?? null;
-  newSim(ticket ? ticket.seed : randomSeed(), false, !!ticket || session.mode === 'outside', !!runDrop);
+  runRing = !!ticket?.ring;
+  newSim(ticket ? ticket.seed : randomSeed(), false, !!ticket || session.mode === 'outside', !!runDrop, runRing);
   mode = 'run';
   router.clear();
   session.event('run_start');
@@ -813,6 +821,7 @@ function finishRun(): void {
       input_log: sim.inputLog,
       items: sim.picked,
       drop_found: sim.dropFound,
+      ring_found: sim.ringFound,
     })
     .then((res) => {
       const el = document.getElementById('resultRank');
@@ -829,8 +838,9 @@ function finishRun(): void {
         }
       }
       if (res?.ring_found) {
-        audio.play('unlock');
-        toast(`${ru.gov.ringFound} ${ru.gov.ringNote}`, 5200);
+        // A small line in the result card (the find itself was announced in the run).
+        const line = document.getElementById('stylesLine');
+        if (line) line.textContent = `${ru.gov.ringLine} ${line.textContent ?? ''}`.trim();
       }
       if (res?.new_items?.length) {
         const line = document.getElementById('stylesLine');
@@ -1670,7 +1680,37 @@ async function refreshGov(): Promise<void> {
     };
   }
   applyPlayColor(res.state.settings.play_color);
-  if (router.top === 'government' || router.top === 'govManage' || router.top === 'menu') router.refresh();
+  const json = JSON.stringify(res.state);
+  const changed = json !== govJson;
+  govJson = json;
+  // The menu is never redrawn for this (that made the whole screen flash): its few parts change in place.
+  if (router.top === 'menu') updateMenuGov();
+  else if (changed && (router.top === 'government' || router.top === 'govManage')) router.refresh();
+}
+
+let govJson = '';
+
+/** The strip under the Play button and the bell change in place, without redrawing the menu. */
+function updateMenuGov(): void {
+  const s = govStrip();
+  const strip = document.querySelector<HTMLElement>('.gov-strip');
+  if (strip) {
+    strip.className = `gov-strip ${s.kind}`;
+    const text = strip.querySelector('.gov-strip-text');
+    if (text && text.textContent !== s.text) text.textContent = s.text;
+  }
+  const bell = document.querySelector<HTMLElement>('.bell-btn');
+  if (bell) {
+    let badge = bell.querySelector<HTMLElement>('.bell-count');
+    if (s.unread > 0) {
+      if (!badge) {
+        badge = document.createElement('i');
+        badge.className = 'bell-count';
+        bell.appendChild(badge);
+      }
+      badge.textContent = String(Math.min(99, s.unread));
+    } else badge?.remove();
+  }
 }
 
 /** Loads the list of players the mayor can appoint (the search box keeps its focus while it is redrawn). */
@@ -2012,7 +2052,7 @@ window.setInterval(() => {
   void govApi.notices().then((r) => {
     if (r && session.data?.gov) {
       session.data.gov.unread = r.unread;
-      if (router.top === 'menu') router.refresh();
+      if (router.top === 'menu') updateMenuGov();
     }
   });
 }, 90_000);

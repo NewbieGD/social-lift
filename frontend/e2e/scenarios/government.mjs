@@ -52,10 +52,13 @@ const all = [];
 // ---- 1. an ordinary player
 role = null;
 all.push(...await withPlayer(async (p, top) => {
+  // The menu must not be redrawn while the government loads in the background (that made the screen flash).
+  const mut = await p.evaluate(() => new Promise((res) => { let n = 0; const o = new MutationObserver((m) => { n += m.length; }); o.observe(document.getElementById('screens'), { childList: true, subtree: true }); setTimeout(() => { o.disconnect(); res(n); }, 2600); }));
+  console.log('menu redraws in 2.6 s:', mut);
   console.log('menu: strip:', (await p.locator('.gov-strip').textContent()).replace(/\s+/g, ' ').trim(), '| bell:', await p.locator('.bell-count').textContent(), '| Play color:', await p.evaluate(() => document.body.dataset.play));
   await p.screenshot({ path: `${OUT}/gov_menu_${W}.png` });
   await p.click('.gov-strip'); await p.waitForTimeout(1200);
-  console.log('government screen:', await top(), '| slots:', await p.locator('.slot').count(), '| candidates:', await p.locator('.cand-row').count(), '| throne canvas:', await p.locator('#throneCanvas').count(), '| manage button:', await p.locator('[data-arg="govManage"]').count());
+  console.log('government screen:', await top(), '| seats:', await p.locator('.seat').count(), '| candidates:', await p.locator('.cand-card').count(), '| tiles:', await p.locator('.gtile').count(), '| vote steps:', await p.locator('.vstep').count(), '| throne canvas:', await p.locator('#throneCanvas').count(), '| manage button:', await p.locator('[data-arg="govManage"]').count());
   await p.screenshot({ path: `${OUT}/gov_empty_${W}.png` });
   await p.click('[data-arg="govCandidacy"]'); await p.waitForTimeout(700);
   console.log('candidacy window:', await top(), '| requirements:', await p.locator('.req').count(), '| ok marks:', await p.locator('.req.ok').count(), '| apply button:', await p.locator('[data-action="govApply"]').count());
@@ -71,7 +74,7 @@ role = 'mayor';
 all.push(...await withPlayer(async (p, top) => {
   await p.screenshot({ path: `${OUT}/gov_mayor_menu_${W}.png` });
   await p.click('.gov-strip'); await p.waitForTimeout(1200);
-  console.log('mayor government screen: assistants shown:', await p.locator('.slot.filled').count(), '| manage button:', await p.locator('[data-arg="govManage"]').count());
+  console.log('mayor government screen: assistants shown:', await p.locator('.seat.filled').count(), '| manage button:', await p.locator('[data-arg="govManage"]').count());
   await p.screenshot({ path: `${OUT}/gov_throne_${W}.png` });
   await p.click('[data-arg="govManage"]'); await p.waitForTimeout(800);
   console.log('management:', await top(), '| color buttons:', await p.locator('.color-btn').count(), '| remove buttons:', await p.locator('[data-action="govRemove"]').count());

@@ -6620,3 +6620,523 @@ body[data-play='fire'].reduced .primary.big.play {
   min-width: 96px;
   text-align: center;
 }
+
+/* ===================== Government: the finished look ===================== */
+.gov-screen {
+  --gold1: #ffe58a;
+  --gold2: #e8b53a;
+  --gold3: #9a6a12;
+}
+.gov-screen .gov-h {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 22px 0 8px;
+  font-size: 15px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--gold1);
+}
+.gov-screen .gov-h::before,
+.gov-screen .gov-h::after {
+  content: '';
+  flex: 1;
+  height: 1.5px;
+  background: linear-gradient(90deg, transparent, rgba(232, 181, 58, 0.7), transparent);
+}
+/* An ornate card: a gold gradient frame, dark glass inside and a light that slides over it now and then. */
+.gcard {
+  position: relative;
+  margin: 10px 0;
+  padding: 12px 14px;
+  border: 2px solid transparent;
+  border-radius: 16px;
+  background:
+    linear-gradient(160deg, #1d1830, #14101f) padding-box,
+    linear-gradient(135deg, var(--gold1), var(--gold3) 45%, var(--gold2) 70%, var(--gold1)) border-box;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.4);
+  overflow: hidden;
+}
+.gcard::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(105deg, transparent 40%, rgba(255, 240, 190, 0.12) 50%, transparent 60%);
+  transform: translateX(-130%);
+  animation: gov-sheen 6s ease-in-out infinite;
+  pointer-events: none;
+}
+@keyframes gov-sheen {
+  0%,
+  60% {
+    transform: translateX(-130%);
+  }
+  100% {
+    transform: translateX(130%);
+  }
+}
+.gcard h4 {
+  margin: 0 0 4px;
+  font-size: 14px;
+  color: var(--gold1);
+}
+.gcard p {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: #cfd6e6;
+}
+.gcard.soft {
+  border-color: rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.05);
+}
+.gcard.soft::after {
+  display: none;
+}
+.gcard.invite {
+  text-align: center;
+}
+/* The throne hall with bunting over it. */
+.throne-card {
+  position: relative;
+  border: 2px solid transparent;
+  border-radius: 20px;
+  background:
+    linear-gradient(#10131f, #10131f) padding-box,
+    linear-gradient(135deg, var(--gold1), var(--gold3) 40%, var(--gold2) 70%, var(--gold1)) border-box;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.5), 0 0 24px rgba(232, 181, 58, 0.2);
+  overflow: hidden;
+}
+.throne-card canvas {
+  display: block;
+  width: 100%;
+  height: 330px;
+}
+.throne-banner {
+  position: absolute;
+  top: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 4px 16px;
+  border-radius: 0 0 14px 14px;
+  background: linear-gradient(180deg, #b01c34, #7a1224);
+  color: #ffe58a;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.14em;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.5), inset 0 0 0 1px rgba(255, 220, 120, 0.6);
+  white-space: nowrap;
+}
+.bunting {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  justify-content: space-around;
+  pointer-events: none;
+}
+.bunting i {
+  width: 16px;
+  height: 20px;
+  background: var(--c, #e8b53a);
+  clip-path: polygon(0 0, 100% 0, 50% 100%);
+  transform-origin: top center;
+  animation: bunting 2.6s ease-in-out infinite;
+}
+.bunting i:nth-child(1) {
+  --c: #ff6a8a;
+}
+.bunting i:nth-child(2) {
+  --c: #ffd25a;
+  animation-delay: 0.3s;
+}
+.bunting i:nth-child(3) {
+  --c: #6fd6ff;
+  animation-delay: 0.6s;
+}
+.bunting i:nth-child(4) {
+  --c: #b36bff;
+  animation-delay: 0.9s;
+}
+.bunting i:nth-child(5) {
+  --c: #7be07b;
+  animation-delay: 1.2s;
+}
+.bunting i:nth-child(6) {
+  --c: #ffd25a;
+  animation-delay: 1.5s;
+}
+.bunting i:nth-child(7) {
+  --c: #ff6a8a;
+  animation-delay: 1.8s;
+}
+@keyframes bunting {
+  50% {
+    transform: rotate(10deg);
+  }
+}
+.throne-caption {
+  bottom: 12px;
+}
+/* The week as a bar with a marker that pulses. */
+.week-bar {
+  position: relative;
+  display: flex;
+  height: 14px;
+  margin: 6px 0 4px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.08);
+}
+.week-bar .seg {
+  display: block;
+  height: 100%;
+}
+.week-bar .seg:first-child {
+  border-radius: 8px 0 0 8px;
+}
+.week-bar .seg.res {
+  border-radius: 0 8px 8px 0;
+}
+.seg.cand {
+  background: linear-gradient(90deg, #3a82e0, #5fb0ff);
+}
+.seg.vote {
+  background: linear-gradient(90deg, #e8a020, #ffd25a);
+}
+.seg.res {
+  background: linear-gradient(90deg, #b36bff, #e0a0ff);
+}
+.week-now {
+  position: absolute;
+  top: -4px;
+  width: 4px;
+  height: 22px;
+  margin-left: -2px;
+  border-radius: 3px;
+  background: #fff;
+  box-shadow: 0 0 10px #fff, 0 0 18px rgba(255, 255, 255, 0.7);
+  animation: now-pulse 1.4s ease-in-out infinite;
+}
+@keyframes now-pulse {
+  50% {
+    box-shadow: 0 0 4px #fff;
+    opacity: 0.6;
+  }
+}
+.week-days {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
+  font-weight: 800;
+  color: var(--ink-dim);
+}
+.week-days span {
+  flex: 1;
+  text-align: center;
+}
+.week-legend {
+  display: flex;
+  justify-content: space-around;
+  margin-top: 6px;
+  font-size: 11px;
+  font-weight: 800;
+}
+.week-legend .lg::before {
+  content: '';
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-right: 5px;
+  border-radius: 3px;
+  vertical-align: -1px;
+  background: currentColor;
+}
+.lg.cand {
+  color: #5fb0ff;
+}
+.lg.vote {
+  color: #ffd25a;
+}
+.lg.res {
+  color: #c88aff;
+}
+.gcard.status .phase-pill {
+  margin: 10px 0 0;
+}
+/* The four seats of the assistants: shields in gold frames. */
+.seats {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+}
+.seat {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 18px 2px 8px;
+  border: 0;
+  border-radius: 14px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.02));
+  color: inherit;
+  font: inherit;
+  text-align: center;
+  min-width: 0;
+}
+.seat.filled {
+  cursor: pointer;
+  background: linear-gradient(180deg, rgba(190, 215, 255, 0.2), rgba(255, 255, 255, 0.03));
+}
+.seat b {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+}
+.seat small {
+  font-size: 8.5px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  color: #b8c8e8;
+}
+.seat-num {
+  position: absolute;
+  top: 4px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.1em;
+  color: var(--gold2);
+}
+.seat-frame {
+  display: block;
+  width: 56px;
+  height: 66px;
+  padding: 3px;
+  background: linear-gradient(160deg, #ffe58a, #9a6a12 55%, #e8b53a);
+  clip-path: polygon(50% 0, 100% 10%, 100% 68%, 50% 100%, 0 68%, 0 10%);
+}
+.seat.empty .seat-frame {
+  background: linear-gradient(160deg, #5a5f78, #33374a);
+}
+.seat.filled .seat-frame {
+  background: linear-gradient(160deg, #e8f0ff, #7a94c8 55%, #c8d4ec);
+}
+.seat-in {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  background: #1a1f33;
+  clip-path: polygon(50% 0, 100% 10%, 100% 68%, 50% 100%, 0 68%, 0 10%);
+  overflow: hidden;
+}
+.seat-in img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.seat-in em {
+  font-style: normal;
+  font-size: 22px;
+  font-weight: 900;
+}
+.seat-in svg {
+  width: 30px;
+  height: 30px;
+  fill: rgba(255, 255, 255, 0.28);
+}
+.seat.wait .seat-frame {
+  animation: seat-wait 1.6s ease-in-out infinite;
+}
+@keyframes seat-wait {
+  50% {
+    filter: brightness(1.5);
+  }
+}
+.gov-ava.gold {
+  box-shadow: 0 0 0 2px #e8b53a, 0 0 10px rgba(232, 181, 58, 0.6);
+}
+.cand-card {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0;
+  padding: 8px 10px;
+  border-radius: 14px;
+  background: linear-gradient(90deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.02));
+  box-shadow: inset 0 0 0 1px rgba(232, 181, 58, 0.35);
+}
+.cand-card.mine {
+  box-shadow: inset 0 0 0 2px #ffe27a, 0 0 14px rgba(255, 226, 122, 0.35);
+}
+.cand-card .primary.small {
+  width: auto;
+  margin: 0;
+  padding: 8px 14px;
+}
+/* The things a mayor can do, as tiles whose icons float. */
+.gtiles {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+}
+.gtile {
+  padding: 12px 10px;
+  border-radius: 14px;
+  background: linear-gradient(160deg, rgba(255, 255, 255, 0.09), rgba(255, 255, 255, 0.02));
+  box-shadow: inset 0 0 0 1px rgba(232, 181, 58, 0.3);
+  text-align: center;
+}
+.gtile b {
+  display: block;
+  margin: 6px 0 3px;
+  font-size: 12.5px;
+  color: var(--gold1);
+}
+.gtile p {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.4;
+  color: #cfd6e6;
+}
+.gico {
+  display: inline-grid;
+  place-items: center;
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, rgba(255, 255, 255, 0.35), rgba(232, 181, 58, 0.25) 60%, rgba(120, 70, 190, 0.3));
+  font-size: 24px;
+  animation: gov-float 3.2s ease-in-out infinite;
+  animation-delay: var(--d, 0s);
+}
+.gico.sm {
+  width: 34px;
+  height: 34px;
+  font-size: 17px;
+}
+@keyframes gov-float {
+  50% {
+    transform: translateY(-4px) rotate(-4deg);
+  }
+}
+.req-chips {
+  display: grid;
+  gap: 8px;
+}
+.req-chip {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 10px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.06);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12);
+}
+.req-chip.ok {
+  box-shadow: inset 0 0 0 1.5px #52c47a;
+  background: rgba(82, 196, 122, 0.12);
+}
+.req-chip > div {
+  flex: 1;
+  min-width: 0;
+}
+.req-chip b {
+  font-size: 12.5px;
+}
+.req-chip .bar {
+  height: 6px;
+  margin-top: 6px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.12);
+  overflow: hidden;
+}
+.req-chip .bar i {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, #4da3ff, #ffc93c);
+}
+.req-chip .req-mark {
+  width: 22px;
+  color: #52c47a;
+  font-weight: 900;
+  text-align: center;
+}
+.vsteps {
+  display: grid;
+  gap: 8px;
+}
+.vstep {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.05);
+}
+.vnum {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: linear-gradient(160deg, #ffe58a, #c98a12);
+  color: #3a2300;
+  font-weight: 900;
+  animation: gov-float 3.2s ease-in-out infinite;
+}
+.vstep b {
+  font-size: 13px;
+}
+.vstep p {
+  margin: 2px 0 0;
+  font-size: 11.5px;
+  line-height: 1.4;
+  color: #cfd6e6;
+}
+.vote-status ul {
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.vote-status li {
+  display: flex;
+  gap: 8px;
+  padding: 3px 0;
+  font-size: 12px;
+  color: #cfd6e6;
+}
+.vote-status li span {
+  flex: none;
+  width: 18px;
+  font-weight: 900;
+}
+.vote-status li.ok span {
+  color: #52c47a;
+}
+.vote-status li.no span {
+  color: #ffb36b;
+}
+.vote-status.ok b {
+  color: #8ff0a8;
+}
+.vote-status.no b {
+  color: #ffd25a;
+}
+.center {
+  text-align: center;
+}
+body.reduced .bunting i,
+body.reduced .gcard::after,
+body.reduced .gico,
+body.reduced .vnum,
+body.reduced .week-now,
+body.reduced .seat.wait .seat-frame {
+  animation: none;
+}

@@ -163,6 +163,8 @@ export interface RunTicket {
   item_misses?: number[];
   /** The cosmetic the server offers in this run (it may lie on a platform), or null. */
   drop?: string | null;
+  /** The ring of a mayor candidate lies on a platform in this run. */
+  ring?: boolean;
 }
 
 export interface RunReport {
@@ -177,6 +179,7 @@ export interface RunReport {
   items: number;
   /** The offered cosmetic was picked up from a platform. */
   drop_found?: boolean;
+  ring_found?: boolean;
 }
 
 export interface FinishResult {

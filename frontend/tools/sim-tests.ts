@@ -75,6 +75,20 @@ function landOn(platform: Partial<Platform>, light: LightId | null): Sim {
   return sim;
 }
 
+test('the ring of a candidate appears on a platform and changes nothing else in the run', () => {
+  let placed = 0;
+  for (const seed of [11, 23, 37, 41, 59, 61]) {
+    const plain = playBot(seed, 0.2, 80);
+    const withRing = playBot(seed, 0.2, 80, undefined, { ring: true });
+    // The ring never changes the score or the length of the run (the bot is the same).
+    assert.equal(withRing.score, plain.score, `seed ${seed}: the score must not change`);
+    assert.equal(withRing.tick, plain.tick, `seed ${seed}: the length of the run must not change`);
+    assert.equal(plain.ringWasPlaced, false);
+    if (withRing.ringWasPlaced) placed++;
+  }
+  assert.ok(placed >= 2, `the ring was placed in ${placed} of 6 runs`);
+});
+
 test('landing table', () => {
   let s = landOn({}, 'yellow');
   assert.equal(s.captures, 1);

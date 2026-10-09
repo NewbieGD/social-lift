@@ -1310,17 +1310,28 @@ function leftText(ms: number): string {
 export function governmentView(g: GovState | null, myId: number): string {
   if (!g) return `${header(ru.gov.title)}<div class="scroll"><p class="status">${ru.chat.connecting}</p></div>`;
   const role = g.me.role;
-  const slots = Array.from({ length: 4 }, (_, i) => {
-    const a = g.assistants[i];
-    return a
-      ? `<button class="slot filled" data-action="player" data-arg="${a.id}">${avatarHtml(a)}<b>${esc(a.name || ru.leaders.player)}</b><small>${a.status === 'invited' ? ru.gov.waiting : ru.gov.roleAssistant}</small></button>`
-      : `<div class="slot">${avatarHtml(null)}<b>${ru.gov.free}</b></div>`;
-  }).join('');
-  const how = ru.gov.about.map(([h, t]) => `<div class="duel-card"><div><h4>${h}</h4><p>${t}</p></div></div>`).join('');
-  const cal = ru.gov.calendar.map(([a, b]) => `<div class="cal-row"><b>${a}</b><span>${b}</span></div>`).join('');
+  const e = g.me.eligibility;
+  // The week as a bar: the segments of the stages and a marker of "now".
+  const weekMs = 7 * 86400000;
+  const nowPct = Math.max(0, Math.min(100, ((Date.now() - (g.ends_at - weekMs)) / weekMs) * 100));
+  const candPct = ((g.voting_opens_at - (g.ends_at - weekMs)) / weekMs) * 100;
+  const bar = `<div class="week">
+    <div class="week-bar"><i class="seg cand" style="width:${candPct}%"></i><i class="seg vote" style="width:${(100 - candPct) * 0.93}%"></i><i class="seg res" style="width:${(100 - candPct) * 0.07}%"></i><b class="week-now" style="left:${nowPct}%"></b></div>
+    <div class="week-days">${ru.gov.weekDays.map((d) => `<span>${d}</span>`).join('')}</div>
+    <div class="week-legend"><span class="lg cand">${ru.gov.segCandidacy}</span><span class="lg vote">${ru.gov.segVoting}</span><span class="lg res">${ru.gov.segResults}</span></div>
+  </div>`;
   const left = leftText((g.phase === 'candidacy' ? g.voting_opens_at : g.ends_at) - Date.now());
+  const seats = Array.from({ length: 4 }, (_, i) => {
+    const a = g.assistants[i];
+    const roman = `<span class="seat-num">${ru.gov.seatRoman[i]}</span>`;
+    if (!a) {
+      return `<div class="seat empty">${roman}<span class="seat-frame"><span class="seat-in"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8.5" r="4"/><path d="M4 21c0-4.4 3.6-7 8-7s8 2.6 8 7z"/></svg></span></span><b>${ru.gov.free}</b></div>`;
+    }
+    const img = a.photo ? `<img src="${esc(a.photo)}" alt="" referrerpolicy="no-referrer" />` : `<em>${esc((a.name || '?').slice(0, 1).toUpperCase())}</em>`;
+    return `<button class="seat filled ${a.status === 'invited' ? 'wait' : ''}" data-action="player" data-arg="${a.id}">${roman}<span class="seat-frame"><span class="seat-in">${img}</span></span><b>${esc(a.name || ru.leaders.player)}</b><small>${a.status === 'invited' ? ru.gov.waiting : ru.gov.roleAssistant}</small></button>`;
+  }).join('');
   const invite = g.me.invited
-    ? `<div class="duel-card reward"><div><h4>${ru.gov.inviteTitle}</h4><p>${ru.gov.inviteText}</p><div class="btn-row"><button class="primary" data-action="govRespond" data-arg="yes">${ru.gov.accept}</button><button class="secondary" data-action="govRespond" data-arg="no">${ru.gov.decline}</button></div></div></div>`
+    ? `<div class="gcard invite"><h4>${ru.gov.inviteTitle}</h4><p>${ru.gov.inviteText}</p><div class="btn-row"><button class="primary" data-action="govRespond" data-arg="yes">${ru.gov.accept}</button><button class="secondary" data-action="govRespond" data-arg="no">${ru.gov.decline}</button></div></div>`
     : '';
   const cands = g.candidates.length
     ? g.candidates
@@ -1332,32 +1343,61 @@ export function governmentView(g: GovState | null, myId: number): string {
               ? `<span class="voted">✓ ${ru.gov.voted}</span>`
               : `<button class="primary small" data-action="govVote" data-arg="${c.id}" ${g.me.can_vote ? '' : 'disabled'}>${ru.gov.vote}</button>`;
           }
-          return `<div class="cand-row ${mine ? 'mine' : ''}"><button class="cand-name" data-action="player" data-arg="${c.id}">${avatarHtml(c)}<b>${esc(c.name || ru.leaders.player)}</b></button>${act}</div>`;
+          return `<div class="cand-card ${mine ? 'mine' : ''}"><button class="cand-name" data-action="player" data-arg="${c.id}">${avatarHtml(c, 'gold')}<b>${esc(c.name || ru.leaders.player)}</b></button>${act}</div>`;
         })
         .join('')
-    : `<p class="muted">${ru.gov.noCandidates}</p>`;
-  const voteNote =
-    g.phase === 'voting'
-      ? `<p class="muted small">${ru.gov.votingHidden}${g.me.can_vote ? '' : `<br />${ru.gov.canNotVote(g.me.vote_need_runs, g.me.runs)}`}</p>`
-      : '';
+    : `<div class="gcard soft"><p class="muted">${ru.gov.noCandidates}</p></div>`;
+  const does = ru.gov.does
+    .map(([ico, h, t], i) => `<div class="gtile" style="--d:${i * 0.35}s"><span class="gico">${ico}</span><b>${h}</b><p>${i === 2 ? t.replace('прибавку', `прибавку +${g.bonus_percent}%`) : t}</p></div>`)
+    .join('');
+  const req = (ok: boolean, ico: string, text: string, pct: number): string =>
+    `<div class="req-chip ${ok ? 'ok' : ''}"><span class="gico sm">${ico}</span><div><b>${text}</b><div class="bar"><i style="width:${Math.round(pct * 100)}%"></i></div></div><span class="req-mark">${ok ? '✓' : ''}</span></div>`;
+  const reqs =
+    req(e.wins.have >= e.wins.need, '⚔️', ru.gov.reqWins(e.wins.have, e.wins.need), e.wins.need ? Math.min(1, e.wins.have / e.wins.need) : 1) +
+    req(e.record.have >= e.record.need, '🚀', ru.gov.reqRecord(e.record.have, e.record.need), e.record.need ? Math.min(1, e.record.have / e.record.need) : 1) +
+    req(e.ring, '💍', e.ring ? ru.gov.reqRingHave : ru.gov.reqRing, e.ring ? 1 : 0);
+  const steps = ru.gov.voteSteps
+    .map(([n, h, t]) => `<div class="vstep"><span class="vnum">${n}</span><div><b>${h}</b><p>${t}</p></div></div>`)
+    .join('');
+  const c = ru.gov.voteConds;
+  const conds = [
+    [g.phase === 'voting', c.phase],
+    [g.me.runs >= g.me.vote_need_runs, c.runs(g.me.vote_need_runs, g.me.runs)],
+    [true, c.age],
+    [true, c.self],
+    [true, c.hidden],
+  ] as [boolean, string][];
   return `${header(ru.gov.title)}<div class="scroll gov-screen">
     <section class="throne-card">
+      <div class="bunting"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
       <canvas id="throneCanvas" aria-hidden="true"></canvas>
+      <div class="throne-banner">${ru.gov.banner}</div>
       <div class="throne-caption">${g.mayor ? `<span class="role-tag mayor">${ru.gov.roleMayor}</span><b>${esc(g.mayor.name || ru.leaders.player)}</b>` : `<b>${ru.gov.throneEmpty}</b><small>${ru.gov.throneEmptyNote}</small>`}</div>
     </section>
+    <div class="gcard status">
+      ${bar}
+      <div class="phase-pill ${g.phase}"><b>${g.phase === 'voting' ? ru.gov.phaseVoting : ru.gov.phaseCandidacy}</b><span>${ru.gov.left(left)}</span></div>
+    </div>
     <h3 class="gov-h">${ru.gov.assistants}</h3>
-    <div class="assist-slots">${slots}</div>
+    <div class="seats">${seats}</div>
     ${invite}
-    <div class="phase-pill ${g.phase}"><b>${g.phase === 'voting' ? ru.gov.phaseVoting : ru.gov.phaseCandidacy}</b><span>${ru.gov.left(left)}</span></div>
     <div class="gov-actions">
-      ${role ? `<button class="primary" data-action="open" data-arg="govManage">${ru.gov.manage}</button>` : ''}
-      <button class="${role ? 'secondary' : 'primary'}" data-action="open" data-arg="govCandidacy">${ru.gov.run}</button>
+      ${role ? `<button class="primary" data-action="open" data-arg="govManage">⚙️ ${ru.gov.manage}</button>` : ''}
+      <button class="${role ? 'secondary' : 'primary'}" data-action="open" data-arg="govCandidacy">🗳️ ${ru.gov.run}</button>
     </div>
     <h3 class="gov-h">${ru.gov.candidates}</h3>
-    ${cands}${voteNote}
-    <h3 class="gov-h">${ru.gov.aboutTitle}</h3>
-    ${how}
-    <div class="calendar">${cal}<small>${ru.gov.mskNote}</small></div>
+    ${cands}
+    <h3 class="gov-h">${ru.gov.doesTitle}</h3>
+    <div class="gtiles">${does}</div>
+    <h3 class="gov-h">${ru.gov.howCandTitle}</h3>
+    <p class="muted small">${ru.gov.howCandLead}</p>
+    <div class="req-chips">${reqs}</div>
+    <h3 class="gov-h">${ru.gov.howVoteTitle}</h3>
+    <div class="vsteps">${steps}</div>
+    <div class="gcard vote-status ${g.me.can_vote ? 'ok' : 'no'}"><b>${g.me.can_vote ? '✅ ' + ru.gov.youCanVote : '⏳ ' + ru.gov.youCannotVote}</b>
+      <ul>${conds.map(([ok, text]) => `<li class="${ok ? 'ok' : 'no'}"><span>${ok ? '✓' : '○'}</span>${text}</li>`).join('')}</ul></div>
+    <div class="gcard soft"><h4>${ru.gov.tieTitle}</h4><p>${ru.gov.tieText}</p></div>
+    <p class="muted small center">${ru.gov.mskNote}</p>
   </div>`;
 }
 

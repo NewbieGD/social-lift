@@ -25,6 +25,8 @@ export interface Platform {
   item: number;
   /** A cosmetic offered by the server for this run lies on the platform. */
   drop?: boolean;
+  /** The ring of a mayor candidate lies on the platform (the server decided so for this run). */
+  ring?: boolean;
 }
 
 export interface Hero {
@@ -64,6 +66,7 @@ export type SimEvent =
   | { type: 'pickup'; item: number; x: number; y: number }
   | { type: 'itemSpawn'; item: number }
   | { type: 'dropPickup'; x: number; y: number }
+  | { type: 'ringPickup'; x: number; y: number }
   | { type: 'wall'; x: number; y: number; side: number }
   /** Tutorial only: a mistake was forgiven (the hero was put back, or the shield switched on). */
   | { type: 'rescue'; reason: 'fall' | 'red' };

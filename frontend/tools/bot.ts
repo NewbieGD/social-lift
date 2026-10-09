@@ -11,8 +11,9 @@ export function playBot(
   reaction: number,
   maxSec = 900,
   onTier: (tier: number, t: number) => void = () => undefined,
+  simOpts: { ring?: boolean; drop?: boolean; items?: boolean } = {},
 ): Sim {
-  const sim = new Sim(seed, 700);
+  const sim = new Sim(seed, 700, simOpts);
   let standY = sim.hero.y;
   let target: Platform | null = null;
   let pendingLight: { light: LightId; at: number } | null = null;

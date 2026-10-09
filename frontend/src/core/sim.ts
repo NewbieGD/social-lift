@@ -61,6 +61,17 @@ export class Sim {
   private dropRng: Rng;
   private dropAt: number;
   private dropPlaced = false;
+  private ringEnabled: boolean;
+  private ringRng: Rng;
+  private ringAt: number;
+  private ringPlaced = false;
+  /** The candidate's ring was picked up in this run. */
+  ringFound = false;
+
+  /** The ring was put on a platform at some moment of this run (for tests). */
+  get ringWasPlaced(): boolean {
+    return this.ringPlaced;
+  }
   /** The offered cosmetic was picked up (reported when the run finishes). */
   dropFound = false;
 
@@ -85,7 +96,7 @@ export class Sim {
   constructor(
     seed: number,
     viewH: number,
-    opts: { tutorial?: boolean; items?: boolean; drop?: boolean } = {},
+    opts: { tutorial?: boolean; items?: boolean; drop?: boolean; ring?: boolean } = {},
   ) {
     this.seed = seed >>> 0;
     this.tutorial = !!opts.tutorial;
@@ -94,6 +105,10 @@ export class Sim {
     this.dropEnabled = !!opts.drop && !this.tutorial;
     this.dropRng = new Rng(this.seed ^ 0x2f0e1d3c);
     this.dropAt = 12 + this.dropRng.next() * 28;
+    // The ring has a generator of its own, so that it never changes anything else in the run.
+    this.ringEnabled = !!opts.ring && !this.tutorial;
+    this.ringRng = new Rng(this.seed ^ 0x1b873593);
+    this.ringAt = 16 + this.ringRng.next() * 30;
     this.viewH = viewH;
     const W = gameConfig.world.width;
     const genRng = new Rng(this.seed);
@@ -174,6 +189,7 @@ export class Sim {
     this.fillPlatforms();
     this.placeItem();
     this.placeDrop();
+    this.placeRing();
     this.cullPlatforms();
 
     this.time += DT;
@@ -294,6 +310,11 @@ export class Sim {
       this.picked |= 1 << item;
       this.events.push({ type: 'pickup', item, x: best.x, y: best.y });
     }
+    if (best.ring) {
+      best.ring = false;
+      this.ringFound = true;
+      this.events.push({ type: 'ringPickup', x: best.x, y: best.y });
+    }
     if (best.drop) {
       best.drop = false;
       this.dropFound = true;
@@ -405,6 +426,21 @@ export class Sim {
     if (!best) return;
     best.drop = true;
     this.dropPlaced = true;
+  }
+
+  /** Puts the candidate's ring on a calm colored platform above the screen, once (never the platform of a drop). */
+  private placeRing(): void {
+    if (!this.ringEnabled || this.ringPlaced || !this.runStarted || this.runTime < this.ringAt) return;
+    const lo = this.camY + this.viewH * 0.8;
+    const hi = this.camY + this.viewH + 160;
+    let best: Platform | null = null;
+    for (const p of this.platforms) {
+      if (p.kind !== 'color' || p.phases || p.item >= 0 || p.drop || p.y < lo || p.y > hi) continue;
+      if (!best || p.y < best.y) best = p;
+    }
+    if (!best) return;
+    best.ring = true;
+    this.ringPlaced = true;
   }
 
   private updateCombo(): void {

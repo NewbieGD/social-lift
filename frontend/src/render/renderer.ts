@@ -248,7 +248,7 @@ export class Renderer {
   /** Menu background: draw the scene only, no platforms or hero. */
   sceneOnly = false;
   /** Called at the start of a suit-up with the new pieces (for the caption). */
-  onCaption: (kind: 'stage' | 'item', value: number) => void = () => undefined;
+  onCaption: (kind: 'stage' | 'item' | 'ring', value: number) => void = () => undefined;
   private impulse = 0;
   private spots: Spot[] = [];
   private moneyTier = 0;
@@ -365,6 +365,11 @@ export class Renderer {
         this.moneyTier = e.tier;
         this.prewarm(Math.min(e.tier + 1, 12), H);
         this.startStage(e.tier);
+      } else if (e.type === 'ringPickup') {
+        this.onCaption('ring', 0);
+        if (!this.reducedEffects) {
+          for (let i = 0; i < 22; i++) this.sparkles.push({ x: e.x + (Math.random() - 0.5) * 70, y: toScreenY(e.y) + (Math.random() - 0.5) * 36, t: Math.random() * 0.3 });
+        }
       } else if (e.type === 'dropPickup') {
         this.onDrop();
         if (!this.reducedEffects) {
@@ -618,6 +623,7 @@ export class Renderer {
       this.drawPlatform(p, toY(p.y), sim.time);
       if (p.item >= 0) this.drawPickup(ITEM_BY_TIER[p.item] as Item, p.x, toY(p.y), sim.time);
       if (p.drop) this.drawDropBox(p.x, toY(p.y), sim.time);
+      if (p.ring) this.drawRingBox(p.x, toY(p.y), sim.time);
     }
     this.drawSpots(toY, frameDt);
 
@@ -1671,6 +1677,69 @@ export class Renderer {
   }
 
   /** A gift box in the color of the offered set: touch the platform to take the cosmetic. */
+  /** The candidate's ring: a golden ring with a blue diamond turning above the platform, in a warm glow. */
+  private drawRingBox(x: number, sy: number, t: number): void {
+    const ctx = this.ctx;
+    const y = sy - 22 + Math.sin(t * 3) * 2.8;
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    const g = ctx.createRadialGradient(x, y, 0, x, y, 30);
+    g.addColorStop(0, 'rgba(255,225,120,0.9)');
+    g.addColorStop(0.5, 'rgba(255,170,60,0.3)');
+    g.addColorStop(1, 'rgba(255,170,60,0)');
+    ctx.globalAlpha = 0.6 + 0.25 * Math.sin(t * 4);
+    ctx.fillStyle = g;
+    ctx.fillRect(x - 30, y - 30, 60, 60);
+    ctx.restore();
+    ctx.save();
+    ctx.translate(x, y);
+    // The band turns around its vertical axis: its width breathes between a circle and a thin line.
+    const turn = Math.cos(t * 2.4);
+    ctx.scale(0.45 + 0.55 * Math.abs(turn), 1);
+    ctx.beginPath();
+    ctx.arc(0, 2, 7.2, 0, Math.PI * 2);
+    ctx.lineWidth = 3.4;
+    const band = ctx.createLinearGradient(-7, -5, 7, 9);
+    band.addColorStop(0, '#FFF3B0');
+    band.addColorStop(0.5, '#E8B53A');
+    band.addColorStop(1, '#9A6A12');
+    ctx.strokeStyle = band;
+    ctx.stroke();
+    ctx.restore();
+    // The diamond on top.
+    ctx.save();
+    ctx.translate(x, y - 7);
+    ctx.beginPath();
+    ctx.moveTo(0, -5.4);
+    ctx.lineTo(4.4, -1);
+    ctx.lineTo(0, 4.2);
+    ctx.lineTo(-4.4, -1);
+    ctx.closePath();
+    const gem = ctx.createLinearGradient(-4, -5, 4, 4);
+    gem.addColorStop(0, '#FFFFFF');
+    gem.addColorStop(0.5, '#8FD3FF');
+    gem.addColorStop(1, '#3FA0E8');
+    ctx.fillStyle = gem;
+    ctx.fill();
+    ctx.lineWidth = 0.8;
+    ctx.strokeStyle = '#2A5A8A';
+    ctx.stroke();
+    ctx.restore();
+    // A flash that crosses the diamond now and then.
+    const k = (t * 0.8) % 1;
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.strokeStyle = `rgba(255,255,255,${0.9 * Math.sin(k * Math.PI)})`;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(x - 6 * Math.sin(k * Math.PI), y - 8);
+    ctx.lineTo(x + 6 * Math.sin(k * Math.PI), y - 8);
+    ctx.moveTo(x, y - 14 * Math.sin(k * Math.PI) / 1.5 - 2);
+    ctx.lineTo(x, y + 2);
+    ctx.stroke();
+    ctx.restore();
+  }
+
   private drawDropBox(x: number, sy: number, t: number): void {
     const ctx = this.ctx;
     const y = sy - 20 + Math.sin(t * 3.2) * 2.6;
