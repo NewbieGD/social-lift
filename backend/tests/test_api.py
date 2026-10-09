@@ -925,3 +925,221 @@ async def test_spectators_watch_a_duel(client):
         for uid in (210, 211, 212):
             duel_ws.conns.pop(uid, None)
         duel_ws.duels.pop(duel_id, None)
+
+
+# ---------------------------------------------------------------- the government (mayor election)
+
+def _msk(y, m, d, h=12, mi=0):
+    from datetime import datetime
+
+    from app.services.gov import MSK
+
+    return datetime(y, m, d, h, mi, tzinfo=MSK)
+
+
+def test_gov_week_math():
+    from app.services import gov
+
+    mon = _msk(2026, 10, 12, 0, 5)  # a Monday
+    assert gov.week_start(mon).isoformat() == "2026-10-12"
+    assert gov.week_start(_msk(2026, 10, 18, 23, 59)).isoformat() == "2026-10-12"  # Sunday evening
+    assert gov.week_start(_msk(2026, 10, 19, 0, 1)).isoformat() == "2026-10-19"
+    assert gov.phase(_msk(2026, 10, 16, 17, 59)) == "candidacy"  # Friday before 18:00
+    assert gov.phase(_msk(2026, 10, 16, 18, 0)) == "voting"
+    assert gov.phase(_msk(2026, 10, 18, 23, 0)) == "voting"
+    assert gov.phase(_msk(2026, 10, 19, 0, 1)) == "candidacy"
+
+
+async def _gov_players(client, ids, wk, wins=3, best=2000, runs=5, ring=True, age_days=10):
+    """Players who fulfil the conditions of a candidate (progress and the ring of the week)."""
+    from datetime import timedelta
+
+    from app.core import utcnow
+    from app.models import GovProgress, GovRing
+
+    for uid in ids:
+        await ready_player(client, uid)
+    async with SessionLocal() as s:
+        for uid in ids:
+            u = await s.get(User, uid)
+            u.created_at = utcnow() - timedelta(days=age_days)
+            s.add(GovProgress(week=wk, user_id=uid, duel_wins=wins, best_solo=best, runs=runs))
+            if ring:
+                s.add(GovRing(week=wk, user_id=uid, found_at=utcnow()))
+        await s.commit()
+
+
+async def test_gov_election_flow_and_mayor_privileges(client, monkeypatch):
+    from app.services import gov, shop as shop_service
+    from app import cosmetics
+
+    clock = {"t": _msk(2026, 10, 12, 12)}
+    monkeypatch.setattr(gov, "now", lambda: clock["t"])
+    try:
+        await _gov_players(client, [300, 301, 302, 303, 304], "2026-10-12")
+        # Candidacy: 300 and 301 qualify; 302 has no ring.
+        async with SessionLocal() as s:
+            from app.models import GovRing
+
+            await s.delete(await s.get(GovRing, ("2026-10-12", 302)))
+            await s.commit()
+        assert (await client.post("/api/gov/apply", headers=headers(300))).status_code == 200
+        assert (await client.post("/api/gov/apply", headers=headers(301))).status_code == 200
+        no = await client.post("/api/gov/apply", headers=headers(302))
+        assert no.status_code == 409 and no.json()["error"]["code"] == "conditions"
+        state = (await client.get("/api/gov/state", headers=headers(303))).json()
+        assert state["phase"] == "candidacy" and [c["id"] for c in state["candidates"]] == [300, 301] and state["mayor"] is None
+        # No voting before Friday 18:00.
+        assert (await client.post("/api/gov/vote", json={"candidate_id": 300}, headers=headers(303))).status_code == 409
+        # Friday evening: the voting starts, the candidacy is closed.
+        clock["t"] = _msk(2026, 10, 16, 18, 30)
+        late = await client.post("/api/gov/apply", headers=headers(303))
+        assert late.status_code == 409 and late.json()["error"]["code"] == "voting"
+        state = (await client.get("/api/gov/state", headers=headers(303))).json()
+        assert state["phase"] == "voting"
+        # Voting: not for yourself, only for candidates; the vote can be changed.
+        assert (await client.post("/api/gov/vote", json={"candidate_id": 300}, headers=headers(300))).status_code == 409
+        assert (await client.post("/api/gov/vote", json={"candidate_id": 304}, headers=headers(302))).status_code == 404
+        assert (await client.post("/api/gov/vote", json={"candidate_id": 301}, headers=headers(302))).status_code == 200
+        assert (await client.post("/api/gov/vote", json={"candidate_id": 300}, headers=headers(302))).status_code == 200
+        assert (await client.post("/api/gov/vote", json={"candidate_id": 300}, headers=headers(303))).status_code == 200
+        assert (await client.post("/api/gov/vote", json={"candidate_id": 301}, headers=headers(304))).status_code == 200
+        # Too few runs: no vote.
+        await ready_player(client, 305)
+        assert (await client.post("/api/gov/vote", json={"candidate_id": 300}, headers=headers(305))).status_code == 403
+        # Monday 00:10: the votes are counted, 300 has 2 votes against 1.
+        clock["t"] = _msk(2026, 10, 19, 0, 10)
+        state = (await client.get("/api/gov/state", headers=headers(303))).json()
+        assert state["mayor"]["id"] == 300 and state["week"] == "2026-10-19" and state["phase"] == "candidacy"
+        assert state["me"]["role"] is None and gov.role_of(300) == "mayor"
+        # The mayor has the mayor's things only for the term; the throne background too.
+        async with SessionLocal() as s:
+            owned = await shop_service.owned_ids(s, 300)
+        assert {"mayor_head", "mayor_torso", "mayor_arms", "mayor_legs", "mayor_torch", "bg_throne"} <= owned
+        assert not (cosmetics.gov_items("assistant") & owned)
+        # The notifications: everybody is told about the new mayor, the winner personally.
+        note = (await client.get("/api/notifications", headers=headers(303))).json()
+        kinds = [n["kind"] for n in note["items"]]
+        assert "mayor_elected" in kinds and "voting_started" in kinds and note["unread"] >= 2
+        mine = (await client.get("/api/notifications", headers=headers(300))).json()
+        assert any(n["kind"] == "mayor_you" for n in mine["items"])
+        assert (await client.post("/api/notifications/read", headers=headers(303))).json() == {"unread": 0}
+        assert (await client.get("/api/notifications", headers=headers(303))).json()["unread"] == 0
+        # Last week's mayor cannot be mayor again straight away, even with everything done.
+        await _gov_players_week(client, [300], "2026-10-19")
+        again = await client.post("/api/gov/apply", headers=headers(300))
+        assert again.status_code == 409 and again.json()["error"]["code"] == "was_mayor"
+        # The mayor names assistants: only those who played this week.
+        await _gov_players_week(client, [302, 303, 304, 306, 307], "2026-10-19", ring=False)
+        assert (await client.post("/api/gov/assistants", json={"user_id": 302}, headers=headers(303))).status_code == 403  # not the mayor
+        assert (await client.post("/api/gov/assistants", json={"user_id": 305}, headers=headers(300))).status_code == 409  # did not play
+        for uid in (302, 303, 304, 306):
+            assert (await client.post("/api/gov/assistants", json={"user_id": uid}, headers=headers(300))).status_code == 200
+        assert (await client.post("/api/gov/assistants", json={"user_id": 307}, headers=headers(300))).json()["error"]["code"] == "full"
+        inv = (await client.get("/api/notifications", headers=headers(302))).json()
+        assert any(n["kind"] == "assistant_invite" for n in inv["items"])
+        assert (await client.post("/api/gov/respond", json={"accept": True}, headers=headers(302))).json()["me"]["role"] == "assistant"
+        assert (await client.post("/api/gov/respond", json={"accept": False}, headers=headers(303))).status_code == 200
+        async with SessionLocal() as s:
+            asst = await shop_service.owned_ids(s, 302)
+        assert cosmetics.gov_items("assistant") <= asst and not (cosmetics.gov_items("mayor") & asst)
+        # The mayor removes an assistant; the place becomes free.
+        assert (await client.delete("/api/gov/assistants/302", headers=headers(300))).status_code == 200
+        assert gov.role_of(302) is None
+        # Settings: the coin bonus works only while the mayor is in the game.
+        assert (await client.put("/api/gov/settings", json={"bonus": True, "play_color": "fire"}, headers=headers(300))).json()["settings"] == {"bonus_on": True, "play_color": "fire", "colors": list(gov.PLAY_COLORS)}
+        assert (await client.put("/api/gov/settings", json={"play_color": "pink"}, headers=headers(300))).status_code == 400
+        assert (await client.put("/api/gov/settings", json={"bonus": False}, headers=headers(302))).status_code == 403
+        await client.put("/api/gov/settings", json={"bonus": True}, headers=headers(300))
+        monkeypatch.setattr(gov, "_mayor_ping", -1e9)
+        assert gov.bonus_active() is False  # the mayor is not in the game
+        await client.post("/api/gov/ping", headers=headers(300))
+        assert gov.bonus_active() is True
+        async with SessionLocal() as s:
+            user = await s.get(User, 306)
+            before = user.coins or 0
+            paid = await shop_service.credit_run(s, user, "bonus-run-1", 1000)
+        assert paid == 110  # 1000 points = 100 coins, and 10% more
+        # The next Monday the government changes: nobody has a post any more.
+        clock["t"] = _msk(2026, 10, 26, 0, 5)
+        await client.get("/api/gov/state", headers=headers(303))
+        assert gov.role_of(300) is None and gov.bonus_active() is False and gov.current["play_color"] == "default"
+    finally:
+        gov.current.update(week="", mayor_id=None, assistants=set(), play_color="default", bonus_on=False)
+
+
+async def _gov_players_week(client, ids, wk, ring=True):
+    """Progress of the week for players that already exist (a new week starts from zero)."""
+    from app.core import utcnow
+    from app.models import GovProgress, GovRing
+
+    for uid in ids:
+        await ready_player(client, uid)
+    async with SessionLocal() as s:
+        for uid in ids:
+            if await s.get(GovProgress, (wk, uid)) is None:
+                s.add(GovProgress(week=wk, user_id=uid, duel_wins=3, best_solo=2000, runs=5))
+            if ring and await s.get(GovRing, (wk, uid)) is None:
+                s.add(GovRing(week=wk, user_id=uid, found_at=utcnow()))
+        await s.commit()
+
+
+async def test_gov_ties_one_candidate_and_no_candidates(client, monkeypatch):
+    from app.services import gov
+
+    clock = {"t": _msk(2026, 11, 2, 12)}
+    monkeypatch.setattr(gov, "now", lambda: clock["t"])
+    try:
+        # An empty election: nobody becomes mayor.
+        await client.get("/api/gov/state", headers=headers(310) if False else (await _gov_headers(client, 310)))
+        clock["t"] = _msk(2026, 11, 9, 0, 5)
+        assert (await client.get("/api/gov/state", headers=headers(310))).json()["mayor"] is None
+        # One candidate wins without a vote; a tie goes to the one with more duel wins.
+        wk = "2026-11-09"
+        await _gov_players(client, [311, 312, 313, 314], wk)
+        async with SessionLocal() as s:
+            (await s.get(User, 312)).duel_wins = 9
+            (await s.get(User, 311)).duel_wins = 2
+            await s.commit()
+        clock["t"] = _msk(2026, 11, 10, 12)
+        await client.post("/api/gov/apply", headers=headers(311))
+        await client.post("/api/gov/apply", headers=headers(312))
+        clock["t"] = _msk(2026, 11, 14, 19)
+        assert (await client.post("/api/gov/vote", json={"candidate_id": 311}, headers=headers(313))).status_code == 200
+        assert (await client.post("/api/gov/vote", json={"candidate_id": 312}, headers=headers(314))).status_code == 200
+        clock["t"] = _msk(2026, 11, 16, 0, 5)
+        assert (await client.get("/api/gov/state", headers=headers(313))).json()["mayor"]["id"] == 312  # 1:1, more duel wins
+        # One candidate.
+        wk2 = "2026-11-16"
+        await _gov_players_week(client, [313], wk2)
+        clock["t"] = _msk(2026, 11, 17, 12)
+        await client.post("/api/gov/apply", headers=headers(313))
+        clock["t"] = _msk(2026, 11, 23, 0, 5)
+        assert (await client.get("/api/gov/state", headers=headers(314))).json()["mayor"]["id"] == 313
+    finally:
+        gov.current.update(week="", mayor_id=None, assistants=set(), play_color="default", bonus_on=False)
+
+
+async def _gov_headers(client, uid):
+    await ready_player(client, uid)
+    return headers(uid)
+
+
+async def test_gov_ring_is_rare_and_once_a_week(client, monkeypatch):
+    import random
+
+    from app.services import gov
+
+    monkeypatch.setattr(gov, "now", lambda: _msk(2026, 12, 7, 12))
+    await ready_player(client, 320)
+    monkeypatch.setattr(random, "random", lambda: 0.0)
+    async with SessionLocal() as s:
+        assert await gov.maybe_ring(s, 320, 799) is False  # too low a score
+        assert await gov.maybe_ring(s, 320, 900) is True
+        await s.commit()
+    async with SessionLocal() as s:
+        assert await gov.maybe_ring(s, 320, 3000) is False  # one ring per week
+    monkeypatch.setattr(random, "random", lambda: 0.5)
+    await ready_player(client, 321)
+    async with SessionLocal() as s:
+        assert await gov.maybe_ring(s, 321, 3000) is False  # luck is needed

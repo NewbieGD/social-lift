@@ -28,6 +28,7 @@ from .db import SessionLocal
 from sqlalchemy import func, select
 
 from .models import ChatBlock, ChatReport, User
+from .services import gov
 from . import chat_filter, cosmetics
 from .services import game, notify, shop
 from .vk_sign import verify_launch_params
@@ -114,12 +115,17 @@ def opponent_of(d: Duel, user_id: int) -> int:
 
 
 def public(c: Conn) -> dict:
-    return {"id": c.user_id, "name": c.name, "photo": c.photo}
+    return {"id": c.user_id, "name": c.name, "photo": c.photo, "role": gov.role_of(c.user_id)}
+
+
+async def chat_notice(kind: str, user: dict) -> None:
+    """A line of the government in the chat (a post holder came in or left, an assistant was named)."""
+    await chat_broadcast({"t": "chat_notice", "kind": kind, "user": user})
 
 
 def chat_user(c: Conn) -> dict:
     """Public data of a chat member: avatar, name and place in the all-time leaderboard."""
-    return {"id": c.user_id, "name": c.name, "photo": c.photo, "rank": c.chat_rank, "link": c.link}
+    return {"id": c.user_id, "name": c.name, "photo": c.photo, "rank": c.chat_rank, "link": c.link, "role": gov.role_of(c.user_id)}
 
 
 def chat_members() -> list[Conn]:
@@ -166,6 +172,10 @@ async def chat_join(me: Conn) -> None:
             if c is not me and me.user_id not in c.blocked:
                 await send(c, {"t": "chat_user", "action": "join", "user": chat_user(me)})
         await chat_send_users()
+        # The mayor and his assistants are greeted in the chat.
+        role = gov.role_of(me.user_id)
+        if role:
+            await chat_notice("mayor_in" if role == "mayor" else "asst_in", chat_user(me))
 
 
 async def chat_leave(me: Conn) -> None:
@@ -173,6 +183,9 @@ async def chat_leave(me: Conn) -> None:
         return
     me.in_chat = False
     await chat_send_users()
+    role = gov.role_of(me.user_id)
+    if role:
+        await chat_notice("mayor_out" if role == "mayor" else "asst_out", chat_user(me))
 
 
 async def chat_say(me: Conn, raw: object) -> None:

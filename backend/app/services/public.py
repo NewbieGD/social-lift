@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from .. import cosmetics
 from ..deps import ApiError
 from ..models import User
-from . import crown, game, shop
+from . import crown, game, gov, shop
 
 
 async def public_profile(session: AsyncSession, target_id: int) -> dict:
@@ -28,6 +28,7 @@ async def public_profile(session: AsyncSession, target_id: int) -> dict:
         "photo": user.photo_url,
         "link": not user.hide_vk_link,
         "crown": holder_id == user.id,
+        "role": gov.role_of(user.id),
         "stats": {
             "best_all": stats["best_all"],
             "best_tier": stats["best_tier"],

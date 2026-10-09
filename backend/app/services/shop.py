@@ -8,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .. import cosmetics, tunables
+from . import gov
 from ..core import utcnow
 from ..deps import ApiError
 from ..models import CoinTx, OwnedCosmetic, User
@@ -15,7 +16,9 @@ from ..models import CoinTx, OwnedCosmetic, User
 
 async def owned_ids(session: AsyncSession, user_id: int) -> set[str]:
     rows = await session.execute(select(OwnedCosmetic.item_id).where(OwnedCosmetic.user_id == user_id))
-    return {r for (r,) in rows.all()}
+    owned = {r for (r,) in rows.all()}
+    # The mayor and his assistants have their sets only while they hold the post.
+    return owned | cosmetics.gov_items(gov.role_of(user_id))
 
 
 async def grant(session: AsyncSession, user: User, item_ids: list[str], source: str) -> list[str]:
@@ -67,6 +70,9 @@ POINTS_PER_COIN = 10  # the default; the live value is tunables.get("points_per_
 async def credit_run(session: AsyncSession, user: User, run_id: str, score: int) -> int:
     """Pays coins for a counted run. The journal row is unique per run, so it pays once."""
     amount = max(0, score) // tunables.get("points_per_coin")
+    # While the mayor is in the game and has switched the bonus on, everybody earns a little more.
+    if amount > 0 and gov.bonus_active():
+        amount += amount * tunables.get("gov_bonus_percent") // 100
     if amount <= 0:
         return 0
     user.coins = (user.coins or 0) + amount

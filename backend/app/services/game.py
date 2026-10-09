@@ -29,7 +29,7 @@ from ..core import (
 from ..deps import ApiError, Caller
 from ..models import ChatBlock, ChatReport, CoinTx, Event, OwnedCosmetic, Run, User, VkOrder, WeekBest
 from ..schemas import RunFinishIn
-from . import crown, shop
+from . import crown, gov, shop
 
 # ---------- Users ----------
 
@@ -174,6 +174,7 @@ async def start_run(session: AsyncSession, user: User, *, seed: int | None = Non
     )
     session.add(run)
     await session.commit()
+    gov.touch(user.id)
     started_ts = int(now.timestamp())
     return {
         "run_id": run.id,
@@ -183,6 +184,8 @@ async def start_run(session: AsyncSession, user: User, *, seed: int | None = Non
         "drop": run.drop_item,
         "items_mask": run.items_start,
         "item_misses": parse_misses(user.item_misses),
+        # The mayor's bonus to coins is on right now (shown to the player in the run).
+        "gov_bonus": gov.bonus_active(),
     }
 
 
@@ -259,6 +262,7 @@ async def finish_run(session: AsyncSession, caller: Caller, body: RunFinishIn) -
     is_record = False
     is_week_record = False
     coins_earned = 0
+    ring_found = False
     new_items: list[str] = []
     if not verdict.ok:
         run.status = "rejected"
@@ -291,6 +295,10 @@ async def finish_run(session: AsyncSession, caller: Caller, body: RunFinishIn) -
         coins_earned = 0 if run.duel_id else await shop.credit_run(session, user, run.id, body.score)
         new_items = await shop.sync_unlocks(session, user)
         new_items += await shop.claim_drop(session, user, run.drop_item, body.drop_found, body.score)
+        # What counts for the weekly election; and the ring of a candidate, found only in solo runs.
+        await gov.add_run(session, user.id, body.score, solo=not run.duel_id)
+        ring_found = False if run.duel_id else await gov.maybe_ring(session, user.id, body.score)
+        gov.touch(user.id)
     await session.commit()
 
     await _cleanup_weeks(session)
@@ -309,6 +317,7 @@ async def finish_run(session: AsyncSession, caller: Caller, body: RunFinishIn) -
             "coins": user.coins or 0,
             "coins_earned": coins_earned,
             "new_items": new_items,
+            "ring_found": ring_found,
             **_ranks(before, after),
         },
     )
@@ -382,6 +391,7 @@ async def resolve_duel(session: AsyncSession, duel_id: str) -> dict:
         if user is not None and result_ == "win":
             user.duel_wins = (user.duel_wins or 0) + 1
             user.duel_wins_at = now
+            await gov.add_duel_win(session, user.id)
             # Wins in a row against DIFFERENT players: a win over someone already beaten in this
             # streak still counts as a win, but does not extend the streak. A loss breaks it, a draw keeps it.
             beaten = list(user.duel_streak_opps or [])
@@ -564,6 +574,7 @@ async def _top_rows(session: AsyncSession, scope: str, wid: str) -> list[dict]:
                 "deactivated": bool(u.profile_deactivated),
                 # Whether the game may offer a link to this player's VK page.
                 "link": not u.hide_vk_link,
+                "role": gov.role_of(u.id),
                 "score": int(score),
                 "_synced": synced.timestamp() if synced else None,
             }

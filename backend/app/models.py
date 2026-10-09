@@ -63,6 +63,8 @@ class User(Base):
     hide_vk_link: Mapped[bool] = mapped_column(Boolean, default=False)
     # Main-screen decoration: {bg, frame, fx, pet, props: {spot: item_id}}.
     decor: Mapped[dict] = mapped_column(JsonType, default=dict)
+    # Notifications up to this id are read (the bell in the game).
+    notif_read_id: Mapped[int] = mapped_column(BigInteger, default=0)
     # The opponents beaten in the current streak (a win over one of them again does not extend it).
     duel_streak_opps: Mapped[list] = mapped_column(JsonType, default=list)
     # Duel wins in a row now, and the best such streak ever (it opens cosmetics).
@@ -225,3 +227,91 @@ class BalanceOverride(Base):
     key: Mapped[str] = mapped_column(String(80), primary_key=True)
     value: Mapped[float] = mapped_column(Float)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+# ---------------------------------------------------------------- government (the weekly mayor election)
+
+class GovElection(Base):
+    """The election of a week (keyed by the Monday of the week, Moscow time). Closed on the next Monday."""
+
+    __tablename__ = "gov_elections"
+
+    week: Mapped[str] = mapped_column(String(10), primary_key=True)
+    voting_notified: Mapped[bool] = mapped_column(Boolean, default=False)
+    closed: Mapped[bool] = mapped_column(Boolean, default=False)
+    winner_id: Mapped[int | None] = mapped_column(BigInteger)
+
+
+class GovCandidate(Base):
+    __tablename__ = "gov_candidates"
+
+    week: Mapped[str] = mapped_column(String(10), primary_key=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class GovVote(Base):
+    __tablename__ = "gov_votes"
+
+    week: Mapped[str] = mapped_column(String(10), primary_key=True)
+    voter_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    candidate_id: Mapped[int] = mapped_column(BigInteger)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class GovTerm(Base):
+    """Who governs in a week (keyed by the Monday): the mayor and what the mayor switched on."""
+
+    __tablename__ = "gov_terms"
+
+    week: Mapped[str] = mapped_column(String(10), primary_key=True)
+    mayor_id: Mapped[int | None] = mapped_column(BigInteger)
+    bonus_on: Mapped[bool] = mapped_column(Boolean, default=False)
+    play_color: Mapped[str] = mapped_column(String(12), default="default")
+
+
+class GovAssistant(Base):
+    __tablename__ = "gov_assistants"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    term_week: Mapped[str] = mapped_column(String(10), index=True)
+    user_id: Mapped[int] = mapped_column(BigInteger)
+    status: Mapped[str] = mapped_column(String(10))  # invited | accepted | declined | removed
+    invited_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    answered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    __table_args__ = (UniqueConstraint("term_week", "user_id", name="uq_gov_assistant"),)
+
+
+class GovProgress(Base):
+    """What a player did in a week that counts for the election."""
+
+    __tablename__ = "gov_progress"
+
+    week: Mapped[str] = mapped_column(String(10), primary_key=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    duel_wins: Mapped[int] = mapped_column(Integer, default=0)
+    best_solo: Mapped[int] = mapped_column(Integer, default=0)
+    runs: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class GovRing(Base):
+    """The candidate's ring found in a week (it disappears the next week)."""
+
+    __tablename__ = "gov_rings"
+
+    week: Mapped[str] = mapped_column(String(10), primary_key=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    found_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class Notification(Base):
+    """A message for the bell: for one player, or for everybody (user_id is null)."""
+
+    __tablename__ = "notifications"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int | None] = mapped_column(BigInteger, index=True)
+    kind: Mapped[str] = mapped_column(String(24))
+    payload: Mapped[dict] = mapped_column(JsonType, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)

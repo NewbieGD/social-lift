@@ -17,7 +17,7 @@ from ..db import get_session
 from ..models import ChatBlock, ChatReport, User
 from ..deps import ApiError, Caller, current_user, enforce_limit
 from ..schemas import BlockIn, BuyIn, ConsentIn, DecorIn, EventIn, LoadoutIn, PrivacyIn, RunFinishIn, SettingsIn
-from ..services import crown, game, payments, public, shop
+from ..services import crown, game, gov, payments, public, shop
 from ..services.profiles import refresh_profiles
 
 router = APIRouter(prefix="/api")
@@ -50,6 +50,8 @@ async def bootstrap(
         "privacy": {"hide_vk_link": bool(user.hide_vk_link)},
         "tunables": {"duel_stake": tunables.get("duel_stake"), "points_per_coin": tunables.get("points_per_coin")},
         "crown": crown_info,
+        # The government: my post, the color of the Play button, the mayor's bonus, and the bell.
+        "gov": {**gov.brief(user.id), "unread": await gov.unread_count(session, user)},
         "profile": game.profile_dict(user),
         "flags": {
             "consent_ok": game.consent_ok(user),

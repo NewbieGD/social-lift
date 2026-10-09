@@ -41,6 +41,8 @@ class Item:
     kind: str = "style"
     # Premium: sold for VK votes as part of this product (see PRODUCTS); empty = not premium.
     product: str = ""
+    # Government: lent for the term to the mayor ("mayor") or to the assistants ("advisor"); never owned.
+    gov: str = ""
 
 
 def _set(set_id: str, parts: tuple[str, ...], **how) -> list[Item]:
@@ -112,6 +114,11 @@ ITEMS.update({i.id: i for i in DECOR})
 # A product gives all of its items at once. The set has 5 parts (the flashlight is a slot of its own).
 PREMIUM_SET = ("head", "torso", "arms", "legs", "torch")
 ITEMS.update({i.id: i for i in _set("seraph", PREMIUM_SET, product="seraph_set")})
+# The mayor's set (5 parts) and the throne background, and the assistants' set (5 parts). They are not
+# in owned_cosmetics: the player has them only while he holds the post (see services/gov.py).
+ITEMS.update({i.id: i for i in _set("mayor", PREMIUM_SET, gov="mayor")})
+ITEMS["bg_throne"] = Item("bg_throne", "bg", kind="bg", gov="mayor")
+ITEMS.update({i.id: i for i in _set("advisor", PREMIUM_SET, gov="advisor")})
 ITEMS["pet_spark"] = Item("pet_spark", "pet", kind="pet", product="pet_spark")
 # A winged trophy that floats beside the player: the reward for 10 duel wins in a row.
 ITEMS["pet_trophy"] = Item("pet_trophy", "pet", kind="pet", duel_streak=10)
@@ -153,6 +160,7 @@ def catalog_public() -> list[dict]:
             "drop": i.drop,
             "kind": i.kind,
             "product": i.product,
+            "gov": i.gov,
         }
         for i in ITEMS.values()
     ]
@@ -161,6 +169,12 @@ def catalog_public() -> list[dict]:
 def unlocked_by_record(best_score: int, owned: set[str]) -> list[str]:
     """Items that the player's best single run opens and that are not owned yet."""
     return [i.id for i in ITEMS.values() if record_of(i) is not None and best_score >= record_of(i) and i.id not in owned]
+
+
+def gov_items(role: str | None) -> set[str]:
+    """The ids lent to the holder of a post: the mayor gets the mayor's things, an assistant the advisor's."""
+    want = {"mayor": "mayor", "assistant": "advisor"}.get(role or "")
+    return {i.id for i in ITEMS.values() if want and i.gov == want}
 
 
 def price_of(i: Item) -> int | None:

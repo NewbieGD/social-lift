@@ -14,11 +14,13 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from . import game_config as gc
 from .admin import page_router, reload_overrides, router as admin_router
+from .gov_api import router as gov_router
+from .services import gov as gov_service
 from .api.routes import router
 from .duel_ws import router as duel_router
 from .config import settings
 from .core import limiter
-from .db import Base, engine
+from .db import Base, SessionLocal, engine
 from .deps import ApiError
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -42,6 +44,12 @@ async def lifespan(_: FastAPI):
                 await reload_overrides()
             except Exception as exc:  # noqa: BLE001 - the table may not exist before the migration
                 log.warning("balance overrides not loaded: %s", type(exc).__name__)
+            try:
+                # The weekly clock of the government: the voting announcement, the count on Monday.
+                async with SessionLocal() as s:
+                    await gov_service.tick(s)
+            except Exception as exc:  # noqa: BLE001
+                log.warning("government tick failed: %s", type(exc).__name__)
             await asyncio.sleep(30)
 
     task = asyncio.create_task(refresh_loop())
@@ -61,6 +69,7 @@ app = FastAPI(
 app.include_router(router)
 app.include_router(duel_router)
 app.include_router(admin_router)
+app.include_router(gov_router)
 app.include_router(page_router)
 
 
