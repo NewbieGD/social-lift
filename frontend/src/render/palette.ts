@@ -33,8 +33,9 @@ export interface Scene {
 // One scene per wealth tier (see design doc, section 4).
 export const scenes: Scene[] = [
   { skyTop: '#1F2A33', skyBottom: '#3B4A4F', block: '#2A363C', window: '#5E6B5A', dot: '#9FB0A8', page: '#151D23' },
-  { skyTop: '#26304A', skyBottom: '#4A5470', block: '#2F3954', window: '#C8A86A', dot: '#B9C2DA', page: '#181F31' },
-  { skyTop: '#3C6E9E', skyBottom: '#8FBBDB', block: '#4F7EA8', window: '#D8EAF6', dot: '#FFFFFF', page: '#22425F' },
+  // The story of the career, stage by stage (see storyScenes.ts): the office basement, the car showroom.
+  { skyTop: '#241E1A', skyBottom: '#3B322C', block: '#2B2623', window: '#E8C27A', dot: '#D8C8A8', page: '#1A1512' },
+  { skyTop: '#0F2038', skyBottom: '#2F5F92', block: '#3A4A66', window: '#FFE9B0', dot: '#CFE6FF', page: '#12233C' },
   { skyTop: '#2B2350', skyBottom: '#B5607A', block: '#3A2F62', window: '#FFC873', dot: '#FFD9A6', page: '#1C1736' },
   { skyTop: '#4F9BCB', skyBottom: '#CDE7EE', block: '#6CA9C9', window: '#F4FBFF', dot: '#FFFFFF', page: '#2C5F80' },
   { skyTop: '#5FA7B8', skyBottom: '#D9EFC9', block: '#5E9B78', window: '#EAF7D4', dot: '#FFFFFF', page: '#2E5E58' },

@@ -101,8 +101,8 @@ export const gameConfig = {
     bounce: 0.45,
   },
   death: {
-    hitStopMs: 150,
-    slowMoSec: 1.2,
+    hitStopMs: 110,
+    slowMoSec: 0.9,
     slowMoScale: 0.3,
   },
   input: {

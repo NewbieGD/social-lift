@@ -16,6 +16,7 @@ import { palette } from './palette';
 import { CROWN_LIFT_SIDE, crownBob, drawCrown } from './crown';
 import { drawGovAura, type GovRole } from './govArt';
 import { paintParallax, paintScene, paintSky } from './scenes';
+import { drawStoryDecor, STORY_TIERS } from './storyScenes';
 
 const MAX_PARTICLES = 220;
 
@@ -838,6 +839,11 @@ export class Renderer {
     const ctx = this.ctx;
     const t = this.clock;
     const at = (y: number): number[] => [y + off - H, y + off];
+    // The first stages tell the story of the career with their own living details (storyScenes.ts).
+    if (tier < STORY_TIERS) {
+      drawStoryDecor(ctx, tier, W, H, off, t, this.lowQuality);
+      return;
+    }
     if (tier === 0) {
       for (let y = 120; y < H; y += 220) {
         for (const sy of at(y - 22)) {
@@ -1328,8 +1334,8 @@ export class Renderer {
         sg.translate(SW / 2, SH - 10);
         sg.scale(sx * hero.facing, sy);
         drawHeroBody(sg, pose, rig);
-        this.deathFx.start(snap, k, SW, SH, x, footY - 30, this.lastDeathReason);
-      } else this.deathFx.start(null, k, SW, SH, x, footY - 30, this.lastDeathReason);
+        this.deathFx.start(snap, k, SW, SH, x, footY - 30, this.lastDeathReason, perf.effective);
+      } else this.deathFx.start(null, k, SW, SH, x, footY - 30, this.lastDeathReason, perf.effective);
     }
     const shielded = sim.light === 'red' && !sim.dead;
     if (shielded) this.drawShieldGlow(pose, rig, x, footY, sx * hero.facing, sy, sim.time, dt, 'halo');

@@ -2,11 +2,12 @@
 // offscreen canvas once, then scrolled with parallax. Props are generic silhouettes
 // with no brands or logos (rule 2.1.4). The middle of the screen stays calm for gameplay.
 import { scenes } from './palette';
+import { paintStoryParallax, paintStorySky, paintStoryTile, STORY_TIERS } from './storyScenes';
 
-type G = CanvasRenderingContext2D;
-type Rnd = () => number;
+export type G = CanvasRenderingContext2D;
+export type Rnd = () => number;
 
-function rng(seed: number): Rnd {
+export function rng(seed: number): Rnd {
   let s = seed;
   return () => {
     s = (s * 16807) % 2147483647;
@@ -14,12 +15,12 @@ function rng(seed: number): Rnd {
   };
 }
 
-function rect(g: G, x: number, y: number, w: number, h: number, c: string): void {
+export function rect(g: G, x: number, y: number, w: number, h: number, c: string): void {
   g.fillStyle = c;
   g.fillRect(x, y, w, h);
 }
 
-function rr(g: G, x: number, y: number, w: number, h: number, r: number, c: string): void {
+export function rr(g: G, x: number, y: number, w: number, h: number, r: number, c: string): void {
   const k = Math.min(r, w / 2, h / 2);
   g.fillStyle = c;
   g.beginPath();
@@ -85,7 +86,7 @@ function palm(g: G, x: number, y: number, s: number, c: string): void {
 }
 
 /** Generic car silhouette (no brand features). */
-function car(g: G, x: number, y: number, s: number, c: string, sport = false): void {
+export function car(g: G, x: number, y: number, s: number, c: string, sport = false): void {
   g.fillStyle = c;
   g.beginPath();
   if (sport) {
@@ -151,7 +152,7 @@ function stars(g: G, r: Rnd, W: number, H: number, n: number, c: string): void {
   g.globalAlpha = 1;
 }
 
-function bins(g: G, x: number, y: number, c: string): void {
+export function bins(g: G, x: number, y: number, c: string): void {
   rr(g, x, y - 22, 26, 22, 3, c);
   rect(g, x - 2, y - 25, 30, 4, 'rgba(0,0,0,0.35)');
   rr(g, x + 30, y - 18, 20, 18, 3, '#4E6B4A');
@@ -194,6 +195,7 @@ function tower(g: G, x: number, w: number, H: number, c: string): void {
 
 /** Static layer: sky and horizon (does not scroll). */
 export function paintSky(g: G, tier: number, W: number, H: number): void {
+  if (tier < STORY_TIERS) return paintStorySky(g, tier, W, H);
   const sc = scenes[Math.min(tier, scenes.length - 1)];
   const sky = g.createLinearGradient(0, 0, 0, H);
   sky.addColorStop(0, sc.skyTop);
@@ -229,6 +231,7 @@ export function paintSky(g: G, tier: number, W: number, H: number): void {
 
 /** Scrolling layer: edge structures and props on a transparent tile. */
 export function paintScene(g: G, tier: number, W: number, H: number): void {
+  if (tier < STORY_TIERS) return paintStoryTile(g, tier, W, H);
   const sc = scenes[Math.min(tier, scenes.length - 1)];
   const r = rng(1000 + tier * 97);
 
@@ -411,6 +414,7 @@ export function paintScene(g: G, tier: number, W: number, H: number): void {
  * stay away from the middle of the field, so they never hide a platform.
  */
 export function paintParallax(g: G, tier: number, W: number, H: number, layer: 0 | 1 | 2): void {
+  if (tier < STORY_TIERS) return paintStoryParallax(g, tier, W, H, layer);
   const sc = scenes[Math.min(tier, scenes.length - 1)];
   const r = rng(7000 + tier * 31 + layer * 977);
   if (layer === 0) {
