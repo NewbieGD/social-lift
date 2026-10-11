@@ -80,6 +80,9 @@ def role_of(user_id: int) -> str | None:
     return "assistant" if user_id in current["assistants"] else None
 
 
+_bonus_live: bool | None = None  # was the mayor's bonus working at the last check (None: not checked yet)
+
+
 def touch(user_id: int) -> None:
     """The mayor is in the game now."""
     global _mayor_ping
@@ -202,6 +205,7 @@ async def tick(session: AsyncSession) -> None:
     if changed:
         await session.commit()
     await refresh(session)
+    await _watch_bonus(session)
 
 
 async def _close(session: AsyncSession, el: GovElection, new_week: str) -> None:
@@ -240,6 +244,23 @@ async def _close(session: AsyncSession, el: GovElection, new_week: str) -> None:
         notify(session, winner, "mayor_you", {})
     else:
         notify(session, None, "no_mayor", {})
+
+
+async def _watch_bonus(session: AsyncSession, reason: str = "left") -> None:
+    """Tells everybody (the bell) when the mayor's coin bonus starts and when it stops (the mayor left the game)."""
+    global _bonus_live
+    live = bonus_active()
+    if _bonus_live is None:
+        _bonus_live = live  # the first check after a start only remembers the state
+        return
+    if live == _bonus_live:
+        return
+    _bonus_live = live
+    if live:
+        notify(session, None, "bonus_started", {"percent": tunables.get("gov_bonus_percent")})
+    else:
+        notify(session, None, "bonus_ended", {"percent": tunables.get("gov_bonus_percent"), "reason": reason})
+    await session.commit()
 
 
 # ---------------------------------------------------------------- candidacy
@@ -424,6 +445,7 @@ async def remove_assistant(session: AsyncSession, mayor: User, target_id: int) -
 async def set_settings(session: AsyncSession, mayor: User, bonus: bool | None, play_color: str | None) -> None:
     await tick(session)
     _require_mayor(mayor)
+    await _watch_bonus(session)  # the state before the change is remembered, so that the change is announced
     term = await session.get(GovTerm, week_key(week_start(now())))
     if term is None:
         raise ApiError(404, "no_term", "No term")
@@ -435,6 +457,10 @@ async def set_settings(session: AsyncSession, mayor: User, bonus: bool | None, p
         term.play_color = play_color
     await session.commit()
     await refresh(session)
+    if bonus is not None:
+        # The mayor is acting right now, so he is in the game: the bonus starts (or stops) at once.
+        touch(mayor.id)
+        await _watch_bonus(session, "off")
 
 
 # ---------------------------------------------------------------- what the client shows
@@ -478,6 +504,22 @@ async def state(session: AsyncSession, user: User) -> dict:
             "invited": my_invite is not None,
         },
         "settings": {"bonus_on": bool(current["bonus_on"]), "play_color": current["play_color"], "colors": list(PLAY_COLORS)},
+        "bonus_active": bonus_active(),
+        "bonus_percent": tunables.get("gov_bonus_percent"),
+    }
+
+
+async def pulse(session: AsyncSession, user: User) -> dict:
+    """A small answer for the client's regular check: the bell, an invitation, the post, the bonus."""
+    wk = week_key(week_start(now()))
+    invited = await session.scalar(
+        select(GovAssistant.id).where(GovAssistant.term_week == wk, GovAssistant.user_id == user.id, GovAssistant.status == "invited")
+    )
+    return {
+        "unread": await unread_count(session, user),
+        "invited": invited is not None,
+        "role": role_of(user.id),
+        "play_color": current["play_color"],
         "bonus_active": bonus_active(),
         "bonus_percent": tunables.get("gov_bonus_percent"),
     }

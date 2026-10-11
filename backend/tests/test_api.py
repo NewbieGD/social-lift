@@ -1147,3 +1147,35 @@ async def test_gov_ring_is_rolled_at_the_start_and_granted_once_a_week(client, m
     await ready_player(client, 321)
     async with SessionLocal() as s:
         assert await gov.roll_ring(s, 321) is False  # no luck, no ring
+
+
+async def test_gov_bonus_notifications_and_pulse(client, monkeypatch):
+    from app.models import GovTerm
+    from app.services import gov
+
+    clock = {"t": _msk(2027, 1, 12, 12)}
+    monkeypatch.setattr(gov, "now", lambda: clock["t"])
+    try:
+        await ready_player(client, 330)
+        await ready_player(client, 331)
+        async with SessionLocal() as s:
+            s.add(GovTerm(week="2027-01-11", mayor_id=330, bonus_on=False, play_color="default"))
+            await s.commit()
+        monkeypatch.setattr(gov, "_bonus_live", None)
+        await client.get("/api/gov/state", headers=headers(331))  # the first check only remembers the state
+        # The mayor switches the bonus on: everybody gets a message at once.
+        r = await client.put("/api/gov/settings", json={"bonus": True}, headers=headers(330))
+        assert r.status_code == 200 and r.json()["bonus_active"] is True
+        kinds = [n["kind"] for n in (await client.get("/api/notifications", headers=headers(331))).json()["items"]]
+        assert "bonus_started" in kinds
+        pulse = (await client.get("/api/gov/pulse", headers=headers(331))).json()
+        assert pulse["bonus_active"] is True and pulse["unread"] >= 1 and pulse["invited"] is False
+        # The mayor leaves the game (no signal for a while): the bonus stops and everybody is told.
+        monkeypatch.setattr(gov, "_mayor_ping", -1e9)
+        await client.get("/api/gov/state", headers=headers(331))
+        items = (await client.get("/api/notifications", headers=headers(331))).json()["items"]
+        ended = [n for n in items if n["kind"] == "bonus_ended"]
+        assert ended and ended[0]["payload"]["reason"] == "left"
+        assert (await client.get("/api/gov/pulse", headers=headers(331))).json()["bonus_active"] is False
+    finally:
+        gov.current.update(week="", mayor_id=None, assistants=set(), play_color="default", bonus_on=False)

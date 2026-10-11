@@ -46,6 +46,15 @@ async def gov_state(caller: Caller = Depends(current_user), session: AsyncSessio
     return await gov.state(session, await _user(caller, session, "gov"))
 
 
+@router.get("/gov/pulse")
+async def gov_pulse(caller: Caller = Depends(current_user), session: AsyncSession = Depends(get_session)) -> dict:
+    """The light regular check of the client (every few seconds on the main screen)."""
+    user = await game.require_user(session, caller)
+    enforce_limit(f"u:{caller.user_id}:pulse", (240, 60))
+    await gov.tick(session)
+    return await gov.pulse(session, user)
+
+
 @router.post("/gov/apply")
 async def gov_apply(caller: Caller = Depends(current_user), session: AsyncSession = Depends(get_session)) -> dict:
     user = await _user(caller, session, "gov")
