@@ -44,7 +44,7 @@ export interface GovState {
 export interface Notice {
   id: number;
   kind: string;
-  payload: { user?: GovPlayer | null; from?: GovPlayer | null; accepted?: boolean; percent?: number; reason?: string };
+  payload: { user?: GovPlayer | null; from?: GovPlayer | null; accepted?: boolean; percent?: number; reason?: string; color?: string };
   at: number;
   unread: boolean;
   personal: boolean;

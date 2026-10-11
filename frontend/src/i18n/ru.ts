@@ -715,6 +715,7 @@ export const ru = {
       assistant_answer: (n: string, yes: boolean) => `${n} ${yes ? 'принял' : 'отклонил'} ваше приглашение в помощники.`,
       assistant_set: (n: string) => `${n} назначен помощником мэра.`,
       assistant_removed: () => 'Мэр снял вас с должности помощника.',
+      color_changed: (c: string) => `Мэр сменил кнопку «Играть»: ${c}.`,
       bonus_started: (p: number) => `Мэр в игре: бонус +${p}% к монетам включён.`,
       bonus_ended: (p: number, reason: string) => (reason === 'off' ? `Мэр отключил бонус +${p}% к монетам.` : `Мэр вышел из игры, бонуса +${p}% больше нет.`),
     },

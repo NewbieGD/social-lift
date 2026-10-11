@@ -7364,3 +7364,27 @@ body.reduced .color-btn i,
 body.reduced .color-btn i::before {
   animation: none !important;
 }
+
+/* The canvas with the living effects above the Play button (it never takes a tap). */
+canvas.play-fx {
+  position: fixed;
+  z-index: 12;
+  pointer-events: none;
+  display: none;
+}
+.color-btn i {
+  overflow: visible;
+}
+canvas.fx-prev {
+  position: absolute;
+  left: -10px;
+  top: -12px;
+  width: calc(100% + 20px);
+  height: calc(100% + 24px);
+  pointer-events: none;
+}
+/* The effects are drawn on the canvas now: the old layers of the button only keep its colour. */
+body[data-play] button.primary.play::before,
+.color-btn i::before {
+  content: none !important;
+}

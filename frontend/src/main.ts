@@ -36,6 +36,7 @@ import { buyWithVotes, canPay } from './platform/pay';
 import { isIOS } from './platform/vk';
 import { CROWN_LIFT_FRONT, crownBob, drawCrown } from './render/crown';
 import { drawGovAura, drawThrone, type GovRole } from './render/govArt';
+import { PlayFx, type PlayFxKind } from './render/playFx';
 import { occupiedSlots, splitBonus, type Slot } from './render/slots';
 import { STYLE_SETS, STYLES, type StyleLoadout } from './render/styles';
 import { drawStyleIcon } from './render/styleArt';
@@ -193,6 +194,12 @@ function keyBindings(s: Settings): Record<LightId, string> {
   return { yellow: s.keyYellow, blue: s.keyBlue, green: s.keyGreen, red: s.keyRed };
 }
 
+/** For testing: ?quality=0 (high), 1 (medium) or 2 (low) forces the graphics quality. */
+const debugQuality: 0 | 1 | 2 | null = (() => {
+  const q = new URLSearchParams(location.search).get('quality');
+  return q === '0' || q === '1' || q === '2' ? (Number(q) as 0 | 1 | 2) : null;
+})();
+
 function applySettings(s: Settings, changed?: (keyof Settings)[]): void {
   // Beside the wide field the buttons stand in one column.
   const placement = document.body.classList.contains('wide') ? { layout: 'row' as const, side: 'left' as const } : s;
@@ -209,7 +216,7 @@ function applySettings(s: Settings, changed?: (keyof Settings)[]): void {
   document.body.classList.toggle('reduced', s.reducedFx);
   document.body.classList.toggle('hide-opp', !s.duelPreview);
   // "Reduced effects" forces the lowest quality; otherwise the monitor chooses (core/perf.ts).
-  perf.forced = s.reducedFx ? 2 : null;
+  perf.forced = s.reducedFx ? 2 : debugQuality;
   audio.musicOn = s.music;
   audio.musicVol = s.musicVol;
   audio.sfxVol = s.sfxVol;
@@ -1767,6 +1774,70 @@ async function loadNotices(): Promise<void> {
   if (router.top === 'notices') router.refresh();
   // The messages are shown (the unread ones stay highlighted in this window), and now count as read.
   void govApi.markRead();
+}
+
+/** The effects around the Play button (a canvas above the main screen) and in the colour picker. */
+const playFxMain = new PlayFx();
+const playFxPrev = new WeakMap<HTMLCanvasElement, PlayFx>();
+let playFxCanvas: HTMLCanvasElement | null = null;
+let playFxLast = 0;
+function playFxKind(): PlayFxKind | null {
+  const k = document.body.dataset.play;
+  return k === 'fire' || k === 'ice' || k === 'emerald' ? k : null;
+}
+function drawPlayFx(now: number): void {
+  const dt = Math.min(0.1, Math.max(0, now - playFxLast));
+  playFxLast = now;
+  const kind = playFxKind();
+  const btn = router.top === 'menu' && kind ? document.querySelector<HTMLElement>('button.primary.big.play') : null;
+  const off = !btn || !kind || perf.effective >= 2 || settingsStore.get().reducedFx;
+  if (off || !btn || !kind) {
+    if (playFxCanvas) playFxCanvas.style.display = 'none';
+    return;
+  }
+  if (!playFxCanvas) {
+    playFxCanvas = document.createElement('canvas');
+    playFxCanvas.className = 'play-fx';
+    document.body.appendChild(playFxCanvas);
+  }
+  const r = btn.getBoundingClientRect();
+  const pad = 34;
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const w = Math.round(r.width + pad * 2);
+  const h = Math.round(r.height + pad * 2);
+  if (playFxCanvas.width !== Math.round(w * dpr) || playFxCanvas.height !== Math.round(h * dpr)) {
+    playFxCanvas.width = Math.round(w * dpr);
+    playFxCanvas.height = Math.round(h * dpr);
+  }
+  const s = playFxCanvas.style;
+  s.display = 'block';
+  s.width = `${w}px`;
+  s.height = `${h}px`;
+  s.left = `${Math.round(r.left - pad)}px`;
+  s.top = `${Math.round(r.top - pad)}px`;
+  const g = playFxCanvas.getContext('2d');
+  if (!g) return;
+  g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  g.clearRect(0, 0, w, h);
+  playFxMain.draw(g, kind, pad, pad, r.width, r.height, now, dt, perf.effective);
+}
+/** The small previews of the three effects in the mayor's colour picker. */
+function drawPlayFxPreviews(now: number): void {
+  document.querySelectorAll<HTMLCanvasElement>('canvas.fx-prev').forEach((c) => {
+    const kind = c.dataset.fx as PlayFxKind;
+    const w = c.clientWidth;
+    const h = c.clientHeight;
+    if (!w || !h) return;
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    if (c.width !== Math.round(w * dpr)) { c.width = Math.round(w * dpr); c.height = Math.round(h * dpr); }
+    const g = c.getContext('2d');
+    if (!g) return;
+    let fx = playFxPrev.get(c);
+    if (!fx) { fx = new PlayFx(); playFxPrev.set(c, fx); }
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    g.clearRect(0, 0, w, h);
+    fx.draw(g, kind, 10, 12, w - 20, h - 24, now, 0.016, 1);
+  });
 }
 
 /** The throne hall of the Government screen. */
@@ -3838,6 +3909,8 @@ function frame(now: number): void {
   }
   if (router.top === 'buyConfirm') drawBuyPreview(now / 1000);
   if (router.top === 'government') drawGovThrone(now / 1000);
+  drawPlayFx(now / 1000);
+  if (router.top === 'govManage') drawPlayFxPreviews(now / 1000);
   if (router.top === 'pets') {
     const pc = document.getElementById('petsHero') as HTMLCanvasElement | null;
     if (pc) drawStageHero(pc, lastTier(), now / 1000);

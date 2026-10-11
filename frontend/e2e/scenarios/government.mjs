@@ -44,7 +44,7 @@ async function withPlayer(fn) {
     return json({ ok: true });
   });
   const top = () => p.evaluate(() => document.querySelector('#screens .screen:not(.leaving)')?.dataset.screen ?? null);
-  await p.goto(`${BASE}/index.html?vk_user_id=5&vk_app_id=7&sign=x`); await p.waitForTimeout(2800);
+  await p.goto(`${BASE}/index.html?vk_user_id=5&vk_app_id=7&sign=x&quality=0`); await p.waitForTimeout(2800);
   await fn(p, top);
   console.log('hscroll', await p.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1), 'errors', errs);
   await b.close();

@@ -1441,7 +1441,7 @@ export function govManageView(g: GovState | null): string {
     .map((a) => `<div class="cand-row"><button class="cand-name" data-action="player" data-arg="${a.id}">${avatarHtml(a)}<b>${esc(a.name || ru.leaders.player)}</b><small>${a.status === 'invited' ? ru.gov.waiting : ''}</small></button><button class="secondary small" data-action="govRemove" data-arg="${a.id}">${ru.gov.remove}</button></div>`)
     .join('');
   const colors = g.settings.colors
-    .map((c) => `<button class="color-btn play-${c} ${g.settings.play_color === c ? 'on' : ''}" data-action="govColor" data-arg="${c}"><i></i>${ru.gov.colors[c] ?? c}</button>`)
+    .map((c) => `<button class="color-btn play-${c} ${g.settings.play_color === c ? 'on' : ''}" data-action="govColor" data-arg="${c}"><i>${c === 'default' ? '' : `<canvas class="fx-prev" data-fx="${c}"></canvas>`}</i>${ru.gov.colors[c] ?? c}</button>`)
     .join('');
   return `${header(ru.gov.manageTitle)}<div class="scroll gov-screen">
     <h3 class="gov-h">${ru.gov.assistantsManage}</h3>
@@ -1494,6 +1494,8 @@ export function noticesView(items: Notice[] | null): string {
         return f.assistant_set(who(n.payload.user));
       case 'assistant_removed':
         return f.assistant_removed();
+      case 'color_changed':
+        return f.color_changed(ru.gov.colors[n.payload.color ?? ''] ?? '');
       case 'bonus_started':
         return f.bonus_started(n.payload.percent ?? 10);
       case 'bonus_ended':
@@ -1507,8 +1509,8 @@ export function noticesView(items: Notice[] | null): string {
       const who = n.payload.user ?? n.payload.from ?? null;
       const when = new Date(n.at).toLocaleString('ru-RU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
       const open = n.kind === 'assistant_invite' || n.kind === 'mayor_you' || n.kind === 'voting_started' || n.kind === 'mayor_elected';
-      const bonus = n.kind === 'bonus_started' || n.kind === 'bonus_ended';
-      return `<${open ? 'button data-action="open" data-arg="government"' : 'div'} class="notice ${n.unread ? 'unread' : ''}">${who ? avatarHtml(who) : `<span class="gov-ava bell">${bonus ? (n.kind === 'bonus_started' ? '💰' : '🔕') : '🔔'}</span>`}<div><p>${esc(text(n))}</p><small>${when}</small></div></${open ? 'button' : 'div'}>`;
+      const bonus = n.kind === 'bonus_started' || n.kind === 'bonus_ended' || n.kind === 'color_changed';
+      return `<${open ? 'button data-action="open" data-arg="government"' : 'div'} class="notice ${n.unread ? 'unread' : ''}">${who ? avatarHtml(who) : `<span class="gov-ava bell">${bonus ? (n.kind === 'bonus_started' ? '💰' : n.kind === 'color_changed' ? '🎨' : '🔕') : '🔔'}</span>`}<div><p>${esc(text(n))}</p><small>${when}</small></div></${open ? 'button' : 'div'}>`;
     })
     .join('');
   return `${header(ru.gov.noticesTitle)}<div class="scroll"><div class="panel flat">${items === null ? `<p class="status">${ru.chat.connecting}</p>` : rows || `<p class="muted">${ru.gov.noNotices}</p>`}</div></div>`;
