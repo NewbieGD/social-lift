@@ -3,8 +3,8 @@
 // No filters or shadowBlur: shading is done with gradients.
 
 import { bodyGradient, edge, fist3d, hand3d, limb3d, spec, tone, torch3d } from './shade3d';
-import { armColor, armScale, drawLegionFx, drawSeraphAura, drawSeraphWings, drawStyleArm, drawStyleBack, drawStyleFoot, drawStyleHead, drawStyleLeg, drawStyleTorch, drawStyleTorso, handColor, legColors as styleLegColors, skinFor, torsoColor } from './styleArt';
-import { fullLegion, fullSeraph, wornStyles, type StyleLoadout, type WornStyles } from './styles';
+import { armColor, armScale, drawLegionFx, drawMayorFx, drawSeraphAura, drawSeraphWings, drawStyleArm, drawStyleBack, drawStyleFoot, drawStyleHead, drawStyleLeg, drawStyleTorch, drawStyleTorso, handColor, legColors as styleLegColors, skinFor, torsoColor } from './styleArt';
+import { fullLegion, fullMayor, fullSeraph, wornStyles, type StyleLoadout, type WornStyles } from './styles';
 
 export type Face = 'normal' | 'grin' | 'scared' | 'squint';
 export type Gesture = 'none' | 'scratch' | 'pocket' | 'tie' | 'wave';
@@ -516,7 +516,7 @@ function drawHead(ctx: CanvasRenderingContext2D, rig: Rig, o: Outfit, tier: numb
   ctx.rotate(rig.headTilt);
   const face = rig.face;
 
-  const coversHair = !!w?.head && ['helmet', 'cowl', 'mask', 'brute', 'beanie', 'seraphHelm', 'legionHead', 'mayorHat', 'advisorCap'].includes(w.head.kind);
+  const coversHair = !!w?.head && ['helmet', 'cowl', 'mask', 'brute', 'beanie', 'seraphHelm', 'legionHead', 'mayorHat'].includes(w.head.kind);
   // Back hair mass behind the head (a knitted cap leaves the hair at the back visible).
   if (!coversHair || w?.head?.kind === 'beanie') {
     ctx.fillStyle = HAIR;
@@ -1049,6 +1049,13 @@ export function drawHeroBody(ctx: CanvasRenderingContext2D, pose: HeroPose, give
     ctx.save();
     ctx.translate(rig.hip.x, rig.hip.y);
     drawSeraphAura(ctx, w.torso, t, -rig.torsoLen * 0.6);
+    ctx.restore();
+  }
+  // The mayor's set: ribbons of light and tiny fireworks.
+  if (w.torso && fullMayor(w)) {
+    ctx.save();
+    ctx.translate(rig.hip.x, rig.hip.y);
+    drawMayorFx(ctx, w.torso, t, -rig.torsoLen * 0.6);
     ctx.restore();
   }
   // The chrome set: the red scanner of the machine.

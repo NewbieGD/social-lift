@@ -504,8 +504,54 @@ export function drawStyleHead(ctx: CanvasRenderingContext2D, d: StyleDef, view: 
       ctx.stroke();
       break;
     }
-    case 'mayorHat':
-    case 'advisorCap': {
+    case 'advisorWreath': {
+      // A silver laurel wreath: two branches of leaves that meet above the forehead, with a small gem.
+      const hx = cx - (side ? 1 : 0);
+      const R = rx + 2.8;
+      const leaf = (x: number, y: number, ang: number, len: number): void => {
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.rotate(ang);
+        ctx.beginPath();
+        ctx.ellipse(len / 2, 0, len / 2, len * 0.3, 0, 0, Math.PI * 2);
+        const lg = ctx.createLinearGradient(0, -len * 0.3, 0, len * 0.3);
+        lg.addColorStop(0, '#F6FAFF');
+        lg.addColorStop(0.5, p.sub);
+        lg.addColorStop(1, tone(p.sub, -0.35));
+        ctx.fillStyle = lg;
+        ctx.fill();
+        ctx.lineWidth = 0.5;
+        ctx.strokeStyle = p.dark;
+        ctx.stroke();
+        ctx.restore();
+      };
+      const spans = side ? [{ sd: 1, from: 0.04, to: 0.96 }] : [{ sd: -1, from: 0.06, to: 0.52 }, { sd: 1, from: 0.06, to: 0.52 }];
+      for (const sp of spans) {
+        for (let i = 0; i < 9; i++) {
+          const phi = (sp.from + ((sp.to - sp.from) * i) / 8) * Math.PI;
+          const x = hx + (side ? Math.cos(phi) : sp.sd * Math.cos(phi)) * R;
+          const y = -5.2 - Math.sin(phi) * 9.2;
+          const tan = Math.atan2(-Math.cos(phi) * 9.2, (side ? -1 : -sp.sd) * Math.sin(phi) * R);
+          const flip = i % 2 ? 0.55 : -0.55;
+          leaf(x, y, tan + (side ? Math.PI : sp.sd > 0 ? Math.PI : 0) + flip, 5.6 - i * 0.12);
+        }
+      }
+      // A gem in the middle of the brow band.
+      const gx = side ? cx + rx - 1.5 : hx;
+      ctx.fillStyle = p.accent;
+      ctx.beginPath();
+      ctx.moveTo(gx, -15.6);
+      ctx.lineTo(gx + 2, -13.4);
+      ctx.lineTo(gx, -11.2);
+      ctx.lineTo(gx - 2, -13.4);
+      ctx.closePath();
+      ctx.fill();
+      ctx.lineWidth = 0.5;
+      ctx.strokeStyle = p.dark;
+      ctx.stroke();
+      break;
+    }
+    case 'mayorHat': {
       // A peaked cap: a dome, a band, a visor, and a small badge (the mayor's shows the city).
       const mayor = d.kind === 'mayorHat';
       const hx = cx - (side ? 1 : 0);
@@ -1070,7 +1116,7 @@ export function drawStyleTorso(ctx: CanvasRenderingContext2D, d: StyleDef, len: 
       ctx.lineTo(mid, -len * 0.45);
       ctx.closePath();
       ctx.fill();
-      for (const sd of [-1, 1]) {
+      for (const sd of mayor ? [-1, 1] : []) {
         ctx.beginPath();
         ctx.moveTo(mid + sd * 3.2, -len);
         ctx.lineTo(mid + sd * 8.6, -len + 1);
@@ -1099,19 +1145,38 @@ export function drawStyleTorso(ctx: CanvasRenderingContext2D, d: StyleDef, len: 
         ctx.lineWidth = 0.5;
         ctx.stroke();
       } else {
-        ctx.fillStyle = '#A01830';
-        ctx.beginPath();
-        ctx.moveTo(mid - 0.9, -len + 1.4);
-        ctx.lineTo(mid + 0.9, -len + 1.4);
-        ctx.lineTo(mid + 1.4, -len * 0.5);
-        ctx.lineTo(mid, -len * 0.42);
-        ctx.lineTo(mid - 1.4, -len * 0.5);
-        ctx.closePath();
-        ctx.fill();
+        // A waistcoat over a white shirt: two panels with a silver edge and buttons, and a pale scarf
+        // draped over one shoulder down to the hip.
+        for (const sd of [-1, 1]) {
+          ctx.beginPath();
+          ctx.moveTo(mid + sd * 3.6, -len + 0.4);
+          ctx.lineTo(mid + sd * 8.4, -len + 0.8);
+          ctx.lineTo(mid + sd * (hw - 0.6), -5.2);
+          ctx.lineTo(mid + sd * 0.7, -5.2);
+          ctx.lineTo(mid + sd * 1.1, -len * 0.44);
+          ctx.closePath();
+          ctx.fillStyle = tone(p.main, 0.1);
+          ctx.fill();
+          ctx.strokeStyle = p.sub;
+          ctx.lineWidth = 0.8;
+          ctx.stroke();
+        }
         ctx.fillStyle = p.sub;
+        for (let i = 0; i < 3; i++) {
+          ctx.beginPath();
+          ctx.arc(mid + 1.7, -len * 0.64 + i * 3.4, 0.8, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        ctx.lineCap = 'round';
+        ctx.strokeStyle = '#9FC4E8';
+        ctx.lineWidth = 3.4;
         ctx.beginPath();
-        ctx.arc(mid - hw * 0.5, -len * 0.62, 2, 0, Math.PI * 2);
-        ctx.fill();
+        ctx.moveTo(mid - hw + 2, -len + 1.4);
+        ctx.quadraticCurveTo(mid - 2, -len * 0.55, mid + hw - 3, -9);
+        ctx.stroke();
+        ctx.strokeStyle = '#EAF6FF';
+        ctx.lineWidth = 0.8;
+        ctx.stroke();
       }
       rr(ctx, -hw - 1, -4.6, hw * 2 + 2, 4.6, 1);
       ctx.fillStyle = p.sub;
@@ -1414,8 +1479,9 @@ export function legColors(d: StyleDef): { thigh: string; shin: string } {
     case 'legionLegs':
       return { thigh: p.sub, shin: p.main };
     case 'mayorLegs':
-    case 'advisorLegs':
       return { thigh: p.main, shin: p.main };
+    case 'advisorLegs':
+      return { thigh: '#2A3A48', shin: '#2A3A48' };
     default:
       return { thigh: p.main, shin: p.main };
   }
@@ -2129,6 +2195,85 @@ function seraphLantern(ctx: CanvasRenderingContext2D, d: StyleDef, len: number, 
   ctx.fillStyle = lg;
   ctx.fill();
   glowDot(ctx, len + 3, 0, 11 * pulse, p.accent, 0.55);
+}
+
+/**
+ * The full set of the mayor: thin ribbons of light (gold, white, cyan, rose) spiral up around the hero,
+ * a tiny firework blooms near his head every few seconds, and stars twinkle. Light lines, no heavy blobs.
+ * Hero frame; `cy` is the middle of the body.
+ */
+export function drawMayorFx(ctx: CanvasRenderingContext2D, d: StyleDef, t: number, cy = -30): void {
+  void d;
+  const cols = ['255,214,110', '255,255,255', '140,225,255', '255,150,190'];
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.lineCap = 'round';
+  // Ribbons of light.
+  for (let k = 0; k < 4; k++) {
+    const base = t * 0.8 + (k * Math.PI) / 2;
+    ctx.beginPath();
+    for (let i = 0; i <= 18; i++) {
+      const s = i / 18;
+      const a = base + s * 2.4;
+      const x = Math.cos(a) * (20 + 5 * Math.sin(s * 6 + t));
+      const y = cy + 40 - s * 84 + Math.sin(a) * 6;
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    const g = ctx.createLinearGradient(0, cy + 40, 0, cy - 44);
+    g.addColorStop(0, `rgba(${cols[k]},0)`);
+    g.addColorStop(0.5, `rgba(${cols[k]},0.6)`);
+    g.addColorStop(1, `rgba(${cols[k]},0)`);
+    ctx.strokeStyle = g;
+    ctx.lineWidth = 1.3;
+    ctx.stroke();
+  }
+  // A small firework every 2.6 s, lasting about a second.
+  const cycle = 2.6;
+  const n = Math.floor(t / cycle);
+  const k = (t % cycle) / 0.95;
+  if (k < 1) {
+    const seed = n * 7.31;
+    const bx = Math.sin(seed) * 22 + (Math.sin(seed * 3) > 0 ? 14 : -14);
+    const by = cy - 48 + Math.cos(seed * 2) * 8;
+    const col = cols[n % 4];
+    const R = 6 + 17 * Math.sqrt(k);
+    ctx.lineWidth = 1.2;
+    for (let i = 0; i < 12; i++) {
+      const a = (i / 12) * Math.PI * 2 + seed;
+      ctx.strokeStyle = `rgba(${col},${0.95 * (1 - k)})`;
+      ctx.beginPath();
+      ctx.moveTo(bx + Math.cos(a) * R * 0.55, by + Math.sin(a) * R * 0.55);
+      ctx.lineTo(bx + Math.cos(a) * R, by + Math.sin(a) * R);
+      ctx.stroke();
+      ctx.fillStyle = `rgba(255,255,255,${0.8 * (1 - k)})`;
+      ctx.fillRect(bx + Math.cos(a) * R * 1.12 - 0.7, by + Math.sin(a) * R * 1.12 - 0.7, 1.4, 1.4);
+    }
+  }
+  // Four-point stars that twinkle.
+  for (let i = 0; i < 5; i++) {
+    const ph = (t * 0.7 + i * 0.2) % 1;
+    const a = Math.sin(ph * Math.PI);
+    if (a < 0.2) continue;
+    const x = Math.sin(i * 2.3 + t * 0.3) * 27;
+    const y = cy - 30 + ((i * 17) % 60) - 30 + Math.sin(t + i) * 3;
+    const r = 3.8 * a;
+    ctx.strokeStyle = `rgba(255,250,225,${a})`;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(x - r, y);
+    ctx.lineTo(x + r, y);
+    ctx.moveTo(x, y - r);
+    ctx.lineTo(x, y + r);
+    ctx.stroke();
+  }
+  // A breathing ring of gold light on the ground.
+  ctx.strokeStyle = `rgba(255,214,110,${0.18 + 0.08 * Math.sin(t * 2)})`;
+  ctx.lineWidth = 1.4;
+  ctx.beginPath();
+  ctx.ellipse(0, cy + 38, 21, 4.4, 0, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.restore();
 }
 
 /** A small feather: a soft pointed leaf with a light vein. Drawn at 0,0 pointing up. */

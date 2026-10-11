@@ -124,7 +124,7 @@ export interface MenuData {
   /** The statistics cards are unfolded. */
   statsOpen: boolean;
   /** The government strip under the Play button and the bell. */
-  gov: { kind: 'mayor' | 'voting' | 'candidacy' | 'empty'; text: string; unread: number };
+  gov: { kind: 'mayor' | 'voting' | 'candidacy' | 'empty' | 'invite'; text: string; unread: number };
   /** Something new (not seen yet) in Styles, Decoration or Pets. */
   newDots: { styles: boolean; decor: boolean; pets: boolean };
   /** Coin balance; null when there is no server (offline, outside VK). */
@@ -1401,6 +1401,19 @@ export function governmentView(g: GovState | null, myId: number): string {
   </div>`;
 }
 
+/** The window that opens on the main screen when the mayor invites the player to be an assistant. */
+export function govInviteView(g: GovState | null): string {
+  const name = g?.mayor?.name || ru.leaders.player;
+  return `<div class="panel cand-panel invite-pop">
+    <div class="invite-ico">🛡️</div>
+    <h2>${ru.gov.invitePopTitle}</h2>
+    ${avatarHtml(g?.mayor ?? null, 'gold')}
+    <p>${esc(ru.gov.invitePopText(name))}</p>
+    <div class="btn-row"><button class="primary" data-action="govRespond" data-arg="yes">${ru.gov.accept}</button><button class="secondary" data-action="govRespond" data-arg="no">${ru.gov.decline}</button></div>
+    <button class="link-btn" data-action="back">${ru.gov.later}</button>
+  </div>`;
+}
+
 export function candidacyView(g: GovState | null): string {
   if (!g) return '';
   const e = g.me.eligibility;
@@ -1481,6 +1494,10 @@ export function noticesView(items: Notice[] | null): string {
         return f.assistant_set(who(n.payload.user));
       case 'assistant_removed':
         return f.assistant_removed();
+      case 'bonus_started':
+        return f.bonus_started(n.payload.percent ?? 10);
+      case 'bonus_ended':
+        return f.bonus_ended(n.payload.percent ?? 10, n.payload.reason ?? 'left');
       default:
         return '';
     }
@@ -1490,7 +1507,8 @@ export function noticesView(items: Notice[] | null): string {
       const who = n.payload.user ?? n.payload.from ?? null;
       const when = new Date(n.at).toLocaleString('ru-RU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
       const open = n.kind === 'assistant_invite' || n.kind === 'mayor_you' || n.kind === 'voting_started' || n.kind === 'mayor_elected';
-      return `<${open ? 'button data-action="open" data-arg="government"' : 'div'} class="notice ${n.unread ? 'unread' : ''}">${who ? avatarHtml(who) : '<span class="gov-ava bell">🔔</span>'}<div><p>${esc(text(n))}</p><small>${when}</small></div></${open ? 'button' : 'div'}>`;
+      const bonus = n.kind === 'bonus_started' || n.kind === 'bonus_ended';
+      return `<${open ? 'button data-action="open" data-arg="government"' : 'div'} class="notice ${n.unread ? 'unread' : ''}">${who ? avatarHtml(who) : `<span class="gov-ava bell">${bonus ? (n.kind === 'bonus_started' ? '💰' : '🔕') : '🔔'}</span>`}<div><p>${esc(text(n))}</p><small>${when}</small></div></${open ? 'button' : 'div'}>`;
     })
     .join('');
   return `${header(ru.gov.noticesTitle)}<div class="scroll"><div class="panel flat">${items === null ? `<p class="status">${ru.chat.connecting}</p>` : rows || `<p class="muted">${ru.gov.noNotices}</p>`}</div></div>`;

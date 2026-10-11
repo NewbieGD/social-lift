@@ -103,7 +103,7 @@ export const STYLE_SETS: StyleSet[] = [
     // The assistants' set: a navy suit with a silver badge and a soft silver glow.
     id: 'advisor',
     gov: true,
-    palette: { main: '#1E2D58', sub: '#C8D4EC', accent: '#E8F0FF', dark: '#0C1630', glow: '#B8CCF0' },
+    palette: { main: '#1F5461', sub: '#C8D4EC', accent: '#EAF3FF', dark: '#0A2630', glow: '#BFE0F0' },
     parts: ['head', 'torso', 'arms', 'legs', 'torch'],
   },
   // Flashlights: each one replaces the flashlight in the hero's hand.
@@ -130,7 +130,7 @@ const KINDS: Record<string, Partial<Record<Slot, string>>> = {
   brute: { head: 'brute', torso: 'bare', arms: 'big', legs: 'torn' },
   seraph: { head: 'seraphHelm', torso: 'seraphArmor', arms: 'seraphGauntlet', legs: 'seraphGreaves', torch: 'seraphLantern' },
   mayor: { head: 'mayorHat', torso: 'mayorCoat', arms: 'mayorGloves', legs: 'mayorLegs', torch: 'mayorBeacon' },
-  advisor: { head: 'advisorCap', torso: 'advisorSuit', arms: 'advisorSleeves', legs: 'advisorLegs', torch: 'advisorClip' },
+  advisor: { head: 'advisorWreath', torso: 'advisorSuit', arms: 'advisorSleeves', legs: 'advisorLegs', torch: 'advisorClip' },
   legion: { head: 'legionHead', torso: 'legionArmor', arms: 'legionArms', legs: 'legionLegs', torch: 'legionTorch' },
   phone: { torch: 'phoneTorch' },
   wood: { torch: 'woodTorch' },
@@ -205,6 +205,11 @@ export function torchReach(d: StyleDef | undefined): number {
     default:
       return 0;
   }
+}
+
+/** All five parts of the mayor's set are worn together: lights, ribbons and tiny fireworks around the hero. */
+export function fullMayor(w: WornStyles): boolean {
+  return [w.head, w.torso, w.arms, w.legs, w.torch].every((d) => d?.set === 'mayor');
 }
 
 /** All five parts of the premium set are worn together: the hero glows. */

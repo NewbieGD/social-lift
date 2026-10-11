@@ -3,8 +3,8 @@
 // Origin: between the feet on the floor; y grows downward.
 
 import type { Outfit } from './hero';
-import { armColor, armScale, drawLegionFx, drawSeraphAura, drawSeraphWings, drawStyleArm, drawStyleBack, drawStyleFoot, drawStyleHead, drawStyleLeg, drawStyleTorch, drawStyleTorso, handColor, legColors as styleLegColors, skinFor, torsoColor } from './styleArt';
-import { fullLegion, fullSeraph, wornStyles, type StyleLoadout, type WornStyles } from './styles';
+import { armColor, armScale, drawLegionFx, drawMayorFx, drawSeraphAura, drawSeraphWings, drawStyleArm, drawStyleBack, drawStyleFoot, drawStyleHead, drawStyleLeg, drawStyleTorch, drawStyleTorso, handColor, legColors as styleLegColors, skinFor, torsoColor } from './styleArt';
+import { fullLegion, fullMayor, fullSeraph, wornStyles, type StyleLoadout, type WornStyles } from './styles';
 import { bodyGradient, edge, fist3d, hand3d, limb3d, sphere, spec, tone, torch3d, type P } from './shade3d';
 
 const SKIN = '#EDB48A';
@@ -134,6 +134,11 @@ export function drawHeroFront(
   if (w.torso && fullSeraph(w)) {
     ctx.save();
     drawSeraphAura(ctx, w.torso, t, -30);
+    ctx.restore();
+  }
+  if (w.torso && fullMayor(w)) {
+    ctx.save();
+    drawMayorFx(ctx, w.torso, t, -30);
     ctx.restore();
   }
   if (w.torso && fullLegion(w)) {
@@ -421,7 +426,7 @@ export function drawHeroFront(
   ctx.save();
   ctx.translate(0, hy);
   ctx.rotate(Math.sin(t * 1.3) * 0.03);
-  const coversHair = !!w.head && ['helmet', 'cowl', 'mask', 'brute', 'beanie', 'seraphHelm', 'legionHead', 'mayorHat', 'advisorCap'].includes(w.head.kind);
+  const coversHair = !!w.head && ['helmet', 'cowl', 'mask', 'brute', 'beanie', 'seraphHelm', 'legionHead', 'mayorHat'].includes(w.head.kind);
   if (!coversHair || w.head?.kind === 'beanie') sphere(ctx, 0, -2, 12.4, 11.6, HAIR);
   for (const s of [-1, 1]) {
     sphere(ctx, s * 11.2, 1.4, 2.5, 3.2, skinHead);

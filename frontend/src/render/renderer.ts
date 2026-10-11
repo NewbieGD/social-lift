@@ -960,11 +960,12 @@ export class Renderer {
     if (this.ambientTimer <= 0) {
       this.ambientTimer = 0.9 + Math.random() * 1.4;
       const left = Math.random() < 0.5;
-      if (tier >= 5 && tier <= 10 && this.ambient.filter((a) => a.kind === 'flash').length < 2) {
+      if (tier === 9 && this.ambient.filter((a) => a.kind === 'flash').length < 2) {
         // Small flashes at the screen edge, never more often than 3 times a second.
         this.ambient.push({ kind: 'flash', x: left ? 14 : W - 14, y: H * (0.35 + Math.random() * 0.4), t: 0, dur: 0.4, dir: 0 });
       }
-      if (tier === 9 && Math.random() < 0.15 && !this.ambient.some((a) => a.kind === 'heli')) {
+      // (The helicopter of the business stage is part of its own scene now.)
+      if (false && !this.ambient.some((a) => a.kind === 'heli')) {
         this.ambient.push({ kind: 'heli', x: left ? -40 : W + 40, y: 100 + Math.random() * 60, t: 0, dur: 7, dir: left ? 1 : -1 });
       }
       if (tier === 12 && Math.random() < 0.12 && !this.ambient.some((a) => a.kind === 'launch')) {
@@ -1810,7 +1811,8 @@ export class Renderer {
    */
   private drawMotes(tier: number, W: number, H: number, dt: number): void {
     if (this.reducedEffects) return;
-    const kind = tier === 0 ? 0 : tier <= 3 ? 1 : tier <= 5 ? 2 : tier <= 10 ? 3 : tier === 11 ? 4 : 5;
+    // Dust indoors and in the yard; gold sparks at the gala, fireflies at the mansion, spray at sea, star dust in space.
+    const kind: number = tier <= 8 ? 0 : tier === 9 ? 3 : tier === 10 ? 2 : tier === 11 ? 4 : 5;
     const cap = this.lowQuality ? 10 : 22;
     if (this.motes.length < cap && Math.random() < dt * 6) {
       const side = Math.random();

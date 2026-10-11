@@ -8,12 +8,13 @@ const W = Number(process.argv[2] || 390), H = Number(process.argv[3] || 844);
 const { catalog, products } = JSON.parse(readFileSync('./e2e/catalog.json', 'utf8'));
 const pl = (id, name) => ({ id, name, photo: null });
 let role = null; // the player is a mayor in the second part
+let invitedMock = false; // the mayor has invited the player (the third part)
 const gstate = () => ({
   week: '2026-10-12', phase: 'candidacy', voting_opens_at: Date.now() + 3 * 86400000, ends_at: Date.now() + 6 * 86400000,
   mayor: role === 'mayor' ? pl(5, 'Я') : null,
   assistants: role === 'mayor' ? [{ ...pl(21, 'Анна К.'), status: 'accepted' }, { ...pl(22, 'Борис П.'), status: 'invited' }] : [],
   candidates: [pl(31, 'Вера Т.'), pl(32, 'Глеб Р.')],
-  me: { role, eligibility: { phase: 'candidacy', wins: { have: 2, need: 3 }, record: { have: 2100, need: 2000 }, ring: false, is_candidate: false, can_apply: false, reason: 'conditions' }, my_vote: null, can_vote: true, runs: 5, vote_need_runs: 3, invited: false },
+  me: { role, eligibility: { phase: 'candidacy', wins: { have: 2, need: 3 }, record: { have: 2100, need: 2000 }, ring: false, is_candidate: false, can_apply: false, reason: 'conditions' }, my_vote: null, can_vote: true, runs: 5, vote_need_runs: 3, invited: invitedMock },
   settings: { bonus_on: bonusOn, play_color: color, colors: ['default', 'fire', 'ice', 'emerald'] }, bonus_active: bonusOn, bonus_percent: 10,
 });
 let bonusOn = false, color = 'fire';
@@ -30,6 +31,7 @@ async function withPlayer(fn) {
       const loadout = role === 'mayor' ? { head: 'mayor_head', torso: 'mayor_torso', arms: 'mayor_arms', legs: 'mayor_legs', torch: 'mayor_torch' } : {};
       return json({ profile: { id: 5, name: 'Я', photo: null }, flags: { consent_ok: true, tutorial_done: true }, terms_version: 1, settings: { rulesCard: false }, settings_updated_at: Date.now() + 9999, stats: { best_all: 50, best_tier: 0, best_week: 50, last_score: 50, total_runs: 3, rank_all: 9, rank_week: 9, last_tier: 0, items_mask: 0 }, shop: { coins: 5, owned, loadout, decor: role === 'mayor' ? { bg: 'bg_throne' } : {}, catalog, products }, gov: { role, play_color: color, bonus_active: bonusOn, bonus_percent: 10, mayor_id: role === 'mayor' ? 5 : null, unread: 3 }, server_time: Date.now(), ads: {} });
     }
+    if (path.endsWith('/gov/pulse')) return json({ unread: 3, invited: invitedMock, role, play_color: color, bonus_active: bonusOn, bonus_percent: 10 });
     if (path.endsWith('/gov/state')) return json(gstate());
     if (path.endsWith('/gov/apply')) { calls.push('apply'); return route.fulfill({ status: 409, contentType: 'application/json', headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify({ error: { code: 'conditions', message: 'x' } }) }); }
     if (path.endsWith('/gov/vote')) { calls.push('vote'); return json(gstate()); }
@@ -87,5 +89,12 @@ all.push(...await withPlayer(async (p, top) => {
   await p.screenshot({ path: `${OUT}/gov_find_${W}.png` });
   await p.click('[data-action="govInvite"][data-arg="41"]'); await p.waitForTimeout(600);
   console.log('server calls:', JSON.stringify(calls));
+}));
+// ---- 3. an assistant is invited: the main screen tells him at once
+role = null; invitedMock = true;
+all.push(...await withPlayer(async (p, top) => {
+  await p.waitForTimeout(2600);
+  console.log('invitation: screen on top:', await top(), '| strip:', await p.evaluate(() => document.querySelector('.gov-strip')?.className), '| accept button:', await p.locator('[data-action="govRespond"][data-arg="yes"]').count());
+  await p.screenshot({ path: `${OUT}/gov_invite_${W}.png` });
 }));
 console.log('hscroll false', 'errors', all);

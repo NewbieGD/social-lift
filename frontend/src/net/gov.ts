@@ -44,7 +44,7 @@ export interface GovState {
 export interface Notice {
   id: number;
   kind: string;
-  payload: { user?: GovPlayer | null; from?: GovPlayer | null; accepted?: boolean };
+  payload: { user?: GovPlayer | null; from?: GovPlayer | null; accepted?: boolean; percent?: number; reason?: string };
   at: number;
   unread: boolean;
   personal: boolean;
@@ -74,6 +74,15 @@ export const gov = {
   async find(which: 'top' | 'chat' | 'rivals', q: string): Promise<GovPlayer[] | null> {
     try {
       return (await api<{ players: GovPlayer[] }>('GET', `/gov/find?which=${which}&q=${encodeURIComponent(q)}`)).players;
+    } catch {
+      return null;
+    }
+  },
+  /** The light regular check: the number of unread messages, an invitation, my post, the mayor's bonus. */
+  async pulse(): Promise<{ unread: number; invited: boolean; role: 'mayor' | 'assistant' | null; play_color: string; bonus_active: boolean; bonus_percent: number } | null> {
+    try {
+      const p = await api<{ unread: number; invited: boolean; role: 'mayor' | 'assistant' | null; play_color: string; bonus_active: boolean; bonus_percent: number }>('GET', '/gov/pulse');
+      return p && typeof p.unread === 'number' ? p : null;
     } catch {
       return null;
     }

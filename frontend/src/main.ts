@@ -236,6 +236,26 @@ let captionTimer = 0;
 
 let buffMask = 0;
 
+/** A small explanation card next to a buff chip; it goes away by itself or on the next tap. */
+let buffTipTimer = 0;
+function showBuffTip(anchor: HTMLElement, title: string, text: string): void {
+  let tip = document.getElementById('buffTip');
+  if (!tip) {
+    tip = document.createElement('div');
+    tip.id = 'buffTip';
+    tip.className = 'buff-tip';
+    document.body.appendChild(tip);
+    tip.addEventListener('click', () => tip?.classList.remove('on'));
+  }
+  const r = anchor.getBoundingClientRect();
+  tip.innerHTML = `<b>${title}</b><span>${text}</span>`;
+  tip.style.left = `${Math.max(8, Math.min(window.innerWidth - 248, r.left))}px`;
+  tip.style.top = `${r.bottom + 8}px`;
+  tip.classList.add('on');
+  window.clearTimeout(buffTipTimer);
+  buffTipTimer = window.setTimeout(() => tip?.classList.remove('on'), 6000);
+}
+
 function renderBuffs(): void {
   buffsEl.replaceChildren();
   buffsEl.setAttribute('aria-label', ru.hud.buffs);
@@ -251,11 +271,19 @@ function renderBuffs(): void {
   // The mayor's bonus to coins (while the mayor is in the game).
   const g = session.data?.gov;
   if (g?.bonus_active) {
-    const chip = document.createElement('span');
+    const chip = document.createElement('button');
+    chip.type = 'button';
     chip.className = 'buff gov-buff';
-    chip.setAttribute('role', 'listitem');
-    chip.title = ru.gov.buff(g.bonus_percent);
-    chip.textContent = `+${g.bonus_percent}%`;
+    chip.setAttribute('aria-label', ru.gov.buff(g.bonus_percent));
+    chip.innerHTML = `<span class="gb-coin">🪙</span><b>+${g.bonus_percent}%</b>`;
+    // A tap on the chip explains it (and never steers the hero).
+    const stop = (e: Event): void => e.stopPropagation();
+    chip.addEventListener('pointerdown', stop);
+    chip.addEventListener('touchstart', stop, { passive: true });
+    chip.addEventListener('click', (e) => {
+      e.stopPropagation();
+      showBuffTip(chip, ru.gov.buffTitle, ru.gov.buffText(g.bonus_percent));
+    });
     buffsEl.appendChild(chip);
   }
 }
@@ -1654,6 +1682,9 @@ let buyTarget: string | null = null;
 let govCache: GovState | null = null;
 let govNotices: Notice[] | null = null;
 let govFindTab: 'top' | 'chat' | 'rivals' = 'top';
+/** The mayor has invited the player to be an assistant (and the window about it was shown). */
+let govInvited = false;
+let inviteShown = false;
 let govFindList: GovPlayer[] | null = null;
 let govFindQuery = '';
 
@@ -1770,9 +1801,10 @@ function govDone(res: Awaited<ReturnType<typeof govApi.state>>, okText?: string)
 }
 
 /** The strip under the Play button: who is the mayor, or what stage the election is at. */
-function govStrip(): { kind: 'mayor' | 'voting' | 'candidacy' | 'empty'; text: string; unread: number } {
+function govStrip(): { kind: 'mayor' | 'voting' | 'candidacy' | 'empty' | 'invite'; text: string; unread: number } {
   const unread = session.data?.gov?.unread ?? 0;
   const g = govCache;
+  if (govInvited || g?.me.invited) return { kind: 'invite', text: ru.gov.inviteStrip, unread };
   if (g?.mayor) return { kind: 'mayor', text: ru.gov.stripMayor(g.mayor.name || ru.leaders.player), unread };
   if (g?.phase === 'voting') return { kind: 'voting', text: ru.gov.stripVoting, unread };
   if (g) return { kind: 'candidacy', text: ru.gov.stripCandidacy, unread };
@@ -2046,16 +2078,33 @@ setupMenuTaps();
 
 // The government: load it soon after the start, keep it fresh, and let the server know that the mayor is in the game.
 window.setTimeout(() => void refreshGov(), 1800);
+/** The regular light check: the bell, an invitation to be an assistant, the post and the bonus. */
+async function pollPulse(): Promise<void> {
+  if (document.visibilityState !== 'visible' || session.mode !== 'online' || !session.data) return;
+  const p = await govApi.pulse();
+  if (!p || !session.data) return;
+  const prev = session.data.gov;
+  const roleChanged = (prev?.role ?? null) !== p.role;
+  session.data.gov = { role: p.role, play_color: p.play_color, bonus_active: p.bonus_active, bonus_percent: p.bonus_percent, mayor_id: prev?.mayor_id ?? null, unread: p.unread };
+  govInvited = p.invited;
+  applyPlayColor(p.play_color);
+  if (roleChanged) void session.refreshShop(); // the things of the post come and go with it
+  if (router.top === 'menu') updateMenuGov();
+  // A new invitation: the player learns about it on the main screen at once.
+  if (p.invited && !inviteShown && mode === 'menu' && router.top === 'menu') {
+    inviteShown = true;
+    await refreshGov();
+    if (router.top === 'menu') router.open('govInvitePop');
+  } else if (!p.invited) inviteShown = false;
+}
+window.setInterval(() => void pollPulse(), 20_000);
+window.setTimeout(() => void pollPulse(), 3500);
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') void pollPulse();
+});
 window.setInterval(() => {
-  if (document.visibilityState !== 'visible') return;
-  void refreshGov();
-  void govApi.notices().then((r) => {
-    if (r && session.data?.gov) {
-      session.data.gov.unread = r.unread;
-      if (router.top === 'menu') updateMenuGov();
-    }
-  });
-}, 90_000);
+  if (document.visibilityState === 'visible') void refreshGov();
+}, 120_000);
 window.setInterval(() => {
   if (document.visibilityState === 'visible' && session.data?.gov?.role === 'mayor') govApi.ping();
 }, 60_000);
@@ -2239,6 +2288,7 @@ router.register('government', {
   html: () => V.governmentView(govCache, session.data?.profile.id ?? 0),
   cls: 'solid',
 });
+router.register('govInvitePop', { html: () => V.govInviteView(govCache), modal: true });
 router.register('govCandidacy', { html: () => V.candidacyView(govCache), modal: true });
 router.register('govManage', { html: () => V.govManageView(govCache), cls: 'solid' });
 router.register('govFind', {
@@ -2603,7 +2653,12 @@ const actions: Record<string, (arg: string, el: HTMLElement) => void> = {
     });
   },
   govVote: (id) => void govApi.vote(Number(id)).then((res) => govDone(res, ru.gov.voteDone)),
-  govRespond: (arg) => void govApi.respond(arg === 'yes').then((res) => govDone(res)),
+  govRespond: (arg) => {
+    if (router.top === 'govInvitePop') router.back();
+    void govApi.respond(arg === 'yes').then((res) => {
+      if (govDone(res) && res.ok && res.state.me.role) void session.refreshShop();
+    });
+  },
   govInvite: (id) => {
     void govApi.invite(Number(id)).then((res) => {
       if (govDone(res, ru.gov.invited) && router.top === 'govFind') router.back();
