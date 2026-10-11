@@ -1048,6 +1048,8 @@ async def test_gov_election_flow_and_mayor_privileges(client, monkeypatch):
         assert gov.role_of(302) is None
         # Settings: the coin bonus works only while the mayor is in the game.
         assert (await client.put("/api/gov/settings", json={"bonus": True, "play_color": "fire"}, headers=headers(300))).json()["settings"] == {"bonus_on": True, "play_color": "fire", "colors": list(gov.PLAY_COLORS)}
+        kinds_now = [n["kind"] for n in (await client.get("/api/notifications", headers=headers(303))).json()["items"]]
+        assert "color_changed" in kinds_now  # everybody is told that the Play button changed
         assert (await client.put("/api/gov/settings", json={"play_color": "pink"}, headers=headers(300))).status_code == 400
         assert (await client.put("/api/gov/settings", json={"bonus": False}, headers=headers(302))).status_code == 403
         await client.put("/api/gov/settings", json={"bonus": True}, headers=headers(300))

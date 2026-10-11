@@ -451,10 +451,15 @@ async def set_settings(session: AsyncSession, mayor: User, bonus: bool | None, p
         raise ApiError(404, "no_term", "No term")
     if bonus is not None:
         term.bonus_on = bonus
+    color_changed = False
     if play_color is not None:
         if play_color not in PLAY_COLORS:
             raise ApiError(400, "bad_color", "Unknown color")
+        color_changed = play_color != term.play_color
         term.play_color = play_color
+    if color_changed:
+        # The button of everybody changes: the bell tells it.
+        notify(session, None, "color_changed", {"color": play_color})
     await session.commit()
     await refresh(session)
     if bonus is not None:
