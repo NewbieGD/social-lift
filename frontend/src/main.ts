@@ -1785,7 +1785,11 @@ function playFxKind(): PlayFxKind | null {
   const k = document.body.dataset.play;
   return k === 'fire' || k === 'ice' || k === 'emerald' ? k : null;
 }
+let playFxFrame = 0;
 function drawPlayFx(now: number): void {
+  // On the lighter quality level the effect is drawn every other frame (it is a soft ambient light).
+  playFxFrame++;
+  if (perf.effective >= 1 && playFxFrame % 2 === 1 && playFxCanvas?.style.display === 'block') return;
   const dt = Math.min(0.1, Math.max(0, now - playFxLast));
   playFxLast = now;
   const kind = playFxKind();
@@ -1802,7 +1806,8 @@ function drawPlayFx(now: number): void {
   }
   const r = btn.getBoundingClientRect();
   const pad = 34;
-  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  // A glow does not need sharp pixels: lower density on the lighter level.
+  const dpr = perf.effective >= 1 ? 1 : Math.min(window.devicePixelRatio || 1, 2);
   const w = Math.round(r.width + pad * 2);
   const h = Math.round(r.height + pad * 2);
   if (playFxCanvas.width !== Math.round(w * dpr) || playFxCanvas.height !== Math.round(h * dpr)) {
@@ -1822,7 +1827,10 @@ function drawPlayFx(now: number): void {
   playFxMain.draw(g, kind, pad, pad, r.width, r.height, now, dt, perf.effective);
 }
 /** The small previews of the three effects in the mayor's colour picker. */
+let previewFrame = 0;
 function drawPlayFxPreviews(now: number): void {
+  previewFrame++;
+  if (previewFrame % 2 === 1) return; // the little previews are drawn at half the frame rate
   document.querySelectorAll<HTMLCanvasElement>('canvas.fx-prev').forEach((c) => {
     const kind = c.dataset.fx as PlayFxKind;
     const w = c.clientWidth;
@@ -1836,7 +1844,7 @@ function drawPlayFxPreviews(now: number): void {
     if (!fx) { fx = new PlayFx(); playFxPrev.set(c, fx); }
     g.setTransform(dpr, 0, 0, dpr, 0, 0);
     g.clearRect(0, 0, w, h);
-    fx.draw(g, kind, 10, 12, w - 20, h - 24, now, 0.016, 1);
+    fx.draw(g, kind, 10, 12, w - 20, h - 24, now, 0.033, 1);
   });
 }
 
