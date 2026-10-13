@@ -854,6 +854,14 @@ async def test_admin_balance_changes_apply_without_a_deploy(client, monkeypatch)
         assert cup["price"] == 55
         boot = (await client.post("/api/session/bootstrap", headers=headers(190))).json()
         assert boot["tunables"]["duel_stake"] == 200
+        # The price of a paid product in VK votes can be changed too (at least 1).
+        votes_row = next(r for r in rows if r["key"] == "votes.seraph_set")
+        assert votes_row["default"] == 10 and votes_row["value"] == 10
+        assert (await client.put("/api/admin/balance", json={"key": "votes.seraph_set", "value": 15}, headers=good)).status_code == 200
+        prods = {p["id"]: p["votes"] for p in (await client.get("/api/shop", headers=headers(190))).json()["products"]}
+        assert prods["seraph_set"] == 15 and prods["pet_spark"] == 10
+        assert (await client.put("/api/admin/balance", json={"key": "votes.seraph_set", "value": 0}, headers=good)).json()["error"]["code"] == "out_of_range"
+        await client.delete("/api/admin/balance/votes.seraph_set", headers=good)
         # Bad requests are refused.
         assert (await client.put("/api/admin/balance", json={"key": "duel_stake", "value": -5}, headers=good)).json()["error"]["code"] == "out_of_range"
         assert (await client.put("/api/admin/balance", json={"key": "nonsense", "value": 1}, headers=good)).json()["error"]["code"] == "unknown_key"

@@ -89,7 +89,7 @@ async def handle(session: AsyncSession, params: dict[str, str]) -> dict:
     if kind == "get_item":
         if await _owns_all(session, user_id, product):
             return _err(ALREADY_OWNED, "Это уже куплено")
-        return {"response": {"title": product.title[:48], "price": product.votes, "item_id": product.id, "expiration": 600}}
+        return {"response": {"title": product.title[:48], "price": cosmetics.votes_of(product), "item_id": product.id, "expiration": 600}}
 
     # order_status_change
     try:
@@ -113,14 +113,14 @@ async def handle(session: AsyncSession, params: dict[str, str]) -> dict:
             price = int(params.get("item_price", "-1"))
         except ValueError:
             price = -1
-        if price != product.votes:
+        if price != cosmetics.votes_of(product):
             return _err(PRICE_MISMATCH, "Цена товара изменилась")
         order = VkOrder(
             order_id=order_id,
             test=test,
             user_id=user_id,
             product=product.id,
-            votes=product.votes,
+            votes=cosmetics.votes_of(product),
             status="delivered",
             created_at=utcnow(),
         )

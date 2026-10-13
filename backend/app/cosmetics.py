@@ -139,8 +139,13 @@ PRODUCTS: dict[str, Product] = {
 }
 
 
+def votes_of(p: Product) -> int:
+    """The price of a product in VK votes: the number from the code, or the one set in the admin page (at least 1)."""
+    return max(1, tunables.item_override("votes", p.id, p.votes))
+
+
 def products_public() -> list[dict]:
-    return [{"id": p.id, "title": p.title, "votes": p.votes, "items": list(p.items)} for p in PRODUCTS.values()]
+    return [{"id": p.id, "title": p.title, "votes": votes_of(p), "items": list(p.items)} for p in PRODUCTS.values()]
 
 
 # Run drops: chance that a run has a drop at all, and the least score a run needs to claim it.

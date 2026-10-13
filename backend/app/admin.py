@@ -63,6 +63,7 @@ def _item_prefixes() -> dict[str, set[str]]:
         "price": {i.id for i in cosmetics.ITEMS.values() if i.price is not None},
         "record": {i.id for i in cosmetics.ITEMS.values() if i.record is not None},
         "streak": {i.id for i in cosmetics.ITEMS.values() if i.duel_streak is not None},
+        "votes": set(cosmetics.PRODUCTS),
     }
 
 
@@ -106,6 +107,22 @@ def balance_table() -> list[dict]:
                     "overridden": key in over,
                 }
             )
+    # What the paid products cost in VK votes.
+    for pr in cosmetics.PRODUCTS.values():
+        key = f"votes.{pr.id}"
+        rows.append(
+            {
+                "key": key,
+                "group": "Цены платных вещей (голоса ВК)",
+                "desc": f"{pr.id}: {pr.title}, цена в голосах ВК (от 1 до 1000)",
+                "kind": "int",
+                "lo": 1,
+                "hi": 1000,
+                "default": pr.votes,
+                "value": cosmetics.votes_of(pr),
+                "overridden": key in over,
+            }
+        )
     return rows
 
 

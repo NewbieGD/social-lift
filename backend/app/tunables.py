@@ -69,7 +69,7 @@ def get(key: str):
 
 
 def item_override(prefix: str, item_id: str, default):
-    """`price.<id>`, `record.<id>` or `streak.<id>`: an override for one item, or its default."""
+    """`price.<id>`, `record.<id>`, `streak.<id>` or `votes.<product>`: an override for one item, or its default."""
     v = _overrides.get(f"{prefix}.{item_id}")
     return default if v is None else int(round(v))
 
@@ -83,5 +83,6 @@ def check(key: str, value: float, item_prefixes: dict[str, set[str]]) -> str | N
         return None if t.lo <= value <= t.hi else "out_of_range"
     prefix, _, item_id = key.partition(".")
     if prefix in item_prefixes and item_id in item_prefixes[prefix]:
-        return None if 0 <= value <= 10_000_000 else "out_of_range"
+        lo, hi = (1, 1000) if prefix == "votes" else (0, 10_000_000)  # a price in votes is at least 1 (VK needs it)
+        return None if lo <= value <= hi else "out_of_range"
     return "unknown_key"
