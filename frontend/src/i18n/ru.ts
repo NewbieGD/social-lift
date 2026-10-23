@@ -981,13 +981,9 @@ export const ru = {
     } as Record<string, string>,
   },
   share: {
-    button: 'Поделиться',
-    wall: 'На стене',
-    story: 'В истории',
-    title: 'Поделиться результатом',
-    wallText: (score: number, place: string) =>
-      `Я набрал ${points(score)} и дошёл до этапа «${place}» в игре «Социальный лифт»! Сможешь подняться выше?`,
+    button: 'Поделиться в истории',
     storyLead: 'Мой рекорд',
+    storyLeadResult: 'Мой результат',
     storyCta: 'Сможешь выше?',
     points: (n: number) => plural(n, ['очко', 'очка', 'очков']),
   },

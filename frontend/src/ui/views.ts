@@ -1050,22 +1050,13 @@ export function resultView(d: ResultData): string {
     </dl>
     <button class="primary" data-action="again">${ru.result.again}</button>
     <button class="secondary" data-action="toMenu">${ru.common.menu}</button>
-    ${d.canShare ? `<button class="secondary share-btn" data-action="open" data-arg="share">${SHARE_ICON}${ru.share.button}</button>` : ''}
+    ${d.canShare ? `<button class="secondary share-btn" data-action="shareStory">${SHARE_ICON}${ru.share.button}</button>` : ''}
     <button class="link-btn" data-action="open" data-arg="rules">${ru.rules.title}</button>
   </div>`;
 }
 
 const SHARE_ICON =
   '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 5l7 7-7 7v-4c-5 0-8.5 1.6-11 5 1-5 4-10 11-11z" fill="currentColor"/></svg>';
-
-export function shareView(opts: { wall: boolean; story: boolean }): string {
-  return `<div class="panel">
-    <button class="icon-btn close" data-action="back" aria-label="${ru.common.close}">${'<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/></svg>'}</button>
-    <h2>${ru.share.title}</h2>
-    ${opts.story ? `<button class="primary" data-action="shareStory">${ru.share.story}</button>` : ''}
-    ${opts.wall ? `<button class="secondary" data-action="shareWall">${ru.share.wall}</button>` : ''}
-  </div>`;
-}
 
 export function rankHtml(res: FinishResult): string {
   const line = (label: string, rank: number | null, prev: number | null): string => {

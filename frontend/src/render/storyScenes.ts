@@ -2344,6 +2344,14 @@ const space: Scene = {
   },
 };
 
+/**
+ * Whether the sky behind the scrolling tile can be seen. The tiles of most scenes are opaque (a full wall),
+ * so their sky is never drawn (and never even built): only the yacht and the spaceport need it.
+ */
+export function storyNeedsSky(tier: number): boolean {
+  return tier >= STORY_TIERS || tier === 11 || tier === 12;
+}
+
 // ------------------------------------------------------------------ the list of scenes and the entry points
 const SCENES: Scene[] = [yard, basement, office, cabinet, showroom, buyHouse, emptyHouse, home, business, fame, mansion, yacht, space];
 

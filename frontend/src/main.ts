@@ -12,7 +12,7 @@ import { ApiError } from './net/api';
 import { Session, type BlockedPlayer, type Decor, type PropPlacement, type CrownNotice, type RunTicket, type Stats } from './net/session';
 import { haptic, hapticsSupported, initHaptics } from './platform/haptics';
 import { ads, DEFAULT_ADS, type AdsConfig } from './platform/ads';
-import { canShare, initShare, shareStory, shareWall } from './platform/share';
+import { canShare, initShare, shareStory } from './platform/share';
 import { lockGestures } from './platform/gestures';
 import { askNotifications, initVk } from './platform/vk';
 import { DuelClient, type SpecRow, type ChatMsg, type ChatUser, type DuelMsg, type DuelPlayer } from './net/duel';
@@ -827,12 +827,12 @@ function finishRun(): void {
     maxCombo: sim.maxCombo,
     seconds: Math.floor(sim.runTime),
     record,
-    canShare: sim.score > 0 && (canShare().wall || canShare().story),
+    canShare: sim.score > 0 && canShare().story,
     duel: finishedDuel
       ? { oppName: finishedDuel.opponent.name || ru.duel.player, me: sim.score, opp: oppScoreNow(finishedDuel), oppOut: finishedDuel.opp.dead || finishedDuel.oppFinal !== null || finishedDuel.oppLeft }
       : null,
   };
-  shareData = { score: sim.score, tier: sim.tier, mask: renderer.ownedMask };
+  shareData = { score: sim.score, tier: sim.tier, mask: renderer.ownedMask, record };
   router.reset('result');
   if (finishedDuel) setDuelLine(finishedDuel.oppLeft ? ru.duel.oppLeft : ru.duel.pending);
 
@@ -898,13 +898,14 @@ function finishRun(): void {
     });
 }
 
-let shareData: { score: number; tier: number; mask: number } | null = null;
+/** What the share card shows: the last run (`record` = it beat the best result before the run). */
+let shareData: { score: number; tier: number; mask: number; record: boolean } | null = null;
 
 /**
  * A 1080x1920 story card: the scene's colors, the hero facing the viewer in the run's
  * outfit, the score and the reached place, and a call to beat it.
  */
-function buildStoryImage(score: number, tier: number, mask: number): string {
+function buildStoryImage(score: number, tier: number, mask: number, record: boolean): string {
   const c = document.createElement('canvas');
   c.width = 1080;
   c.height = 1920;
@@ -928,7 +929,8 @@ function buildStoryImage(score: number, tier: number, mask: number): string {
   g.fillText(ru.appTitle, 540, 200);
   g.font = `600 46px ${font}`;
   g.fillStyle = 'rgba(255,255,255,0.85)';
-  g.fillText(ru.share.storyLead, 540, 300);
+  // "My record" only when the run really was a record; otherwise it is just "my result".
+  g.fillText(record ? ru.share.storyLead : ru.share.storyLeadResult, 540, 300);
   g.fillStyle = '#FFD640';
   g.font = `900 190px ${font}`;
   g.fillText(String(score), 540, 470);
@@ -2546,7 +2548,6 @@ router.register('profile', {
 });
 router.register('moreMenu', { html: () => V.moreMenuView(!!menuState.hero), modal: true });
 router.register('coinsInfo', { html: () => V.coinsInfoView(session.data?.shop?.coins ?? 0, session.data?.tunables?.points_per_coin ?? 10), modal: true });
-router.register('share', { html: () => V.shareView(canShare()), modal: true });
 router.register('tutorialDone', { html: () => V.tutorialDoneView(), modal: true });
 let stubKind: V.StubKind = 'offline';
 router.register('stub', { html: () => V.stubView(stubKind, errorCode()), cls: 'solid' });
@@ -3037,14 +3038,9 @@ const actions: Record<string, (arg: string, el: HTMLElement) => void> = {
     duelClient.send({ t: 'decline' });
     router.back();
   },
-  shareWall: () => {
-    if (!shareData) return;
-    void shareWall(ru.share.wallText(shareData.score, ru.tiers[shareData.tier])).then(() => router.back());
-  },
   shareStory: () => {
     if (!shareData) return;
-    const img = buildStoryImage(shareData.score, shareData.tier, shareData.mask);
-    void shareStory(img).then(() => router.back());
+    void shareStory(buildStoryImage(shareData.score, shareData.tier, shareData.mask, shareData.record));
   },
   declineConsent: () => router.open('declined'),
   deleteData: () => void deleteData(),

@@ -16,7 +16,7 @@ import { palette } from './palette';
 import { CROWN_LIFT_SIDE, crownBob, drawCrown } from './crown';
 import { drawGovAura, type GovRole } from './govArt';
 import { paintParallax, paintScene, paintSky } from './scenes';
-import { drawStoryDecor, STORY_TIERS } from './storyScenes';
+import { drawStoryDecor, STORY_TIERS, storyNeedsSky } from './storyScenes';
 
 const MAX_PARTICLES = 220;
 
@@ -260,13 +260,30 @@ export class Renderer {
     this.ctx = ctx;
   }
 
+  private cssW = 0;
+  private cssH = 0;
+  private dprLevel = -1;
+
+  /** The pixel density of the game canvas: sharp on a good device, lower when the device is slow (fewer pixels to fill). */
+  private wantDpr(): number {
+    const d = window.devicePixelRatio || 1;
+    return perf.effective >= 2 ? 1 : perf.effective >= 1 ? Math.min(1.5, d) : Math.min(2, d);
+  }
+
+  private applyDpr(): void {
+    this.dpr = this.wantDpr();
+    this.dprLevel = perf.effective;
+    this.canvas.width = Math.round(this.cssW * this.dpr);
+    this.canvas.height = Math.round(this.cssH * this.dpr);
+  }
+
   resize(cssW: number, cssH: number, scale: number): void {
-    this.dpr = Math.min(2, window.devicePixelRatio || 1);
     this.scale = scale;
+    this.cssW = cssW;
+    this.cssH = cssH;
     this.canvas.style.width = `${cssW}px`;
     this.canvas.style.height = `${cssH}px`;
-    this.canvas.width = Math.round(cssW * this.dpr);
-    this.canvas.height = Math.round(cssH * this.dpr);
+    this.applyDpr();
     this.skies.clear();
     this.tiles.clear();
   }
@@ -744,12 +761,54 @@ export class Renderer {
 
   // ---------- Background ----------
 
+  /**
+   * Pictures of the scenes are kept at a moderate pixel density (a background does not need sharp pixels:
+   * it saves memory, and drawing a picture every frame costs less), and only the last few scenes are kept.
+   */
+  private bgPicture(W: number, H: number, alpha: boolean): { c: HTMLCanvasElement; g: CanvasRenderingContext2D } {
+    const c = document.createElement('canvas');
+    const k = Math.min(this.scale * this.dpr, perf.effective >= 1 ? 1.25 : 2);
+    c.width = Math.max(1, Math.round(W * k));
+    c.height = Math.max(1, Math.round(H * k));
+    const g = c.getContext('2d', { alpha })!;
+    g.scale(k, k);
+    return { c, g };
+  }
+
+  /** Forgets the oldest scene pictures (and frees their memory): only the last three scenes are kept. */
+  private evictScenes(): void {
+    for (const m of [this.tiles, this.skies, this.par]) {
+      while (m.size > (m === this.par ? 6 : 3)) {
+        const first = m.keys().next().value as number;
+        const c = m.get(first);
+        if (c) { c.width = 0; c.height = 0; }
+        m.delete(first);
+      }
+    }
+  }
+
+  private snapC: HTMLCanvasElement | null = null;
+
+  /** The canvas for the picture of the hero at the moment of death; made in advance, made again only if the size changes. */
+  private snapshotCanvas(SW: number, SH: number, k: number): HTMLCanvasElement {
+    const w = Math.max(1, Math.ceil(SW * k));
+    const h = Math.max(1, Math.ceil(SH * k));
+    if (!this.snapC) this.snapC = document.createElement('canvas');
+    if (this.snapC.width !== w || this.snapC.height !== h) {
+      this.snapC.width = w;
+      this.snapC.height = h;
+    }
+    return this.snapC;
+  }
+
   private sky(tier: number, W: number, H: number): HTMLCanvasElement {
     let c = this.skies.get(tier);
     if (!c) {
-      c = this.offscreen(W, H);
-      paintSky(this.ctxOf(c), tier, W, H);
+      const pic = this.bgPicture(W, H, true);
+      paintSky(pic.g, tier, W, H);
+      c = pic.c;
       this.skies.set(tier, c);
+      this.evictScenes();
     }
     return c;
   }
@@ -757,9 +816,12 @@ export class Renderer {
   private tile(tier: number, W: number, H: number): HTMLCanvasElement {
     let c = this.tiles.get(tier);
     if (!c) {
-      c = this.offscreen(W, H);
-      paintScene(this.ctxOf(c), tier, W, H);
+      // The wall of most scenes covers everything: a picture without transparency is cheaper to draw.
+      const pic = this.bgPicture(W, H, storyNeedsSky(tier));
+      paintScene(pic.g, tier, W, H);
+      c = pic.c;
       this.tiles.set(tier, c);
+      this.evictScenes();
     }
     return c;
   }
@@ -802,10 +864,11 @@ export class Renderer {
   private drawBackground(W: number, H: number, cam: number, dt: number): void {
     const ctx = this.ctx;
     const shown = this.heroTierOverride ?? this.sceneTier;
-    ctx.drawImage(this.sky(shown, W, H), 0, 0, W, H);
+    // The sky is drawn only where the wall of the scene lets it show (the yacht, the spaceport).
+    if (storyNeedsSky(shown)) ctx.drawImage(this.sky(shown, W, H), 0, 0, W, H);
     const tile = this.tile(shown, W, H);
-    // Parallax: far towers and clouds behind, the edge buildings in the middle, specks in front.
-    const deep = !this.reducedEffects;
+    // Parallax layers belonged to the old scenes; every scene now paints its own far view into its tile.
+    const deep = !this.reducedEffects && shown >= STORY_TIERS;
     if (deep) {
       this.drawParLayer(shown, 0, 0.07, cam, W, H);
     }
@@ -820,7 +883,7 @@ export class Renderer {
     if (this.cine && this.cine.t < 0.9 && this.cine.fromScene !== shown) {
       const k = Math.min(1, this.cine.t / 0.9);
       ctx.globalAlpha = 1 - k;
-      ctx.drawImage(this.sky(this.cine.fromScene, W, H), 0, 0, W, H);
+      if (storyNeedsSky(this.cine.fromScene)) ctx.drawImage(this.sky(this.cine.fromScene, W, H), 0, 0, W, H);
       const old = this.tile(this.cine.fromScene, W, H);
       ctx.drawImage(old, 0, off - H, W, H);
       ctx.drawImage(old, 0, off, W, H);
@@ -1320,17 +1383,21 @@ export class Renderer {
       drawGovAura(ctx, this.role, this.clock, 0, perf.effective >= 1);
       ctx.restore();
     }
+    // The canvas for the shards is prepared while the hero is alive (once per size).
+    if (!sim.dead && !this.snapC) this.snapshotCanvas(92, 112, this.scale * this.dpr).getContext('2d');
     // The moment of death: the hero is replaced by his own shards (see deathFx.ts).
     if (sim.dead && !this.reducedEffects && !this.deathFxDone) {
       this.deathFxDone = true;
       const k = this.scale * this.dpr;
       const SW = 92;
       const SH = 112;
-      const snap = document.createElement('canvas');
-      snap.width = Math.max(1, Math.ceil(SW * k));
-      snap.height = Math.max(1, Math.ceil(SH * k));
+      // The picture of the hero for the shards is a canvas that was made at the start of the run and is reused:
+      // making a canvas at the very moment of death stalled weak phones.
+      const snap = this.snapshotCanvas(SW, SH, k);
       const sg = snap.getContext('2d');
       if (sg) {
+        sg.setTransform(1, 0, 0, 1, 0, 0);
+        sg.clearRect(0, 0, snap.width, snap.height);
         sg.setTransform(k, 0, 0, k, 0, 0);
         sg.translate(SW / 2, SH - 10);
         sg.scale(sx * hero.facing, sy);
@@ -1891,6 +1958,8 @@ export class Renderer {
   /** Adaptive quality: on a slow device particles are halved (the level is chosen by core/perf.ts). */
   private trackQuality(_dt: number): void {
     // The level comes from the shared monitor (core/perf.ts), which watches the real frame times.
+    // A slower device gets fewer pixels to draw (the picture is a little softer, the game runs smoothly).
+    if (this.cssW && perf.effective !== this.dprLevel) this.applyDpr();
     const low = perf.effective >= 1;
     if (low !== this.lowQuality) {
       this.lowQuality = low;
